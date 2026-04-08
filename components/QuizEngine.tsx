@@ -12,6 +12,28 @@ interface Quiz {
   explanation?: string;
 }
 
+function toQuiz(item: unknown): Quiz | null {
+  if (!item || typeof item !== 'object') return null;
+  const record = item as Record<string, unknown>;
+  const question = typeof record.question === 'string' ? record.question.trim() : '';
+  const options = Array.isArray(record.options)
+    ? record.options.filter((option): option is string => typeof option === 'string').map((option) => option.trim())
+    : [];
+  const answer = typeof record.answer === 'number' ? record.answer : Number(record.answer);
+  const explanation = typeof record.explanation === 'string' ? record.explanation : undefined;
+
+  if (!question || options.length !== 4 || Number.isNaN(answer) || answer < 0 || answer > 3) {
+    return null;
+  }
+
+  return {
+    question,
+    options,
+    correctAnswerIndex: answer,
+    explanation,
+  };
+}
+
 export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject, chapterTitle }: { chapterId: string; quizzes: Quiz[]; subject?: string; chapterTitle?: string; }) {
   const [quizzes, setQuizzes] = useState<Quiz[]>(initialQuizzes);
   const [currentQ, setCurrentQ] = useState(0);
@@ -38,15 +60,20 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chapterId, subject, chapterTitle })
       });
+
       const data = await res.json();
-      if (data.success && data.data && data.data.length > 0) {
-        // Map API response to Quiz structure
-        const newQuizzes = data.data.map((q: any) => ({
-          question: q.question,
-          options: q.options,
-          correctAnswerIndex: q.answer,
-          explanation: q.explanation
-        }));
+
+      if (!res.ok) {
+        alert(data?.error || 'AI quiz generation failed.');
+        return;
+      }
+
+      if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+        const newQuizzes = data.data.map((q: unknown) => toQuiz(q)).filter((q: Quiz | null): q is Quiz => q !== null);
+        if (newQuizzes.length === 0) {
+          alert('AI returned invalid quiz data. Please try again.');
+          return;
+        }
         setQuizzes(newQuizzes);
         resetQuiz();
       } else {
@@ -75,7 +102,7 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
       setShowAnswer(false);
     } else {
       setFinished(true);
-      const newScore = Math.round(((score + (selectedOption === quizzes[currentQ].correctAnswerIndex ? 1 : 0)) / quizzes.length) * 100);
+      const newScore = Math.round((score / quizzes.length) * 100);
       if (!bestScore || newScore > bestScore) {
         localStorage.setItem(`quiz-score-[${chapterId}]`, newScore.toString());
         setBestScore(newScore);
@@ -157,7 +184,7 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
             disabled={isGenerating}
             className="flex items-center gap-2 text-xs font-semibold text-navy-600 bg-navy-50 hover:bg-navy-100 px-3 py-1.5 rounded-lg border border-navy-100 transition-colors disabled:opacity-50"
           >
-            {isGenerating ? "AI Thinking..." : "✨ AI Generate"}
+            {isGenerating ? "AI Thinking..." : "AI Generate"}
           </button>
         </div>
         <div className="text-xs font-bold text-[#8A8AAA] tracking-widest uppercase">

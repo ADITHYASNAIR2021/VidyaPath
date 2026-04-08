@@ -3,10 +3,23 @@
 import { useState, useEffect } from 'react';
 import { Play, Pause, RotateCcw, Coffee, BookOpen, Volume2, VolumeX } from 'lucide-react';
 import clsx from 'clsx';
-import { motion } from 'framer-motion';
 
-export default function PomodoroTimer() {
-  const [timeLeft, setTimeLeft] = useState(25 * 60); // 25 mins by default
+interface PomodoroTimerProps {
+  chapterTitle?: string;
+  pyqStats?: {
+    avgMarks: number;
+    importantTopics: string[];
+    yearsAsked: number[];
+  } | null;
+}
+
+export default function PomodoroTimer({ chapterTitle, pyqStats }: PomodoroTimerProps) {
+  const recommendedFocusMinutes = pyqStats
+    ? pyqStats.avgMarks >= 9 ? 35 : pyqStats.avgMarks >= 7 ? 30 : 25
+    : 25;
+
+  const [focusMinutes, setFocusMinutes] = useState(recommendedFocusMinutes);
+  const [timeLeft, setTimeLeft] = useState(recommendedFocusMinutes * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [mode, setMode] = useState<'focus' | 'break'>('focus');
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -39,32 +52,57 @@ export default function PomodoroTimer() {
         setTimeLeft(5 * 60);
       } else {
         setMode('focus');
-        setTimeLeft(25 * 60);
+        setTimeLeft(focusMinutes * 60);
       }
     }
     return () => clearInterval(interval);
-  }, [isRunning, timeLeft, mode, soundEnabled]);
+  }, [isRunning, timeLeft, mode, soundEnabled, focusMinutes]);
 
   const toggleTimer = () => setIsRunning(!isRunning);
   const resetTimer = () => {
     setIsRunning(false);
-    setTimeLeft(mode === 'focus' ? 25 * 60 : 5 * 60);
+    setTimeLeft(mode === 'focus' ? focusMinutes * 60 : 5 * 60);
   };
 
   const switchMode = (m: 'focus' | 'break') => {
     setMode(m);
     setIsRunning(false);
-    setTimeLeft(m === 'focus' ? 25 * 60 : 5 * 60);
+    setTimeLeft(m === 'focus' ? focusMinutes * 60 : 5 * 60);
+  };
+
+  const applyRecommendedSession = () => {
+    setFocusMinutes(recommendedFocusMinutes);
+    if (mode === 'focus') {
+      setIsRunning(false);
+      setTimeLeft(recommendedFocusMinutes * 60);
+    }
   };
 
   const mins = Math.floor(timeLeft / 60);
   const secs = timeLeft % 60;
   const progress = mode === 'focus' 
-    ? ((25 * 60 - timeLeft) / (25 * 60)) * 100 
+    ? ((focusMinutes * 60 - timeLeft) / (focusMinutes * 60)) * 100 
     : ((5 * 60 - timeLeft) / (5 * 60)) * 100;
 
   return (
     <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm mb-5 overflow-hidden">
+      {pyqStats && chapterTitle && (
+        <div className="px-4 py-3 border-b border-indigo-100 bg-indigo-50">
+          <p className="text-xs font-semibold text-indigo-800">
+            High-Yield Session
+          </p>
+          <p className="text-xs text-indigo-700 mt-0.5 leading-relaxed">
+            {pyqStats.importantTopics[0] ?? chapterTitle} · avg {pyqStats.avgMarks} marks · asked in {pyqStats.yearsAsked.length} years
+          </p>
+          <button
+            onClick={applyRecommendedSession}
+            className="mt-2 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100 transition-colors"
+          >
+            Use {recommendedFocusMinutes}m focus plan
+          </button>
+        </div>
+      )}
+
       {/* Header Tabs */}
       <div className="flex border-b border-[#E8E4DC]">
         <button
@@ -119,6 +157,29 @@ export default function PomodoroTimer() {
         </div>
 
         {/* Controls */}
+        {mode === 'focus' && (
+          <div className="w-full grid grid-cols-3 gap-2 mb-3">
+            {[25, 30, 35].map((minutes) => (
+              <button
+                key={minutes}
+                onClick={() => {
+                  setFocusMinutes(minutes);
+                  setIsRunning(false);
+                  setTimeLeft(minutes * 60);
+                }}
+                className={clsx(
+                  'text-xs font-semibold py-1.5 rounded-lg border transition-colors',
+                  focusMinutes === minutes
+                    ? 'bg-saffron-100 border-saffron-300 text-saffron-700'
+                    : 'bg-white border-gray-200 text-[#4A4A6A] hover:bg-gray-50'
+                )}
+              >
+                {minutes}m
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center gap-3 w-full">
           <button
             onClick={toggleTimer}

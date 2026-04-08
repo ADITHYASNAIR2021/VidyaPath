@@ -92,6 +92,7 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
   const { prev, next } = getAdjacentChapters(params.id);
   const style = SUBJECT_STYLES[chapter.subject] ?? SUBJECT_STYLES.Physics;
   const SubjectIcon = style.icon;
+  const chapterPyq = getPYQData(chapter.id);
 
   const youtubeUrl = `https://www.youtube.com/results?search_query=CBSE+Class+${chapter.classLevel}+${chapter.subject}+${encodeURIComponent(chapter.title)}+NCERT`;
   const ncertExemplarUrl = chapter.ncertExemplarUrl || `https://ncert.nic.in/exemplar-problems.php`;
@@ -209,7 +210,7 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
 
             {/* ── PYQ Analysis ──────────────────────────────────── */}
             {(() => {
-              const pyq = getPYQData(chapter.id);
+              const pyq = chapterPyq;
               const freq = getFrequencyLabel(chapter.id);
               if (!pyq) return null;
               const recentYears = pyq.yearsAsked.filter(y => y >= 2019).sort((a,b) => b-a);
@@ -283,7 +284,7 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
                     className="mt-4 flex items-center gap-2 text-xs font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    Solve {chapter.subject} board papers →
+                    Solve {chapter.subject} board papers ->
                   </Link>
                 </div>
               );
@@ -294,7 +295,14 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
             {chapter.mermaidDiagram && <MermaidRenderer chart={chapter.mermaidDiagram} title="Process Workflow" />}
 
             {/* Native Quizzes & Flashcards */}
-            {chapter.flashcards && <FlashcardDeck chapterId={chapter.id} flashcards={chapter.flashcards} />}
+            {chapter.flashcards && (
+              <FlashcardDeck
+                chapterId={chapter.id}
+                flashcards={chapter.flashcards}
+                subject={chapter.subject}
+                chapterTitle={chapter.title}
+              />
+            )}
             {chapter.quizzes && <QuizEngine chapterId={chapter.id} quizzes={chapter.quizzes} subject={chapter.subject} chapterTitle={chapter.title} />}
 
             {/* Inline PDF Viewer */}
@@ -338,7 +346,7 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
                     </div>
                     <div>
                       <div className="font-semibold text-sm text-navy-700">NCERT Exemplar Problems</div>
-                      <div className="text-xs text-[#4A4A6A]">Higher-order thinking problems · Free</div>
+                      <div className="text-xs text-[#4A4A6A]">Higher-order thinking problems - Free</div>
                     </div>
                   </div>
                   <ExternalLink className="w-4 h-4 text-emerald-500 group-hover:translate-x-0.5 transition-transform" />
@@ -374,7 +382,7 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
                     <div>
                       <p className="text-sm font-medium text-amber-700">No quiz added yet</p>
                       <p className="text-xs text-amber-600 mt-0.5">
-                        Ask your teacher to add a quiz. Meanwhile, ask VidyaAI to generate MCQs for you! →
+                        Ask your teacher to add a quiz. Meanwhile, ask VidyaAI to generate MCQs for you! ->
                       </p>
                     </div>
                   </div>
@@ -427,7 +435,7 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
                     <div className="text-sm font-semibold text-navy-700 group-hover:text-saffron-600 leading-snug line-clamp-2 transition-colors">
                       {prev.title}
                     </div>
-                    <div className="text-xs text-[#8A8AAA] mt-0.5">{prev.subject} · Class {prev.classLevel}</div>
+                    <div className="text-xs text-[#8A8AAA] mt-0.5">{prev.subject} - Class {prev.classLevel}</div>
                   </div>
                 </Link>
               ) : (
@@ -444,7 +452,7 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
                     <div className="text-sm font-semibold text-navy-700 group-hover:text-saffron-600 leading-snug line-clamp-2 transition-colors">
                       {next.title}
                     </div>
-                    <div className="text-xs text-[#8A8AAA] mt-0.5">{next.subject} · Class {next.classLevel}</div>
+                    <div className="text-xs text-[#8A8AAA] mt-0.5">{next.subject} - Class {next.classLevel}</div>
                   </div>
                   <ArrowRight className="w-4 h-4 text-[#8A8AAA] group-hover:text-saffron-500 mt-0.5 flex-shrink-0 transition-colors" />
                 </Link>
@@ -457,10 +465,18 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
           {/* RIGHT — AI Tutor (2/5) — sticky on desktop */}
           <div className="lg:col-span-2">
             <div className="lg:sticky lg:top-24 space-y-5">
-              <PomodoroTimer />
+              <PomodoroTimer
+                chapterTitle={chapter.title}
+                pyqStats={chapterPyq ? {
+                  avgMarks: chapterPyq.avgMarks,
+                  importantTopics: chapterPyq.importantTopics,
+                  yearsAsked: chapterPyq.yearsAsked,
+                } : null}
+              />
               
               <div>
                 <AIChatBox
+                  chapterId={chapter.id}
                   chapterTitle={chapter.title}
                   chapterTopics={chapter.topics}
                   classLevel={chapter.classLevel}

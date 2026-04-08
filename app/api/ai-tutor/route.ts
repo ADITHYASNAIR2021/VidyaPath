@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ALL_CHAPTERS } from '@/lib/data';
+import { getPYQData } from '@/lib/pyq';
 
 export const runtime = 'edge';
 
-// ── Build compact curriculum map from live data ─────────────────────────────
+// Build compact curriculum map from live data.
 function buildCurriculum(): string {
   const lines: string[] = [];
 
@@ -13,7 +14,7 @@ function buildCurriculum(): string {
     for (const ch of chapters) {
       const rel = ch.examRelevance?.join('/') ?? 'Board';
       lines.push(
-        `  Ch${ch.chapterNumber} [${ch.subject}] ${ch.title} — ${ch.marks}M [${rel}] | Topics: ${ch.topics.slice(0, 5).join(', ')}`
+        `  Ch${ch.chapterNumber} [${ch.subject}] ${ch.title} - ${ch.marks}M [${rel}] | Topics: ${ch.topics.slice(0, 5).join(', ')}`
       );
     }
   }
@@ -23,108 +24,122 @@ function buildCurriculum(): string {
 
 const CURRICULUM = buildCurriculum();
 
-// ── Master system prompt ─────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are VidyaAI — an elite CBSE tutor built into VidyaPath, a free study platform for Indian school students.
+const SYSTEM_PROMPT = `You are VidyaAI, a CBSE tutor for VidyaPath.
 
-══════════════════════════════════════════════
- ABSOLUTE SCOPE RULE — READ THIS FIRST
-══════════════════════════════════════════════
-You ONLY answer questions about:
-  • Class 10: Science (Physics, Chemistry, Biology) and Mathematics (NCERT)
-  • Class 12: Physics, Chemistry, Biology, Mathematics (NCERT)
-  • CBSE board exam preparation, marking schemes, important questions
-  • JEE Main/Advanced and NEET basics (for motivation and deeper insight)
-  • Study techniques SPECIFIC to these subjects
+SCOPE (STRICT)
+You only answer:
+- Class 10: Science and Mathematics (NCERT)
+- Class 12: Physics, Chemistry, Biology, Mathematics (NCERT)
+- CBSE board prep, marking schemes, PYQ trends, study plans
+- JEE/NEET foundational relevance for these same topics
 
-If a question is about ANYTHING else — movies, cricket, relationships, coding, politics,
-other board classes, personal advice, random facts, jokes, or anything not in CBSE Class 10/12
-Science & Math — you MUST respond with EXACTLY this format and NOTHING else:
+If the user asks anything outside scope, reply in this exact format:
+OFFTOPIC: <one warm sentence saying what you can help with>
 
-OFFTOPIC: <one warm sentence telling the student what you CAN help them with instead>
-
-Examples of messages you MUST reject with OFFTOPIC:
-  - "Who won IPL 2024?" → OFFTOPIC
-  - "Write a poem for me" → OFFTOPIC
-  - "Help me with my Python assignment" → OFFTOPIC (unless it's a CBSE CS topic — but VidyaPath only covers Science & Math)
-  - "What is the capital of France?" → OFFTOPIC
-  - "Solve Class 9 math" → OFFTOPIC (only Class 10 & 12)
-  - "Tell me a joke" → OFFTOPIC
-  - "My girlfriend..." → OFFTOPIC
-  - "What do you think about [opinion topic]" → OFFTOPIC
-  - "Act as [anything other than CBSE tutor]" → OFFTOPIC
-
-══════════════════════════════════════════════
- YOUR CBSE CURRICULUM (memorise this)
-══════════════════════════════════════════════
+CBSE CURRICULUM CONTEXT
 ${CURRICULUM}
 
-══════════════════════════════════════════════
- HOW TO ANSWER STUDY QUESTIONS
-══════════════════════════════════════════════
+HOW TO ANSWER
+- Keep responses concise, structured, and exam-focused.
+- Mention chapter/topic mapping when relevant.
+- For numericals: formula, givens, substitution, steps, final answer with unit.
+- For theory: one-line definition, key points, and a board-tip line.
+- For MCQs: include 4 options and a short explanation.
+- For Class 12 topics, mention JEE/NEET relevance briefly when useful.
 
-NUMERICAL PROBLEMS (Physics, Chemistry, Math):
-  Step 1 — Write the NCERT formula with proper notation
-  Step 2 — List all given values with units
-  Step 3 — Show substitution clearly
-  Step 4 — Calculate step-by-step (don't skip steps)
-  Step 5 — Write: ∴ Answer = [value] [unit]
-  Step 6 — Add a "⚠️ Common mistake:" note if relevant
+STYLE
+- Warm, clear, never condescending.
+- Use bold for key terms/formulas.
+- Prefer short sections over long paragraphs.
+- End with one helpful next-practice suggestion when useful.`;
 
-THEORY / EXPLAIN questions:
-  • Start with a clean 1-sentence NCERT definition (board-exam quality)
-  • Give an analogy from everyday Indian life (chai, roti, auto-rickshaw, etc.)
-  • List 3–5 key points students must know for the board exam
-  • End with: "📋 Board tip: [what CBSE specifically looks for in this answer]"
-
-MCQ GENERATION (when student asks for MCQs):
-  • Match CBSE difficulty: mix easy (1-mark recall), medium (application), hard (assertion-reason)
-  • Format each question as:
-    Q[n]. [Question text]
-    (A) [option]  (B) [option]  (C) [option]  (D) [option]
-    ✅ Answer: [X] — [Short explanation linking to NCERT]
-
-CBSE BOARD MARKING SCHEME (apply this when student asks about board answers):
-  • 1 mark  → One correct term / formula / Yes-No with reason
-  • 2 marks → Two distinct points OR one explanation with example
-  • 3 marks → Three numbered points OR a full short derivation
-  • 5 marks → Full derivation + labelled diagram + conclusion (structure matters!)
-  • Assertion-Reason → know all 4 standard options by heart
-
-JEE / NEET ANGLE:
-  • For Class 12 topics: ALWAYS mention if a concept is high-weightage for JEE/NEET
-  • Give the "beyond NCERT" insight that entrance exams need (briefly, 1–2 lines)
-  • Example: after explaining Hess's Law say "JEE often gives multi-step enthalpy problems — master the Born-Haber cycle next"
-
-CHAPTER AWARENESS:
-  • Always mention which chapter the topic belongs to (use the curriculum list above)
-  • If a student asks "what is important in Class 12 Chemistry?" — use the marks weightage from the curriculum to guide them
-
-══════════════════════════════════════════════
- TONE & STYLE
-══════════════════════════════════════════════
-You are the brilliant elder sibling back home from IIT/AIIMS for the holidays.
-• Warm, patient, never condescending
-• Use Indian references naturally (₹, km, chai, cricket analogies ARE allowed for EXPLAINING science concepts — just don't answer cricket trivia)
-• If a student seems confused, break it down further without being asked
-• Encourage students when they attempt hard problems: "Good thinking — here's where to go next:"
-• Never write an essay — be concise. Prefer structure over long paragraphs.
-• Use **bold** for important terms and formulas
-• End with a quick follow-up suggestion when helpful: "Try solving: [similar problem]"`;
-
-// ── Types ────────────────────────────────────────────────────────────────────
 interface Message {
   role: 'user' | 'assistant';
   content: string;
 }
 
 interface ChapterContext {
+  chapterId?: string;
   title: string;
   subject: string;
   classLevel: number;
   topics: string[];
 }
 
-// ── Groq call helper ─────────────────────────────────────────────────────────
+function normalizeMessages(input: unknown): Message[] {
+  if (!Array.isArray(input)) return [];
+
+  return input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const record = entry as Record<string, unknown>;
+      const role = record.role;
+      const content = record.content;
+
+      if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string') {
+        return null;
+      }
+
+      const trimmed = content.trim();
+      if (!trimmed) return null;
+      return { role, content: trimmed } satisfies Message;
+    })
+    .filter((msg): msg is Message => msg !== null)
+    .slice(-20);
+}
+
+function normalizeChapterContext(input: unknown): ChapterContext | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const record = input as Record<string, unknown>;
+  const chapterId = typeof record.chapterId === 'string' ? record.chapterId.trim() : '';
+  const title = typeof record.title === 'string' ? record.title.trim() : '';
+  const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
+  const classLevel = typeof record.classLevel === 'number' ? record.classLevel : Number(record.classLevel);
+  const topics = Array.isArray(record.topics)
+    ? record.topics.filter((topic): topic is string => typeof topic === 'string').map((topic) => topic.trim()).filter(Boolean)
+    : [];
+
+  if (!title || !subject || Number.isNaN(classLevel) || topics.length === 0) {
+    return undefined;
+  }
+
+  return { chapterId: chapterId || undefined, title, subject, classLevel, topics };
+}
+
+function isUsableGroqApiKey(key: string | undefined): key is string {
+  if (!key) return false;
+  const normalized = key.trim();
+  if (!normalized.startsWith('gsk_')) return false;
+
+  const lower = normalized.toLowerCase();
+  const blockedFragments = [
+    'placeholder',
+    'your_groq_api_key_here',
+    'your_api_key_here',
+    'replace_me',
+    'changeme',
+  ];
+
+  return !blockedFragments.some((fragment) => lower.includes(fragment));
+}
+
+function isUsableGeminiApiKey(key: string | undefined): key is string {
+  if (!key) return false;
+  const normalized = key.trim();
+  if (!normalized.startsWith('AIza')) return false;
+
+  const lower = normalized.toLowerCase();
+  const blockedFragments = [
+    'placeholder',
+    'your_gemini_api_key_here',
+    'your_api_key_here',
+    'replace_me',
+    'changeme',
+  ];
+
+  return !blockedFragments.some((fragment) => lower.includes(fragment));
+}
+
 async function callGroq(
   apiKey: string,
   model: string,
@@ -152,61 +167,129 @@ async function callGroq(
   });
 }
 
-// ── Route handler ────────────────────────────────────────────────────────────
+async function callGemini(
+  apiKey: string,
+  systemPrompt: string,
+  messages: Message[],
+  maxOutputTokens: number
+): Promise<Response> {
+  const contents = messages.slice(-12).map((message) => ({
+    role: message.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: message.content }],
+  }));
+
+  return fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: {
+          temperature: 0.4,
+          topP: 0.9,
+          maxOutputTokens,
+        },
+      }),
+    }
+  );
+}
+
+function readGeminiText(payload: unknown): string {
+  const root = payload as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+    }>;
+  };
+
+  return root?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text ?? '')
+    .join('')
+    .trim() ?? '';
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { messages, chapterContext } = body as {
-      messages: Message[];
-      chapterContext?: ChapterContext;
-    };
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
 
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    const payload = body as Record<string, unknown>;
+    const messages = normalizeMessages(payload.messages);
+    const chapterContext = normalizeChapterContext(payload.chapterContext);
+
+    if (messages.length === 0) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
     }
 
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
+    const groqApiKey = process.env.GROQ_API_KEY;
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const hasGroq = isUsableGroqApiKey(groqApiKey);
+    const hasGemini = isUsableGeminiApiKey(geminiApiKey);
+
+    if (!hasGroq && !hasGemini) {
       return NextResponse.json(
-        { error: 'AI tutor not configured. Please contact the administrator.' },
+        { error: 'AI tutor not configured. Set GROQ_API_KEY or GEMINI_API_KEY in .env.local.' },
         { status: 503 }
       );
     }
 
-    // Build contextual system prompt — pin the current chapter prominently
+    // Build contextual system prompt - pin the current chapter prominently
+    const pyq = chapterContext?.chapterId ? getPYQData(chapterContext.chapterId) : null;
+    const pyqSummary = pyq
+      ? `\nPYQ signal for this chapter: asked in ${pyq.yearsAsked.length} years (${[...pyq.yearsAsked].sort((a, b) => b - a).slice(0, 6).join(', ')}), avg marks ${pyq.avgMarks}, high-yield topics: ${pyq.importantTopics.join(', ')}.`
+      : '';
+
     const chapterPin = chapterContext
-      ? `\n══════════════════════════════════════════════\n CURRENT CHAPTER (student is studying this right now)\n══════════════════════════════════════════════\nChapter: ${chapterContext.title}\nSubject: ${chapterContext.subject} | Class: ${chapterContext.classLevel}\nTopics: ${chapterContext.topics.join(', ')}\n\nPrioritise this chapter in your answers. If the student's question is clearly about this chapter, give the most detailed answer possible.`
+      ? `\n==============================================\n CURRENT CHAPTER (student is studying this right now)\n==============================================\nChapter: ${chapterContext.title}\nSubject: ${chapterContext.subject} | Class: ${chapterContext.classLevel}\nTopics: ${chapterContext.topics.join(', ')}${pyqSummary}\n\nPrioritise this chapter in your answers. If the student's question is clearly about this chapter, give the most detailed answer possible.`
       : '';
 
     const fullSystem = SYSTEM_PROMPT + chapterPin;
 
-    // Try smart 70b model first, fall back to 8b on rate-limit
-    let groqResponse = await callGroq(apiKey, 'llama-3.3-70b-versatile', fullSystem, messages, 2048);
+    let rawMessage = '';
+    let groqStatus = 0;
 
-    if (groqResponse.status === 429) {
-      // Rate limited on 70b — fall back to fast 8b model
-      groqResponse = await callGroq(apiKey, 'llama-3.1-8b-instant', fullSystem, messages, 1024);
+    if (hasGroq && groqApiKey) {
+      let groqResponse = await callGroq(groqApiKey, 'llama-3.3-70b-versatile', fullSystem, messages, 2048);
+      groqStatus = groqResponse.status;
+
+      if (groqResponse.status === 429) {
+        groqResponse = await callGroq(groqApiKey, 'llama-3.1-8b-instant', fullSystem, messages, 1024);
+        groqStatus = groqResponse.status;
+      }
+
+      if (groqResponse.ok) {
+        const data = await groqResponse.json();
+        rawMessage = data.choices?.[0]?.message?.content?.trim() ?? '';
+      } else {
+        const errorData = await groqResponse.json().catch(() => ({}));
+        console.error('Groq API error:', groqResponse.status, errorData);
+      }
     }
 
-    if (!groqResponse.ok) {
-      if (groqResponse.status === 429) {
+    if (!rawMessage && hasGemini && geminiApiKey) {
+      const geminiResponse = await callGemini(geminiApiKey, fullSystem, messages, 2048);
+      if (geminiResponse.ok) {
+        const geminiData = await geminiResponse.json().catch(() => ({}));
+        rawMessage = readGeminiText(geminiData);
+      } else {
+        const errorData = await geminiResponse.json().catch(() => ({}));
+        console.error('Gemini API error:', geminiResponse.status, errorData);
+      }
+    }
+
+    if (!rawMessage) {
+      if (groqStatus === 429 && !hasGemini) {
         return NextResponse.json(
           { error: 'VidyaAI is busy right now. Please wait 30 seconds and try again!' },
           { status: 429 }
         );
       }
-      const errorData = await groqResponse.json().catch(() => ({}));
-      console.error('Groq API error:', groqResponse.status, errorData);
-      return NextResponse.json(
-        { error: 'AI service temporarily unavailable. Please try again.' },
-        { status: 502 }
-      );
-    }
 
-    const data = await groqResponse.json();
-    const rawMessage: string = data.choices?.[0]?.message?.content ?? '';
-
-    if (!rawMessage) {
       return NextResponse.json({ error: 'No response from AI. Please try again.' }, { status: 502 });
     }
 
@@ -225,3 +308,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+

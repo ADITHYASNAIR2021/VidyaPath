@@ -104,3 +104,60 @@ h1, h2, h3 {
   border-radius: 4px;
   font-size: 0.875em;
 }
+
+.ai-response .ai-paragraph {
+  margin: 0.35rem 0;
+  color: #22243a;
+}
+
+.ai-response .ai-section {
+  margin: 0.65rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #efe7db;
+  border-radius: 0.65rem;
+  background: #fdfaf5;
+}
+
+.ai-response .ai-section-title {
+  margin: 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #5a4b2d;
+  font-weight: 700;
+}
+
+.ai-response .ai-section-body {
+  margin-top: 0.32rem;
+  color: #2d3148;
+}
+
+.ai-response .ai-list {
+  margin: 0.45rem 0 0.55rem 0;
+}
+
+.ai-response .ai-list-ol {
+  padding-left: 1.2rem;
+}
+
+.ai-response .ai-list-ul {
+  padding-left: 1rem;
+  list-style: disc;
+}
+
+.ai-response .ai-list li {
+  margin: 0.26rem 0;
+}
+
+.ai-response .ai-equation {
+  margin: 0.45rem 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.55rem;
+  border: 1px dashed #d5dbe8;
+  background: #f7faff;
+  font-family: var(--font-jetbrains-mono), monospace;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: #233155;
+  overflow-x: auto;
+}

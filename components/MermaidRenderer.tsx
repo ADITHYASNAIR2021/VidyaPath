@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 mermaid.initialize({
   startOnLoad: false,
   theme: 'default',
-  securityLevel: 'loose',
+  securityLevel: 'strict',
   fontFamily: 'inherit',
 });
 

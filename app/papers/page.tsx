@@ -80,6 +80,11 @@ function PaperCard({ paper }: { paper: PaperEntry }) {
           <span className={clsx('text-[10px] font-semibold px-2 py-0.5 rounded-full', color.light, color.text, 'border')}>
             {paper.subject}
           </span>
+          {paper.isFromHF && (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
+              HF PDF
+            </span>
+          )}
           {paper.set && SET_LABELS[paper.set] && (
             <span className="text-[10px] font-medium px-1.5 py-0.5 bg-white border border-gray-200 rounded text-gray-500">
               {SET_LABELS[paper.set]}
@@ -221,7 +226,7 @@ export default function PapersPage() {
               Previous Year Papers
             </h1>
             <p className="text-indigo-200 text-base max-w-xl leading-relaxed mb-8">
-              17 years of official CBSE board papers, sample papers &amp; compartment papers — all in one place. Solve them to master board patterns.
+              17 years of official CBSE board papers, sample papers &amp; compartment papers - all in one place. Solve them to master board patterns.
             </p>
 
             {/* Stats row */}
@@ -229,7 +234,7 @@ export default function PapersPage() {
               <StatBadge icon={FileText}   value={stats.board}         label="Board Papers"    color="bg-white/15" />
               <StatBadge icon={BookOpen}   value={stats.sample}        label="Sample Papers"   color="bg-white/15" />
               <StatBadge icon={Shield}     value={stats.compartment}   label="Compartment"     color="bg-white/15" />
-              <StatBadge icon={Calendar}   value={`${stats.yearsSpanned}`} label="Years (2009–2025)" color="bg-white/15" />
+              <StatBadge icon={Calendar}   value={`${stats.yearsSpanned}`} label="Years (2009-2025)" color="bg-white/15" />
             </div>
           </motion.div>
         </div>

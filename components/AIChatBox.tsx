@@ -13,10 +13,48 @@ interface Message {
 }
 
 interface AIChatBoxProps {
+  chapterId: string;
   chapterTitle: string;
   chapterTopics: string[];
   classLevel: number;
   subject: string;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function normalizeEncodingArtifacts(value: string): string {
+  return value
+    .replace(/\u00c2\u00b7/g, '\u00b7')
+    .replace(/\u00e2\u20ac\u201d/g, '\u2014')
+    .replace(/\u00e2\u20ac\u201c/g, '\u2013')
+    .replace(/\u00e2\u20ac\u00a2/g, '\u2022')
+    .replace(/\u00e2\u2020\u2019/g, '\u2192')
+    .replace(/\u00e2\u02c6\u00b4/g, '\u2234')
+    .replace(/\u00e2\u0153\u2026/g, '\u2705')
+    .replace(/\u00e2\u0161\u00a0\u00ef\u00b8\u008f/g, '\u26a0\ufe0f')
+    .replace(/\u00f0\u0178\u201c\u2039/g, '\ud83d\udccb')
+    .replace(/\u00f0\u0178\u203a\u00a1/g, '\ud83d\udee1');
+}
+
+function formatInlineMarkdown(value: string): string {
+  return value
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">$1</code>')
+    .replace(/\*(?!\s)([^*]+)\*/g, '<em>$1</em>');
+}
+
+function isEquationLikeLine(line: string): boolean {
+  if (line.length > 180) return false;
+  const hasOperator = /(?:\u2192|\u21cc|=|\u0394H|E\u2070)/.test(line);
+  const hasChemPattern = /[A-Za-z0-9\)\]]\s*(?:\u2192|\u21cc|=)\s*[A-Za-z0-9\(\[]/.test(line);
+  return hasOperator && (hasChemPattern || /[A-Z][a-z]?\d?/.test(line));
 }
 
 // Render a string that may contain LaTeX inline ($...$) and block ($$...$$)
@@ -31,7 +69,7 @@ function renderWithKatex(text: string): string {
         trust: false,
       })}</div>`;
     } catch {
-      return `<code class="text-sm">${math}</code>`;
+      return `<code class="text-sm">${escapeHtml(math)}</code>`;
     }
   });
 
@@ -44,7 +82,7 @@ function renderWithKatex(text: string): string {
         trust: false,
       });
     } catch {
-      return `<code class="text-sm">${math}</code>`;
+      return `<code class="text-sm">${escapeHtml(math)}</code>`;
     }
   });
 
@@ -55,7 +93,7 @@ function renderWithKatex(text: string): string {
 function formatAIResponse(text: string): string {
   // Step 1: protect LaTeX from markdown processing by placeholder
   const mathBlocks: string[] = [];
-  let processed = text.replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
+  let processed = normalizeEncodingArtifacts(text).replace(/\$\$([\s\S]+?)\$\$/g, (match) => {
     mathBlocks.push(match);
     return `%%MATHBLOCK_${mathBlocks.length - 1}%%`;
   });
@@ -64,36 +102,93 @@ function formatAIResponse(text: string): string {
     return `%%MATHBLOCK_${mathBlocks.length - 1}%%`;
   });
 
-  // Step 2: markdown formatting
-  processed = processed
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">$1</code>')
-    .replace(/^#{1,3}\s+(.+)$/gm, '<strong class="text-navy-700 block mt-2">$1</strong>')
-    .replace(/∴/g, '<span class="font-bold text-saffron-600">∴</span>')
-    .replace(/✅/g, '<span class="text-emerald-600 font-bold">✅</span>')
-    .replace(/⚠️/g, '<span>⚠️</span>')
-    .replace(/📋/g, '<span>📋</span>')
-    .replace(/\n\n+/g, '</p><p class="mt-2">')
-    .replace(/\n- /g, '\n• ')
-    .replace(/\n(\d+)\. /g, (_, n) => `\n<span class="font-semibold text-navy-700">${n}.</span> `);
+  // Step 2: escape + structured formatting
+  processed = escapeHtml(processed);
+  const lines = processed.split('\n');
+  const blocks: string[] = [];
+  let listType: 'ol' | 'ul' | null = null;
+
+  const closeList = () => {
+    if (!listType) return;
+    blocks.push(listType === 'ol' ? '</ol>' : '</ul>');
+    listType = null;
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      closeList();
+      continue;
+    }
+
+    const sectionMatch = line.match(/^\*\*(.+?)\*\*:\s*(.*)$/);
+    if (sectionMatch) {
+      closeList();
+      const [, title, rest] = sectionMatch;
+      const titleHtml = formatInlineMarkdown(title.trim());
+      const restHtml = rest ? `<div class="ai-section-body">${formatInlineMarkdown(rest.trim())}</div>` : '';
+      blocks.push(`<section class="ai-section"><h4 class="ai-section-title">${titleHtml}</h4>${restHtml}</section>`);
+      continue;
+    }
+
+    const headingMatch = line.match(/^#{1,3}\s+(.+)$/);
+    if (headingMatch) {
+      closeList();
+      blocks.push(`<h4 class="ai-section-title">${formatInlineMarkdown(headingMatch[1].trim())}</h4>`);
+      continue;
+    }
+
+    const orderedMatch = line.match(/^\d+\.\s+(.+)$/);
+    if (orderedMatch) {
+      if (listType !== 'ol') {
+        closeList();
+        blocks.push('<ol class="ai-list ai-list-ol">');
+        listType = 'ol';
+      }
+      blocks.push(`<li>${formatInlineMarkdown(orderedMatch[1].trim())}</li>`);
+      continue;
+    }
+
+    const bulletMatch = line.match(/^(?:[-*\u2022])\s+(.+)$/);
+    if (bulletMatch) {
+      if (listType !== 'ul') {
+        closeList();
+        blocks.push('<ul class="ai-list ai-list-ul">');
+        listType = 'ul';
+      }
+      blocks.push(`<li>${formatInlineMarkdown(bulletMatch[1].trim())}</li>`);
+      continue;
+    }
+
+    closeList();
+    if (isEquationLikeLine(line)) {
+      blocks.push(`<div class="ai-equation">${formatInlineMarkdown(line)}</div>`);
+    } else {
+      blocks.push(`<p class="ai-paragraph">${formatInlineMarkdown(line)}</p>`);
+    }
+  }
+
+  closeList();
+  processed = blocks.join('');
 
   // Step 3: restore math blocks with KaTeX rendering
   processed = processed.replace(/%%MATHBLOCK_(\d+)%%/g, (_, idx) => {
-    return renderWithKatex(mathBlocks[parseInt(idx)]);
+    return renderWithKatex(mathBlocks[parseInt(idx, 10)]);
   });
 
   return processed;
 }
 
 const QUICK_QUESTIONS = (chapterTitle: string, topics: string[]) => [
-  `Explain ${topics[0]} simply`,
+  `Explain ${topics[0] ?? 'this topic'} simply`,
   `Important formulas in ${chapterTitle}?`,
   `Give me 3 MCQs on ${chapterTitle}`,
   `What board questions come from this chapter?`,
 ];
 
 export default function AIChatBox({
+  chapterId,
   chapterTitle,
   chapterTopics,
   classLevel,
@@ -127,7 +222,7 @@ export default function AIChatBox({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [...messages, userMessage],
-          chapterContext: { title: chapterTitle, subject, classLevel, topics: chapterTopics },
+          chapterContext: { chapterId, title: chapterTitle, subject, classLevel, topics: chapterTopics },
         }),
       });
 
@@ -170,7 +265,7 @@ export default function AIChatBox({
           </div>
           <div>
             <div className="font-semibold text-white text-sm">VidyaAI Tutor</div>
-            <div className="text-white/70 text-xs">CBSE Class 10 &amp; 12 · Free · Always available</div>
+            <div className="text-white/70 text-xs">CBSE Class 10 &amp; 12 - Free - Always available</div>
           </div>
         </div>
         {messages.length > 0 && (
@@ -193,9 +288,9 @@ export default function AIChatBox({
                 <MessageCircle className="w-3.5 h-3.5 text-saffron-600" />
               </div>
               <div className="bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-[#4A4A6A] leading-relaxed max-w-xs">
-                Hi! I&apos;m VidyaAI — your CBSE tutor for{' '}
+                Hi! I&apos;m VidyaAI - your CBSE tutor for{' '}
                 <strong className="text-navy-700">{subject}, Class {classLevel}</strong>.
-                Ask anything — formulas, derivations, MCQs, board tips!
+                Ask anything - formulas, derivations, MCQs, board tips!
               </div>
             </div>
             <div>
@@ -230,7 +325,7 @@ export default function AIChatBox({
                     : 'bg-saffron-100 text-saffron-600'
                 )}
               >
-                {msg.role === 'user' ? 'You' : msg.isOffTopic ? '🛡' : 'AI'}
+                {msg.role === 'user' ? 'You' : msg.isOffTopic ? '!' : 'AI'}
               </div>
 
               {msg.isOffTopic ? (
@@ -253,7 +348,7 @@ export default function AIChatBox({
                   {msg.role === 'assistant' ? (
                     <div
                       dangerouslySetInnerHTML={{
-                        __html: `<p>${formatAIResponse(msg.content)}</p>`,
+                        __html: formatAIResponse(msg.content),
                       }}
                     />
                   ) : (
@@ -305,7 +400,7 @@ export default function AIChatBox({
           </button>
         </div>
         <p className="text-xs text-[#8A8AAA] mt-1.5 text-center">
-          CBSE Science &amp; Math only · Powered by Groq LLaMA · Free
+          CBSE Science &amp; Math only - Powered by Groq LLaMA - Free
         </p>
       </div>
     </div>

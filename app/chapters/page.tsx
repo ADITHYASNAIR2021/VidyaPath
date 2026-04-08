@@ -5,8 +5,10 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { Search, Atom, FlaskConical, Leaf, Calculator, SlidersHorizontal, CheckCircle2 } from 'lucide-react';
 import clsx from 'clsx';
+import Fuse from 'fuse.js';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { Subject, ClassLevel } from '@/lib/data';
+import { getPYQData } from '@/lib/pyq';
 import ChapterCard from '@/components/ChapterCard';
 import { useProgressStore } from '@/lib/store';
 
@@ -52,22 +54,74 @@ function ChaptersContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const { studiedChapterIds } = useProgressStore();
 
+  const chapterSearchDocs = useMemo(() => {
+    return ALL_CHAPTERS.map((chapter) => {
+      const pyq = getPYQData(chapter.id);
+      return {
+        id: chapter.id,
+        title: chapter.title,
+        subject: chapter.subject,
+        description: chapter.description,
+        topics: chapter.topics,
+        importantTopics: pyq?.importantTopics ?? [],
+      };
+    });
+  }, []);
+
+  const chapterFuse = useMemo(() => {
+    return new Fuse(chapterSearchDocs, {
+      includeScore: true,
+      threshold: 0.34,
+      ignoreLocation: true,
+      keys: [
+        { name: 'title', weight: 0.35 },
+        { name: 'subject', weight: 0.15 },
+        { name: 'topics', weight: 0.3 },
+        { name: 'importantTopics', weight: 0.3 },
+        { name: 'description', weight: 0.1 },
+      ],
+    });
+  }, [chapterSearchDocs]);
+
+  const searchOrder = useMemo(() => {
+    const query = searchQuery.trim();
+    if (!query) return null;
+    const ordered = new Map<string, number>();
+    chapterFuse.search(query).forEach((hit, idx) => {
+      ordered.set(hit.item.id, idx);
+    });
+    return ordered;
+  }, [chapterFuse, searchQuery]);
+
   const filtered = useMemo(() => {
-    return ALL_CHAPTERS.filter((ch) => {
+    const base = ALL_CHAPTERS.filter((ch) => {
       if (selectedClass !== 0 && ch.classLevel !== selectedClass) return false;
       if (selectedSubject !== 'All' && ch.subject !== selectedSubject) return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        return (
-          ch.title.toLowerCase().includes(q) ||
-          ch.subject.toLowerCase().includes(q) ||
-          ch.topics.some((t) => t.toLowerCase().includes(q)) ||
-          ch.description.toLowerCase().includes(q)
-        );
-      }
       return true;
     });
-  }, [selectedClass, selectedSubject, searchQuery]);
+
+    const query = searchQuery.trim();
+    if (!query || !searchOrder) return base;
+
+    const filteredBySearch = base.filter((chapter) => searchOrder.has(chapter.id));
+    return filteredBySearch.sort((a, b) => (searchOrder.get(a.id) ?? 9999) - (searchOrder.get(b.id) ?? 9999));
+  }, [selectedClass, selectedSubject, searchOrder, searchQuery]);
+
+  const getPyqSearchInsight = (chapterId: string) => {
+    const pyq = getPYQData(chapterId);
+    if (!pyq || !searchQuery.trim()) return null;
+
+    const query = searchQuery.trim().toLowerCase();
+    const matchedTopic = pyq.importantTopics.find((topic) => topic.toLowerCase().includes(query));
+    if (!matchedTopic) return null;
+
+    const years = [...pyq.yearsAsked].sort((a, b) => b - a).slice(0, 5).join(', ');
+    return {
+      topic: matchedTopic,
+      years,
+      avgMarks: pyq.avgMarks,
+    };
+  };
 
   return (
     <div className="min-h-screen">
@@ -158,7 +212,7 @@ function ChaptersContent() {
       <div className="max-w-5xl mx-auto px-4 py-8">
         {filtered.length === 0 ? (
           <div className="text-center py-20">
-            <div className="text-5xl mb-4">🔍</div>
+            <Search className="w-12 h-12 text-[#C7C5BD] mx-auto mb-4" />
             <h3 className="font-fraunces text-xl font-bold text-navy-700 mb-2">No chapters found</h3>
             <p className="text-[#4A4A6A]">Try changing your filters or search query.</p>
           </div>
@@ -167,20 +221,32 @@ function ChaptersContent() {
             <p className="text-sm text-[#8A8AAA] mb-5">
               Showing <span className="font-semibold text-navy-700">{filtered.length}</span> chapter
               {filtered.length !== 1 ? 's' : ''}
-              {selectedClass !== 0 ? ` · Class ${selectedClass}` : ''}
-              {selectedSubject !== 'All' ? ` · ${selectedSubject}` : ''}
+              {selectedClass !== 0 ? ` - Class ${selectedClass}` : ''}
+              {selectedSubject !== 'All' ? ` - ${selectedSubject}` : ''}
               {searchQuery ? ` for "${searchQuery}"` : ''}
             </p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map((chapter, i) => (
-                <div
-                  key={chapter.id}
-                  className="animate-fade-in-up"
-                  style={{ animationDelay: `${Math.min(i * 0.04, 0.4)}s` }}
-                >
-                  <ChapterCard chapter={chapter} />
-                </div>
-              ))}
+              {filtered.map((chapter, i) => {
+                const pyqInsight = getPyqSearchInsight(chapter.id);
+                return (
+                  <div
+                    key={chapter.id}
+                    className="animate-fade-in-up"
+                    style={{ animationDelay: `${Math.min(i * 0.04, 0.4)}s` }}
+                  >
+                    <ChapterCard chapter={chapter} />
+                    {pyqInsight && (
+                      <div className="mt-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold text-indigo-700">PYQ Hit</div>
+                        <p className="text-xs text-indigo-900 mt-0.5">
+                          <span className="font-semibold">{pyqInsight.topic}</span>
+                          {' '}asked in {pyqInsight.years} - avg {pyqInsight.avgMarks} marks
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

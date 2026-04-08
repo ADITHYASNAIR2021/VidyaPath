@@ -114,6 +114,8 @@ export default function DashboardPage() {
   const [cardsDue, setCardsDue] = useState(0);
   const { studiedChapterIds } = useProgressStore();
   const { bookmarkedChapterIds } = useBookmarkStore();
+  const eligibleChapters = useMemo(() => ALL_CHAPTERS.filter((c) => c.classLevel !== 11), []);
+  const chapterById = useMemo(() => new Map(eligibleChapters.map((chapter) => [chapter.id, chapter])), [eligibleChapters]);
 
   const paperStats = useMemo(() => getPaperStats(), []);
 
@@ -129,7 +131,7 @@ export default function DashboardPage() {
       10: { studied: 0, total: 0 },
       12: { studied: 0, total: 0 },
     };
-    for (const ch of ALL_CHAPTERS.filter(c => c.classLevel !== 11)) {
+    for (const ch of eligibleChapters) {
       result[ch.subject].total++;
       if (studiedChapterIds.includes(ch.id)) result[ch.subject].studied++;
       if (classProgress[ch.classLevel]) {
@@ -138,36 +140,35 @@ export default function DashboardPage() {
       }
     }
     return { bySubject: result, byClass: classProgress };
-  }, [studiedChapterIds]);
+  }, [eligibleChapters, studiedChapterIds]);
 
-  const eligibleChapters = ALL_CHAPTERS.filter(c => c.classLevel !== 11);
   const totalChapters = eligibleChapters.length;
-  const studiedCount = studiedChapterIds.filter(id => eligibleChapters.find(c => c.id === id)).length;
+  const studiedCount = studiedChapterIds.filter((id) => chapterById.has(id)).length;
   const overallPct = totalChapters > 0 ? Math.round((studiedCount / totalChapters) * 100) : 0;
 
   // Recent studied (last 5)
   const recentStudied = useMemo(() => {
     return studiedChapterIds
-      .map(id => ALL_CHAPTERS.find(c => c.id === id))
+      .map((id) => chapterById.get(id))
       .filter(Boolean)
       .slice(-5)
       .reverse() as typeof ALL_CHAPTERS;
-  }, [studiedChapterIds]);
+  }, [chapterById, studiedChapterIds]);
 
   // Suggested next (bookmarked but not studied)
   const suggested = useMemo(() => {
     return bookmarkedChapterIds
-      .filter(id => !studiedChapterIds.includes(id))
-      .map(id => ALL_CHAPTERS.find(c => c.id === id))
+      .filter((id) => !studiedChapterIds.includes(id))
+      .map((id) => chapterById.get(id))
       .filter(Boolean)
       .slice(0, 3) as typeof ALL_CHAPTERS;
-  }, [bookmarkedChapterIds, studiedChapterIds]);
+  }, [bookmarkedChapterIds, chapterById, studiedChapterIds]);
 
   useEffect(() => {
     setMounted(true);
     let quizSum = 0, quizCount = 0, due = 0;
     const now = new Date();
-    for (const ch of ALL_CHAPTERS) {
+    for (const ch of eligibleChapters) {
       const score = localStorage.getItem(`quiz-score-[${ch.id}]`);
       if (score) { quizCount++; quizSum += parseInt(score, 10); }
       if (ch.flashcards) {
@@ -183,7 +184,7 @@ export default function DashboardPage() {
     setQuizzesTaken(quizCount);
     setAvgQuizScore(quizCount > 0 ? Math.round(quizSum / quizCount) : 0);
     setCardsDue(due);
-  }, []);
+  }, [eligibleChapters]);
 
   if (!mounted) {
     return (

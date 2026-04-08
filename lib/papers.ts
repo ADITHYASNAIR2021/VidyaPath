@@ -1,8 +1,10 @@
+import HF_PAPER_INDEX from './hfPaperIndex.json';
+
 // ============================================================
-// VidyaPath — Comprehensive CBSE Papers Data
-// Board Exam Papers: 2009–2025 (Class 10 & 12)
-// Sample Papers: 2019–2025
-// Compartment Papers: 2022–2025
+// VidyaPath - Comprehensive CBSE Papers Data
+// Board Exam Papers: 2009-2025 (Class 10 & 12)
+// Sample Papers: 2019-2025
+// Compartment Papers: 2022-2025
 // ============================================================
 
 export type PaperType = 'board' | 'sample' | 'compartment';
@@ -21,10 +23,11 @@ export interface PaperEntry {
   set?: PaperSet;
   isOfficial?: boolean;   // links directly to official CBSE source
   hasMarkingScheme?: boolean;
+  isFromHF?: boolean;
 }
 
-// ── Hugging Face Dataset — primary source for actual PDF files ──
-// Repo: https://huggingface.co/datasets/adithya-s-nair/cbse-papers-2009-2025
+// ── Hugging Face Dataset - primary source for actual PDF files ──
+// Repo: https://huggingface.co/datasets/AdithyaSNair/cbse-papers-2009-2025
 // All 4,666 PDFs are hosted here with the same folder structure as
 // the local dataset/ directory.
 //
@@ -33,12 +36,12 @@ export interface PaperEntry {
 //
 // Example:
 //   hf("2025/Class_10/Science/086_science.zip_extracted/086_Science/31-1-1_Science.pdf")
-//   → https://huggingface.co/datasets/adithya-s-nair/cbse-papers-2009-2025/resolve/main/2025/Class_10/Science/...
+//   -> https://huggingface.co/datasets/AdithyaSNair/cbse-papers-2009-2025/resolve/main/2025/Class_10/Science/...
 //
 // IMPORTANT: Update HF_DATASET_REPO below once you've created the HF dataset repo.
 // Until then, cards fall back to the official CBSE archive page.
 
-const HF_DATASET_REPO = 'adithya-s-nair/cbse-papers-2009-2025'; // ← change to your HF username/repo
+const HF_DATASET_REPO = 'AdithyaSNair/cbse-papers-2009-2025'; // <- change to your HF username/repo
 const HF_BASE = `https://huggingface.co/datasets/${HF_DATASET_REPO}/resolve/main`;
 
 /** Build a direct PDF link from HF dataset using the local relative path */
@@ -51,7 +54,57 @@ export function hf(relativePath: string): string {
   return `${HF_BASE}/${encoded}`;
 }
 
-// ── CBSE Official base URLs — fallback / sample papers ───────
+type ResolvedSubject = 'Physics' | 'Chemistry' | 'Biology' | 'Math' | 'Science';
+
+function normalizePaperSubject(subject: string): ResolvedSubject | null {
+  const normalized = subject.trim().toLowerCase();
+  if (normalized.includes('physics')) return 'Physics';
+  if (normalized.includes('chem')) return 'Chemistry';
+  if (normalized.includes('bio')) return 'Biology';
+  if (normalized.includes('math')) return 'Math';
+  if (normalized === 'science') return 'Science';
+  return null;
+}
+
+function getMathVariant(paper: PaperEntry): 'basic' | 'standard' | 'default' {
+  const combined = `${paper.title} ${paper.set ?? ''}`.toLowerCase();
+  if (combined.includes('basic')) return 'basic';
+  if (combined.includes('standard') || combined.includes('std')) return 'standard';
+  return 'default';
+}
+
+function getHfIndexKey(paper: PaperEntry): string | null {
+  if (paper.classLevel !== 10 && paper.classLevel !== 12) return null;
+  if (paper.paperType !== 'board' && paper.paperType !== 'compartment') return null;
+
+  const subject = normalizePaperSubject(paper.subject);
+  if (!subject) return null;
+
+  const variant = subject === 'Math' && paper.classLevel === 10
+    ? getMathVariant(paper)
+    : 'default';
+
+  return `${paper.paperType}|${paper.year}|${paper.classLevel}|${subject}|${variant}`;
+}
+
+function resolvePaperUrl(paper: PaperEntry): { url: string; isFromHF: boolean } {
+  const hfIndex = HF_PAPER_INDEX as Record<string, string>;
+  const key = getHfIndexKey(paper);
+  if (!key) return { url: paper.url, isFromHF: false };
+
+  const direct = hfIndex[key];
+  if (direct) return { url: hf(direct), isFromHF: true };
+
+  if (paper.classLevel === 10 && normalizePaperSubject(paper.subject) === 'Math') {
+    const fallbackKey = `${paper.paperType}|${paper.year}|${paper.classLevel}|Math|default`;
+    const fallback = hfIndex[fallbackKey];
+    if (fallback) return { url: hf(fallback), isFromHF: true };
+  }
+
+  return { url: paper.url, isFromHF: false };
+}
+
+// ── CBSE Official base URLs - fallback / sample papers ───────
 const CBSE_QP_10 = 'https://cbseacademic.nic.in/Question_Paper_classx.html';
 const CBSE_QP_12 = 'https://cbseacademic.nic.in/Question_Paper.html';
 const CBSE_SQP_12 = (yr: string) => `https://cbseacademic.nic.in/SQP_CLASSXII_${yr}.html`;
@@ -59,11 +112,11 @@ const CBSE_SQP_10 = (yr: string) => `https://cbseacademic.nic.in/SQP_CLASSX_${yr
 const CBSE_MS = 'https://cbseacademic.nic.in/Marking_Scheme.html';
 
 // ============================================================
-// BOARD EXAM PAPERS — CLASS 12
+// BOARD EXAM PAPERS - CLASS 12
 // ============================================================
 
 const boardPapers12: PaperEntry[] = [
-  // ── 2025 — HF direct links (update paths after upload) ────
+  // ── 2025 - HF direct links (update paths after upload) ────
   // TODO: Replace hf(...) paths with actual filenames from your dataset upload
   { id: 'b12-phy-2025', classLevel: 12, subject: 'Physics', year: 2025, title: 'Class 12 Physics Board Paper 2025', duration: '3 Hours', totalMarks: 70, url: CBSE_QP_12, paperType: 'board', set: 'All India', isOfficial: true },
   { id: 'b12-chem-2025', classLevel: 12, subject: 'Chemistry', year: 2025, title: 'Class 12 Chemistry Board Paper 2025', duration: '3 Hours', totalMarks: 70, url: CBSE_QP_12, paperType: 'board', set: 'All India', isOfficial: true },
@@ -161,7 +214,7 @@ const boardPapers12: PaperEntry[] = [
 ];
 
 // ============================================================
-// BOARD EXAM PAPERS — CLASS 10
+// BOARD EXAM PAPERS - CLASS 10
 // ============================================================
 
 const boardPapers10: PaperEntry[] = [
@@ -239,38 +292,38 @@ const boardPapers10: PaperEntry[] = [
 
 const samplePapers: PaperEntry[] = [
   // ── Class 12 Sample Papers ────────────────────────────────
-  { id: 'sq12-phy-2025', classLevel: 12, subject: 'Physics', year: 2025, title: 'Class 12 Physics Sample Paper 2025–26', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2025-26'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-chem-2025', classLevel: 12, subject: 'Chemistry', year: 2025, title: 'Class 12 Chemistry Sample Paper 2025–26', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2025-26'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-bio-2025', classLevel: 12, subject: 'Biology', year: 2025, title: 'Class 12 Biology Sample Paper 2025–26', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2025-26'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-math-2025', classLevel: 12, subject: 'Math', year: 2025, title: 'Class 12 Mathematics Sample Paper 2025–26', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_12('2025-26'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-phy-2024', classLevel: 12, subject: 'Physics', year: 2024, title: 'Class 12 Physics Sample Paper 2024–25', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq12-chem-2024', classLevel: 12, subject: 'Chemistry', year: 2024, title: 'Class 12 Chemistry Sample Paper 2024–25', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq12-bio-2024', classLevel: 12, subject: 'Biology', year: 2024, title: 'Class 12 Biology Sample Paper 2024–25', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq12-math-2024', classLevel: 12, subject: 'Math', year: 2024, title: 'Class 12 Mathematics Sample Paper 2024–25', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_12('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq12-phy-2023', classLevel: 12, subject: 'Physics', year: 2023, title: 'Class 12 Physics Sample Paper 2023–24', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq12-chem-2023', classLevel: 12, subject: 'Chemistry', year: 2023, title: 'Class 12 Chemistry Sample Paper 2023–24', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq12-bio-2023', classLevel: 12, subject: 'Biology', year: 2023, title: 'Class 12 Biology Sample Paper 2023–24', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq12-math-2023', classLevel: 12, subject: 'Math', year: 2023, title: 'Class 12 Mathematics Sample Paper 2023–24', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_12('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq12-phy-2022', classLevel: 12, subject: 'Physics', year: 2022, title: 'Class 12 Physics Sample Paper 2022–23', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2022-23'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-chem-2022', classLevel: 12, subject: 'Chemistry', year: 2022, title: 'Class 12 Chemistry Sample Paper 2022–23', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2022-23'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-bio-2022', classLevel: 12, subject: 'Biology', year: 2022, title: 'Class 12 Biology Sample Paper 2022–23', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2022-23'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-math-2022', classLevel: 12, subject: 'Math', year: 2022, title: 'Class 12 Mathematics Sample Paper 2022–23', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_12('2022-23'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-all-2021', classLevel: 12, subject: 'All Subjects', year: 2021, title: 'Class 12 All Subjects Sample Papers 2021–22', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2021-22'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-all-2020', classLevel: 12, subject: 'All Subjects', year: 2020, title: 'Class 12 All Subjects Sample Papers 2020–21', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2020-21'), paperType: 'sample', isOfficial: true },
-  { id: 'sq12-all-2019', classLevel: 12, subject: 'All Subjects', year: 2019, title: 'Class 12 All Subjects Sample Papers 2019–20', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2019-20'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-phy-2025', classLevel: 12, subject: 'Physics', year: 2025, title: 'Class 12 Physics Sample Paper 2025-26', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2025-26'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-chem-2025', classLevel: 12, subject: 'Chemistry', year: 2025, title: 'Class 12 Chemistry Sample Paper 2025-26', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2025-26'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-bio-2025', classLevel: 12, subject: 'Biology', year: 2025, title: 'Class 12 Biology Sample Paper 2025-26', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2025-26'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-math-2025', classLevel: 12, subject: 'Math', year: 2025, title: 'Class 12 Mathematics Sample Paper 2025-26', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_12('2025-26'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-phy-2024', classLevel: 12, subject: 'Physics', year: 2024, title: 'Class 12 Physics Sample Paper 2024-25', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq12-chem-2024', classLevel: 12, subject: 'Chemistry', year: 2024, title: 'Class 12 Chemistry Sample Paper 2024-25', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq12-bio-2024', classLevel: 12, subject: 'Biology', year: 2024, title: 'Class 12 Biology Sample Paper 2024-25', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq12-math-2024', classLevel: 12, subject: 'Math', year: 2024, title: 'Class 12 Mathematics Sample Paper 2024-25', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_12('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq12-phy-2023', classLevel: 12, subject: 'Physics', year: 2023, title: 'Class 12 Physics Sample Paper 2023-24', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq12-chem-2023', classLevel: 12, subject: 'Chemistry', year: 2023, title: 'Class 12 Chemistry Sample Paper 2023-24', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq12-bio-2023', classLevel: 12, subject: 'Biology', year: 2023, title: 'Class 12 Biology Sample Paper 2023-24', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq12-math-2023', classLevel: 12, subject: 'Math', year: 2023, title: 'Class 12 Mathematics Sample Paper 2023-24', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_12('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq12-phy-2022', classLevel: 12, subject: 'Physics', year: 2022, title: 'Class 12 Physics Sample Paper 2022-23', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2022-23'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-chem-2022', classLevel: 12, subject: 'Chemistry', year: 2022, title: 'Class 12 Chemistry Sample Paper 2022-23', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2022-23'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-bio-2022', classLevel: 12, subject: 'Biology', year: 2022, title: 'Class 12 Biology Sample Paper 2022-23', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2022-23'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-math-2022', classLevel: 12, subject: 'Math', year: 2022, title: 'Class 12 Mathematics Sample Paper 2022-23', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_12('2022-23'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-all-2021', classLevel: 12, subject: 'All Subjects', year: 2021, title: 'Class 12 All Subjects Sample Papers 2021-22', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2021-22'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-all-2020', classLevel: 12, subject: 'All Subjects', year: 2020, title: 'Class 12 All Subjects Sample Papers 2020-21', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2020-21'), paperType: 'sample', isOfficial: true },
+  { id: 'sq12-all-2019', classLevel: 12, subject: 'All Subjects', year: 2019, title: 'Class 12 All Subjects Sample Papers 2019-20', duration: '3 Hours', totalMarks: 70, url: CBSE_SQP_12('2019-20'), paperType: 'sample', isOfficial: true },
 
   // ── Class 10 Sample Papers ────────────────────────────────
-  { id: 'sq10-sci-2025', classLevel: 10, subject: 'Science', year: 2025, title: 'Class 10 Science Sample Paper 2025–26', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2025-26'), paperType: 'sample', isOfficial: true },
-  { id: 'sq10-math-2025', classLevel: 10, subject: 'Math', year: 2025, title: 'Class 10 Mathematics Sample Paper 2025–26', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2025-26'), paperType: 'sample', isOfficial: true },
-  { id: 'sq10-sci-2024', classLevel: 10, subject: 'Science', year: 2024, title: 'Class 10 Science Sample Paper 2024–25', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq10-math-2024', classLevel: 10, subject: 'Math', year: 2024, title: 'Class 10 Mathematics Sample Paper 2024–25', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq10-sci-2023', classLevel: 10, subject: 'Science', year: 2023, title: 'Class 10 Science Sample Paper 2023–24', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq10-math-2023', classLevel: 10, subject: 'Math', year: 2023, title: 'Class 10 Mathematics Sample Paper 2023–24', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
-  { id: 'sq10-sci-2022', classLevel: 10, subject: 'Science', year: 2022, title: 'Class 10 Science Sample Paper 2022–23', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2022-23'), paperType: 'sample', isOfficial: true },
-  { id: 'sq10-math-2022', classLevel: 10, subject: 'Math', year: 2022, title: 'Class 10 Mathematics Sample Paper 2022–23', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2022-23'), paperType: 'sample', isOfficial: true },
-  { id: 'sq10-sci-2021', classLevel: 10, subject: 'Science', year: 2021, title: 'Class 10 Science Sample Paper 2021–22', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2021-22'), paperType: 'sample', isOfficial: true },
-  { id: 'sq10-sci-2020', classLevel: 10, subject: 'Science', year: 2020, title: 'Class 10 Science Sample Paper 2020–21', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2020-21'), paperType: 'sample', isOfficial: true },
-  { id: 'sq10-sci-2019', classLevel: 10, subject: 'Science', year: 2019, title: 'Class 10 Science Sample Paper 2019–20', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2019-20'), paperType: 'sample', isOfficial: true },
+  { id: 'sq10-sci-2025', classLevel: 10, subject: 'Science', year: 2025, title: 'Class 10 Science Sample Paper 2025-26', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2025-26'), paperType: 'sample', isOfficial: true },
+  { id: 'sq10-math-2025', classLevel: 10, subject: 'Math', year: 2025, title: 'Class 10 Mathematics Sample Paper 2025-26', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2025-26'), paperType: 'sample', isOfficial: true },
+  { id: 'sq10-sci-2024', classLevel: 10, subject: 'Science', year: 2024, title: 'Class 10 Science Sample Paper 2024-25', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq10-math-2024', classLevel: 10, subject: 'Math', year: 2024, title: 'Class 10 Mathematics Sample Paper 2024-25', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2024-25'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq10-sci-2023', classLevel: 10, subject: 'Science', year: 2023, title: 'Class 10 Science Sample Paper 2023-24', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq10-math-2023', classLevel: 10, subject: 'Math', year: 2023, title: 'Class 10 Mathematics Sample Paper 2023-24', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2023-24'), paperType: 'sample', isOfficial: true, hasMarkingScheme: true },
+  { id: 'sq10-sci-2022', classLevel: 10, subject: 'Science', year: 2022, title: 'Class 10 Science Sample Paper 2022-23', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2022-23'), paperType: 'sample', isOfficial: true },
+  { id: 'sq10-math-2022', classLevel: 10, subject: 'Math', year: 2022, title: 'Class 10 Mathematics Sample Paper 2022-23', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2022-23'), paperType: 'sample', isOfficial: true },
+  { id: 'sq10-sci-2021', classLevel: 10, subject: 'Science', year: 2021, title: 'Class 10 Science Sample Paper 2021-22', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2021-22'), paperType: 'sample', isOfficial: true },
+  { id: 'sq10-sci-2020', classLevel: 10, subject: 'Science', year: 2020, title: 'Class 10 Science Sample Paper 2020-21', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2020-21'), paperType: 'sample', isOfficial: true },
+  { id: 'sq10-sci-2019', classLevel: 10, subject: 'Science', year: 2019, title: 'Class 10 Science Sample Paper 2019-20', duration: '3 Hours', totalMarks: 80, url: CBSE_SQP_10('2019-20'), paperType: 'sample', isOfficial: true },
 ];
 
 // ============================================================
@@ -312,9 +365,9 @@ const compartmentPapers: PaperEntry[] = [
 // ============================================================
 
 const resources: PaperEntry[] = [
-  { id: 'ms-all-2025', classLevel: 'all', subject: 'Marking Scheme', year: 2025, title: 'CBSE Marking Schemes 2025 — All Classes', duration: '—', totalMarks: 0, url: CBSE_MS, paperType: 'board', isOfficial: true },
-  { id: 'ms-all-2024', classLevel: 'all', subject: 'Marking Scheme', year: 2024, title: 'CBSE Marking Schemes 2024 — All Classes', duration: '—', totalMarks: 0, url: CBSE_MS, paperType: 'board', isOfficial: true },
-  { id: 'ms-all-2023', classLevel: 'all', subject: 'Marking Scheme', year: 2023, title: 'CBSE Marking Schemes 2023 — All Classes', duration: '—', totalMarks: 0, url: CBSE_MS, paperType: 'board', isOfficial: true },
+  { id: 'ms-all-2025', classLevel: 'all', subject: 'Marking Scheme', year: 2025, title: 'CBSE Marking Schemes 2025 - All Classes', duration: '-', totalMarks: 0, url: CBSE_MS, paperType: 'board', isOfficial: true },
+  { id: 'ms-all-2024', classLevel: 'all', subject: 'Marking Scheme', year: 2024, title: 'CBSE Marking Schemes 2024 - All Classes', duration: '-', totalMarks: 0, url: CBSE_MS, paperType: 'board', isOfficial: true },
+  { id: 'ms-all-2023', classLevel: 'all', subject: 'Marking Scheme', year: 2023, title: 'CBSE Marking Schemes 2023 - All Classes', duration: '-', totalMarks: 0, url: CBSE_MS, paperType: 'board', isOfficial: true },
 ];
 
 // ============================================================
@@ -339,13 +392,22 @@ export function filterPapers(opts: {
   paperType?: PaperType | 'all';
   year?: number | 'all';
 }): PaperEntry[] {
-  return ALL_PAPERS.filter((p) => {
-    if (opts.classLevel !== undefined && opts.classLevel !== 'all' && p.classLevel !== opts.classLevel) return false;
-    if (opts.subject && opts.subject !== 'All' && p.subject !== opts.subject) return false;
-    if (opts.paperType && opts.paperType !== 'all' && p.paperType !== opts.paperType) return false;
-    if (opts.year && opts.year !== 'all' && p.year !== opts.year) return false;
-    return true;
-  });
+  return ALL_PAPERS
+    .filter((p) => {
+      if (opts.classLevel !== undefined && opts.classLevel !== 'all' && p.classLevel !== opts.classLevel) return false;
+      if (opts.subject && opts.subject !== 'All' && p.subject !== opts.subject) return false;
+      if (opts.paperType && opts.paperType !== 'all' && p.paperType !== opts.paperType) return false;
+      if (opts.year && opts.year !== 'all' && p.year !== opts.year) return false;
+      return true;
+    })
+    .map((paper) => {
+      const resolved = resolvePaperUrl(paper);
+      return {
+        ...paper,
+        url: resolved.url,
+        isFromHF: resolved.isFromHF,
+      };
+    });
 }
 
 /** Stats: total papers by type */
