@@ -46,19 +46,42 @@ function buildFallbackDrill(chapterId: string, questionCount: number, difficulty
 
   const generated: MCQItem[] = fromChapter.length > 0
     ? fromChapter
-    : chapter.topics.slice(0, questionCount).map((topic, index) => ({
-        question: `Which statement is most accurate for "${topic}" in ${chapter.title}?`,
-        options: [
-          'It is usually ignored in board exams.',
-          'It is a high-yield concept requiring definition + application.',
-          'It only appears in practical exams.',
-          'It is not part of NCERT scope.',
-        ],
-        answer: 1,
-        explanation: `${topic} should be revised with concept clarity and board-style examples.`,
-      }));
+    : Array.from({ length: questionCount }, (_, index) => {
+        const topic = chapter.topics[index % Math.max(1, chapter.topics.length)] ?? chapter.title;
+        return {
+          question: `Which statement is most accurate for "${topic}" in ${chapter.title}?`,
+          options: [
+            'It is usually ignored in board exams.',
+            'It is a high-yield concept requiring definition + application.',
+            'It only appears in practical exams.',
+            'It is not part of NCERT scope.',
+          ],
+          answer: 1,
+          explanation: `${topic} should be revised with concept clarity and board-style examples.`,
+        };
+      });
 
-  const questions = normalizeMCQs(generated).slice(0, questionCount);
+  const normalized = normalizeMCQs(generated);
+  const expanded = normalized.length >= questionCount
+    ? normalized
+    : [
+        ...normalized,
+        ...Array.from({ length: questionCount - normalized.length }, (_, idx) => {
+          const topic = chapter.topics[idx % Math.max(1, chapter.topics.length)] ?? chapter.title;
+          return {
+            question: `Board drill check: what is the most important exam angle of "${topic}" in ${chapter.title}?`,
+            options: [
+              'Formula and concept clarity with solved examples',
+              'Skip this topic because it is never asked',
+              'Only practical file work is needed',
+              'Only memorize definitions without application',
+            ],
+            answer: 0,
+            explanation: `For ${topic}, prioritize concept + formula + PYQ application.`,
+          };
+        }),
+      ];
+  const questions = normalizeMCQs(expanded).slice(0, questionCount);
   return {
     chapterId: chapter.id,
     difficulty,
@@ -154,13 +177,23 @@ ${buildVariationInstruction(variation)}`;
 - Output JSON only.`,
         userPrompt: promptWithVariation,
         temperature: 0.18,
-        maxOutputTokens: 2200,
+        maxOutputTokens: Math.min(3600, 900 + parsed.questionCount * 170),
         validate: isChapterDrillResponse,
       });
 
-      const questions = normalizeMCQs(data.questions)
-        .filter((item) => isQuestionAligned(item.question, chapter.title, chapter.topics))
-        .slice(0, parsed.questionCount);
+      const aiQuestions = normalizeMCQs(data.questions).filter((item) =>
+        isQuestionAligned(item.question, chapter.title, chapter.topics)
+      );
+      const usedQuestionText = new Set(aiQuestions.map((item) => item.question.trim().toLowerCase()));
+      const toppedUp = [...aiQuestions];
+      for (const fallbackQuestion of fallback.questions) {
+        if (toppedUp.length >= parsed.questionCount) break;
+        const key = fallbackQuestion.question.trim().toLowerCase();
+        if (usedQuestionText.has(key)) continue;
+        toppedUp.push(fallbackQuestion);
+        usedQuestionText.add(key);
+      }
+      const questions = toppedUp.slice(0, parsed.questionCount);
       if (questions.length === 0) return NextResponse.json(fallback);
 
       const response: ChapterDrillResponse = {
@@ -180,7 +213,8 @@ ${buildVariationInstruction(variation)}`;
 
       return NextResponse.json(response);
     } catch (aiError) {
-      console.error('[chapter-drill] AI fallback triggered', aiError);
+      const reason = aiError instanceof Error ? aiError.message : String(aiError);
+      console.warn(`[chapter-drill] AI fallback triggered: ${reason}`);
       return NextResponse.json(fallback);
     }
   } catch (error) {

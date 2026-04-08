@@ -45,7 +45,7 @@ export default function CbseNotesIndexPage() {
                 </p>
                 <h2 className="font-fraunces text-lg font-bold text-navy-700 mt-1">{chapter.title}</h2>
                 <p className="text-sm text-[#5C5870] mt-1 line-clamp-2">{chapter.description}</p>
-                <p className="text-xs text-indigo-700 font-semibold mt-3">Open notes -></p>
+              <p className="text-xs text-indigo-700 font-semibold mt-3">Open notes {'->'}</p>
               </Link>
             );
           })}

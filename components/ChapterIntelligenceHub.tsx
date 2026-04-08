@@ -327,11 +327,20 @@ export default function ChapterIntelligenceHub({
           <div className="text-xs font-semibold text-emerald-800 mb-1">
             Drill ready: {drillData.questions.length} questions ({drillData.difficulty})
           </div>
-          <div className="space-y-1">
-            {drillData.questions.slice(0, 2).map((question) => (
-              <p key={question.question} className="text-xs text-emerald-700">
-                - {question.question}
-              </p>
+          <div className="max-h-56 overflow-y-auto pr-1 space-y-2">
+            {drillData.questions.map((question, index) => (
+              <div key={`${index}-${question.question.slice(0, 40)}`} className="text-xs text-emerald-700">
+                <p className="font-semibold">
+                  {index + 1}. {question.question}
+                </p>
+                <div className="mt-1 text-[11px] text-emerald-600">
+                  {question.options.map((option, optionIndex) => (
+                    <p key={`${index}-${optionIndex}-${option.slice(0, 24)}`}>
+                      {String.fromCharCode(65 + optionIndex)}. {option}
+                    </p>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>

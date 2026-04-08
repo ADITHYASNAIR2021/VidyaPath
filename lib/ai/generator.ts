@@ -209,6 +209,89 @@ function stripCodeFence(text: string): string {
     .trim();
 }
 
+function normalizeJsonText(text: string): string {
+  return text
+    .replace(/\r/g, '')
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+}
+
+function extractBalancedJsonBlock(text: string): string | null {
+  const firstObject = text.indexOf('{');
+  const firstArray = text.indexOf('[');
+  const startCandidates = [firstObject, firstArray].filter((idx) => idx >= 0);
+  if (startCandidates.length === 0) return null;
+  const start = Math.min(...startCandidates);
+  const opening = text[start];
+  const expectedClosing = opening === '{' ? '}' : ']';
+
+  let inString = false;
+  let escaped = false;
+  const stack: string[] = [expectedClosing];
+
+  for (let idx = start + 1; idx < text.length; idx++) {
+    const char = text[idx];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === '{') {
+      stack.push('}');
+      continue;
+    }
+    if (char === '[') {
+      stack.push(']');
+      continue;
+    }
+    if (char === '}' || char === ']') {
+      const expected = stack[stack.length - 1];
+      if (char !== expected) continue;
+      stack.pop();
+      if (stack.length === 0) {
+        return text.slice(start, idx + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function tryParseJsonCandidates(rawText: string): { parsed: unknown | null; error?: string } {
+  const normalized = normalizeJsonText(stripCodeFence(rawText));
+  const candidates = [normalized];
+  const balanced = extractBalancedJsonBlock(normalized);
+  if (balanced && balanced !== normalized) {
+    candidates.push(balanced);
+  }
+
+  let lastError = 'Unknown JSON parse error';
+  for (const candidate of candidates) {
+    try {
+      return { parsed: JSON.parse(candidate) };
+    } catch (error) {
+      lastError = String(error);
+    }
+  }
+
+  return { parsed: null, error: lastError };
+}
+
 async function runGeneration(options: GenerateTextOptions): Promise<GenerationResult> {
   const cacheKey = buildCacheKey(options);
   const fromCache = RESPONSE_CACHE.get(cacheKey);
@@ -306,20 +389,36 @@ export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Prom
   data: T;
   result: GenerationResult;
 }> {
-  const result = await runGeneration(options);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripCodeFence(result.text));
-  } catch (error) {
-    throw new Error(`Model returned invalid JSON for task ${options.task}: ${String(error)}`);
+  const firstResult = await runGeneration(options);
+  const firstParsed = tryParseJsonCandidates(firstResult.text);
+  if (firstParsed.parsed && options.validate(firstParsed.parsed)) {
+    return { data: firstParsed.parsed, result: firstResult };
   }
 
-  if (!options.validate(parsed)) {
+  const retryOptions: GenerateTextOptions = {
+    ...options,
+    diversityKey: `${options.diversityKey ?? 'default'}:json-retry`,
+    temperature: Math.min(options.temperature ?? 0.2, 0.1),
+    userPrompt: `${options.userPrompt}
+
+CRITICAL:
+- Return only valid JSON.
+- No markdown fences.
+- Ensure all strings are closed and escaped properly.
+- Do not add any explanatory text before or after JSON.`,
+  };
+
+  const retryResult = await runGeneration(retryOptions);
+  const retryParsed = tryParseJsonCandidates(retryResult.text);
+  if (retryParsed.parsed && options.validate(retryParsed.parsed)) {
+    return { data: retryParsed.parsed, result: retryResult };
+  }
+
+  if (firstParsed.parsed && !options.validate(firstParsed.parsed)) {
     throw new Error(`Model returned schema-invalid JSON for task ${options.task}.`);
   }
 
-  return {
-    data: parsed,
-    result,
-  };
+  throw new Error(
+    `Model returned invalid JSON for task ${options.task}: first=${firstParsed.error ?? 'unknown'}; retry=${retryParsed.error ?? 'unknown'}`
+  );
 }

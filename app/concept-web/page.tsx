@@ -94,7 +94,7 @@ export default function ConceptWebPage() {
               <li>Close with a mixed adaptive test across connected chapters.</li>
             </ul>
             <Link href="/dashboard" className="mt-3 inline-flex text-xs font-semibold text-indigo-700 hover:text-indigo-800">
-              Open Dashboard Coach ->
+              Open Dashboard Coach {'->'}
             </Link>
           </div>
         </div>

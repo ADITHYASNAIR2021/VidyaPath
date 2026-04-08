@@ -157,8 +157,8 @@ export default function FormulasPage() {
                 href={`/chapters/${item.chapterId}`}
                 className="mt-3 inline-flex text-xs font-semibold text-indigo-700 hover:text-indigo-800"
               >
-                Open {item.chapterTitle} ->
-              </Link>
+                    Open {item.chapterTitle} {'->'}
+                  </Link>
             </div>
           ))}
         </div>

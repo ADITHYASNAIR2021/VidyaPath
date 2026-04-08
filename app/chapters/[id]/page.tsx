@@ -12,7 +12,6 @@ import {
   FlaskConical,
   Leaf,
   Calculator,
-  Info,
   ClipboardList,
   Target,
   ChevronRight,
@@ -241,6 +240,8 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
               </div>
             )}
 
+            <ChapterNotes chapterId={chapter.id} />
+
             {/* ── PYQ Analysis ──────────────────────────────────── */}
             {(() => {
               const pyq = chapterPyq;
@@ -248,6 +249,11 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
               if (!pyq) return null;
               const recentYears = pyq.yearsAsked.filter(y => y >= 2019).sort((a,b) => b-a);
               const olderYears = pyq.yearsAsked.filter(y => y < 2019).sort((a,b) => b-a);
+              const allYears = [...pyq.yearsAsked].sort((a, b) => b - a);
+              const oldestKnownYear = allYears[allYears.length - 1];
+              const latestKnownYear = allYears[0];
+              const archivedPaperRange = '2009-2025';
+              const archiveYears = Array.from({ length: 2025 - 2009 + 1 }, (_, index) => 2025 - index);
               return (
                 <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
                   <div className="flex items-center justify-between mb-4">
@@ -273,31 +279,48 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
                       <div className="text-xs text-saffron-500 mt-0.5">Avg marks</div>
                     </div>
                     <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-center">
-                      <div className="text-2xl font-bold text-emerald-700">{recentYears.length}</div>
-                      <div className="text-xs text-emerald-500 mt-0.5">Since 2019</div>
+                      <div className="text-2xl font-bold text-emerald-700">
+                        {oldestKnownYear}-{latestKnownYear}
+                      </div>
+                      <div className="text-xs text-emerald-500 mt-0.5">Known range</div>
                     </div>
                   </div>
 
                   {/* Year dots — recent */}
                   <div className="mb-3">
-                    <div className="text-xs font-semibold text-[#4A4A6A] mb-2">Board exam years (recent first)</div>
+                    <div className="text-xs font-semibold text-[#4A4A6A] mb-2">Paper archive timeline (2009-2025)</div>
                     <div className="flex flex-wrap gap-1.5">
-                      {recentYears.map(yr => (
-                        <span key={yr} className="text-xs font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-md">
-                          {yr}
-                        </span>
-                      ))}
-                      {olderYears.map(yr => (
-                        <span key={yr} className="text-xs font-medium bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md">
-                          {yr}
-                        </span>
-                      ))}
+                      {archiveYears.map((yr) => {
+                        const isAskedYear = pyq.yearsAsked.includes(yr);
+                        return (
+                          <span
+                            key={yr}
+                            className={clsx(
+                              'text-xs px-2 py-0.5 rounded-md border',
+                              isAskedYear
+                                ? 'font-bold bg-indigo-600 text-white border-indigo-600'
+                                : 'font-medium bg-gray-50 text-gray-500 border-gray-200'
+                            )}
+                          >
+                            {yr}
+                          </span>
+                        );
+                      })}
                     </div>
                     <div className="mt-1 text-[11px] text-[#8A8AAA]">
-                      Showing all known PYQ years for this chapter.
+                      Filled years mean this chapter is tagged as asked in PYQ analysis.
+                    </div>
+                    <div className="mt-1 text-[11px] text-[#8A8AAA]">
+                      Showing all known PYQ years for this chapter:
                       {olderYears.length === 0
-                        ? ' No confirmed pre-2019 records in current dataset.'
-                        : ` Includes ${olderYears.length} pre-2019 year(s).`}
+                        ? ' no confirmed pre-2019 records in current chapter map.'
+                        : ` includes ${olderYears.length} pre-2019 year(s).`}
+                    </div>
+                    <div className="mt-1 text-[11px] text-[#8A8AAA]">
+                      Full paper archive on VidyaPath spans {archivedPaperRange}. 2026+ papers are not released yet.
+                    </div>
+                    <div className="mt-1 text-[11px] text-[#8A8AAA]">
+                      Recent asked years: {recentYears.length > 0 ? recentYears.join(', ') : 'none in current map'}.
                     </div>
                   </div>
 
@@ -417,38 +440,6 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
               subject={chapter.subject}
             />
 
-            {/* CBSE Board Pattern */}
-            <div className="bg-saffron-50 border border-saffron-100 rounded-2xl p-5">
-              <h2 className="font-fraunces text-base font-bold text-navy-700 mb-3 flex items-center gap-2">
-                <Info className="w-5 h-5 text-saffron-500" />
-                CBSE Board Exam Pattern
-              </h2>
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center justify-between py-1.5 border-b border-saffron-100">
-                  <span className="text-[#4A4A6A]">This chapter&apos;s weightage</span>
-                  <span className="font-bold text-saffron-600">{chapter.marks} marks</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  {[
-                    { section: 'Section A', type: 'MCQ & Assertion-Reason (1M)', marks: '20 marks' },
-                    { section: 'Section B', type: 'Very Short Answer (2M)', marks: '10 marks' },
-                    { section: 'Section C', type: 'Short Answer (3M)', marks: '18 marks' },
-                    { section: 'Section D', type: 'Case Study Based (4M)', marks: '12 marks' },
-                    { section: 'Section E', type: 'Long Answer (5M)', marks: '20 marks' },
-                  ].map(({ section, type, marks }) => (
-                    <div key={section} className="bg-white/70 rounded-xl p-3 border border-saffron-100">
-                      <div className="font-semibold text-navy-700 text-xs">{section}</div>
-                      <div className="text-[#4A4A6A] text-xs mt-0.5">{type}</div>
-                      <div className="text-saffron-600 font-bold text-xs mt-1">{marks}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-1 pt-2 border-t border-saffron-100 text-xs text-[#8A8AAA]">
-                  Total: 80 marks (theory) + 20 marks (practical)
-                </div>
-              </div>
-            </div>
-
             {/* Prev / Next Navigation */}
             <div className="grid grid-cols-2 gap-3">
               {prev ? (
@@ -529,8 +520,6 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
                   VidyaAI is trained on NCERT curriculum only
                 </p>
               </div>
-
-              <ChapterNotes chapterId={chapter.id} />
             </div>
           </div>
         </div>
