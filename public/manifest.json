@@ -1,0 +1,16 @@
+{
+  "name": "VidyaPath Learning Platform",
+  "short_name": "VidyaPath",
+  "description": "Free NCERT resources, AI tutoring, and study tools for Class 10, 11, and 12.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FDFAF6",
+  "theme_color": "#8B5CF6",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

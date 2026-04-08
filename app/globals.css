@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-saffron: #E8511A;
+  --color-saffron-light: #FFF5EE;
+  --color-navy: #1A2744;
+  --color-navy-mid: #2D3F6B;
+  --color-background: #FDFAF6;
+  --color-border: #E8E4DC;
+  --color-text: #1C1C2E;
+  --color-text-secondary: #4A4A6A;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings use Fraunces */
+h1, h2, h3 {
+  font-family: var(--font-fraunces), Georgia, serif;
+}
+
+/* Smooth page transitions */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s ease-out both;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out both;
+}
+
+/* Staggered children */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.10s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.20s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.30s; }
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #E8511A;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #D4410F;
+}
+
+/* Chat scroll area */
+.chat-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: #E8E4DC;
+  border-radius: 2px;
+}
+
+/* Prose styling for AI responses */
+.ai-response p { margin-bottom: 0.5rem; }
+.ai-response ul { margin: 0.5rem 0; padding-left: 1.25rem; }
+.ai-response ol { margin: 0.5rem 0; padding-left: 1.25rem; }
+.ai-response li { margin-bottom: 0.25rem; }
+.ai-response strong { font-weight: 600; color: #1A2744; }
+.ai-response code {
+  font-family: var(--font-jetbrains-mono), monospace;
+  background: #F3F4F6;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+}

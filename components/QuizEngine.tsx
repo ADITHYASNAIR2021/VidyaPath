@@ -1,0 +1,241 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { CheckCircle2, XCircle, ArrowRight, Award, Trophy, RotateCcw } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import clsx from 'clsx';
+
+interface Quiz {
+  question: string;
+  options: string[];
+  correctAnswerIndex: number;
+  explanation?: string;
+}
+
+export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject, chapterTitle }: { chapterId: string; quizzes: Quiz[]; subject?: string; chapterTitle?: string; }) {
+  const [quizzes, setQuizzes] = useState<Quiz[]>(initialQuizzes);
+  const [currentQ, setCurrentQ] = useState(0);
+  const [selectedOption, setSelectedOption] = useState<number | null>(null);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [score, setScore] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [bestScore, setBestScore] = useState<number | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Load previous best score
+  useEffect(() => {
+    const saved = localStorage.getItem(`quiz-score-[${chapterId}]`);
+    if (saved) setBestScore(parseInt(saved, 10));
+  }, [chapterId]);
+
+  if (!quizzes || quizzes.length === 0) return null;
+
+  const handleGenerateValues = async () => {
+    setIsGenerating(true);
+    try {
+      const res = await fetch('/api/generate-quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapterId, subject, chapterTitle })
+      });
+      const data = await res.json();
+      if (data.success && data.data && data.data.length > 0) {
+        // Map API response to Quiz structure
+        const newQuizzes = data.data.map((q: any) => ({
+          question: q.question,
+          options: q.options,
+          correctAnswerIndex: q.answer,
+          explanation: q.explanation
+        }));
+        setQuizzes(newQuizzes);
+        resetQuiz();
+      } else {
+        alert("Failed to generate: " + (data.error || "Unknown error"));
+      }
+    } catch (e) {
+      alert("Error contacting AI endpoint.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSelect = (idx: number) => {
+    if (showAnswer) return;
+    setSelectedOption(idx);
+    setShowAnswer(true);
+
+    const isCorrect = idx === quizzes[currentQ].correctAnswerIndex;
+    if (isCorrect) setScore(s => s + 1);
+  };
+
+  const handleNext = () => {
+    if (currentQ < quizzes.length - 1) {
+      setCurrentQ(c => c + 1);
+      setSelectedOption(null);
+      setShowAnswer(false);
+    } else {
+      setFinished(true);
+      const newScore = Math.round(((score + (selectedOption === quizzes[currentQ].correctAnswerIndex ? 1 : 0)) / quizzes.length) * 100);
+      if (!bestScore || newScore > bestScore) {
+        localStorage.setItem(`quiz-score-[${chapterId}]`, newScore.toString());
+        setBestScore(newScore);
+      }
+    }
+  };
+
+  const resetQuiz = () => {
+    setCurrentQ(0);
+    setSelectedOption(null);
+    setShowAnswer(false);
+    setScore(0);
+    setFinished(false);
+  };
+
+  if (finished) {
+    const finalPercentage = Math.round((score / quizzes.length) * 100);
+    return (
+      <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-8 text-center mb-5 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gray-100">
+          <div className="h-full bg-saffron-500" style={{ width: '100%' }} />
+        </div>
+        <div className="w-16 h-16 bg-saffron-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          {finalPercentage >= 80 ? (
+            <Trophy className="w-8 h-8 text-saffron-500" />
+          ) : (
+            <Award className="w-8 h-8 text-saffron-500" />
+          )}
+        </div>
+        <h2 className="font-fraunces text-2xl font-bold text-navy-700 mb-2">Quiz Completed!</h2>
+        <div className="text-4xl font-bold text-saffron-500 mb-2">{finalPercentage}%</div>
+        <p className="text-sm text-[#8A8AAA] mb-6">You got {score} out of {quizzes.length} correct.</p>
+        
+        {bestScore !== null && (
+          <div className="text-xs font-semibold text-emerald-600 bg-emerald-50 max-w-max mx-auto px-3 py-1.5 rounded-full mb-6 border border-emerald-200">
+            Highest Score: {Math.max(finalPercentage, bestScore)}%
+          </div>
+        )}
+
+        <div className="flex items-center justify-center gap-3">
+          <button 
+            onClick={resetQuiz}
+            className="inline-flex items-center gap-2 bg-navy-700 hover:bg-navy-800 text-white px-6 py-2.5 rounded-xl font-semibold transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" /> Retake Quiz
+          </button>
+          <button 
+            onClick={handleGenerateValues}
+            disabled={isGenerating}
+            className="inline-flex items-center gap-2 bg-saffron-50 border border-saffron-200 text-saffron-700 hover:bg-saffron-100 px-4 py-2.5 rounded-xl font-semibold transition-colors disabled:opacity-50"
+          >
+            {isGenerating ? "Generating..." : "Generate New Test"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const q = quizzes[currentQ];
+
+  return (
+    <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-6 mb-5 relative overflow-hidden">
+      {/* Progress Bar */}
+      <div className="absolute top-0 left-0 w-full h-1 bg-gray-100">
+        <div 
+          className="h-full bg-saffron-500 transition-all duration-300" 
+          style={{ width: `${(currentQ / quizzes.length) * 100}%` }} 
+        />
+      </div>
+
+      <div className="flex items-center justify-between mb-6 pt-2">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-saffron-600 bg-saffron-50 px-3 py-1.5 rounded-lg border border-saffron-100">
+            <Award className="w-4 h-4" />
+            Quick Quiz
+          </div>
+          <button 
+            onClick={handleGenerateValues}
+            disabled={isGenerating}
+            className="flex items-center gap-2 text-xs font-semibold text-navy-600 bg-navy-50 hover:bg-navy-100 px-3 py-1.5 rounded-lg border border-navy-100 transition-colors disabled:opacity-50"
+          >
+            {isGenerating ? "AI Thinking..." : "✨ AI Generate"}
+          </button>
+        </div>
+        <div className="text-xs font-bold text-[#8A8AAA] tracking-widest uppercase">
+          Question {currentQ + 1} of {quizzes.length}
+        </div>
+      </div>
+
+      <h3 className="text-lg font-semibold text-navy-700 mb-6">{q.question}</h3>
+
+      <div className="space-y-3">
+        {q.options.map((opt, idx) => {
+          const isSelected = selectedOption === idx;
+          const isCorrectIndex = q.correctAnswerIndex === idx;
+          
+          let stateClass = 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 bg-white text-navy-700';
+          if (showAnswer) {
+            if (isCorrectIndex) {
+              stateClass = 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-500 z-10';
+            } else if (isSelected) {
+              stateClass = 'border-red-300 bg-red-50 text-red-800';
+            } else {
+              stateClass = 'border-gray-100 bg-gray-50 text-gray-400 opacity-60';
+            }
+          }
+
+          return (
+            <button
+              key={idx}
+              onClick={() => handleSelect(idx)}
+              disabled={showAnswer}
+              className={clsx(
+                'w-full text-left p-4 rounded-xl border transition-all duration-200 flex items-start gap-3 relative',
+                stateClass
+              )}
+            >
+              <div className={clsx(
+                'w-5 h-5 rounded-full border shrink-0 mt-0.5 flex items-center justify-center',
+                showAnswer && isCorrectIndex ? 'border-emerald-500 bg-emerald-500 text-white' : 
+                showAnswer && isSelected && !isCorrectIndex ? 'border-red-500 bg-red-500 text-white' :
+                'border-gray-300'
+              )}>
+                {showAnswer && isCorrectIndex && <CheckCircle2 className="w-3.5 h-3.5" />}
+                {showAnswer && isSelected && !isCorrectIndex && <XCircle className="w-3.5 h-3.5" />}
+              </div>
+              <span className="font-medium">{opt}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <AnimatePresence>
+        {showAnswer && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, marginTop: 0 }}
+            animate={{ opacity: 1, height: 'auto', marginTop: 24 }}
+            className="overflow-hidden"
+          >
+            <div className={clsx(
+              "p-4 rounded-xl border text-sm",
+              selectedOption === q.correctAnswerIndex ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-red-50 border-red-200 text-red-800"
+            )}>
+              <div className="font-bold mb-1">
+                {selectedOption === q.correctAnswerIndex ? 'Correct!' : 'Incorrect.'}
+              </div>
+              {q.explanation && <div className="opacity-90">{q.explanation}</div>}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button 
+                onClick={handleNext}
+                className="flex items-center gap-2 bg-saffron-500 hover:bg-saffron-600 text-white px-5 py-2.5 rounded-xl font-semibold transition-colors"
+              >
+                {currentQ < quizzes.length - 1 ? 'Next Question' : 'View Results'} <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(grep -i \"previous\\\\|next\\\\|navigation\\\\|breadcrumb\" /d/VidyaPath/app/chapters/[id]/page.tsx)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")",
+      "Bash(git -C \"D:\\\\VidyaPath\" log --oneline -20)",
+      "Bash(grep -E '^[0-9]+$')",
+      "Read(//d D:/**)",
+      "Bash(dir dataset\\\\cbse_papers /b)",
+      "Read(//c/Users/adith/**)",
+      "Read(//d//**)"
+    ]
+  }
+}
