@@ -12,6 +12,10 @@ import clsx from 'clsx';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { useProgressStore, useBookmarkStore } from '@/lib/store';
 import { getPaperStats } from '@/lib/papers';
+import { getPYQData } from '@/lib/pyq';
+import { buildLearningProfile, rankWeakChapters, type LearningProfile } from '@/lib/learning-profile';
+import RevisionPlanCard from '@/components/RevisionPlanCard';
+import DashboardChapterCoach from '@/components/DashboardChapterCoach';
 
 // ── SVG Progress Ring ─────────────────────────────────────────
 function ProgressRing({
@@ -112,6 +116,7 @@ export default function DashboardPage() {
   const [quizzesTaken, setQuizzesTaken] = useState(0);
   const [avgQuizScore, setAvgQuizScore] = useState(0);
   const [cardsDue, setCardsDue] = useState(0);
+  const [weakProfiles, setWeakProfiles] = useState<LearningProfile[]>([]);
   const { studiedChapterIds } = useProgressStore();
   const { bookmarkedChapterIds } = useBookmarkStore();
   const eligibleChapters = useMemo(() => ALL_CHAPTERS.filter((c) => c.classLevel !== 11), []);
@@ -145,6 +150,20 @@ export default function DashboardPage() {
   const totalChapters = eligibleChapters.length;
   const studiedCount = studiedChapterIds.filter((id) => chapterById.has(id)).length;
   const overallPct = totalChapters > 0 ? Math.round((studiedCount / totalChapters) * 100) : 0;
+  const plannerClassLevel = useMemo<10 | 12>(() => {
+    const class10Weak = weakProfiles.filter((profile) => chapterById.get(profile.chapterId)?.classLevel === 10).length;
+    const class12Weak = weakProfiles.filter((profile) => chapterById.get(profile.chapterId)?.classLevel === 12).length;
+    return class10Weak > class12Weak ? 10 : 12;
+  }, [chapterById, weakProfiles]);
+  const plannerWeakChapterIds = useMemo(
+    () =>
+      weakProfiles
+        .filter((profile) => chapterById.get(profile.chapterId)?.classLevel === plannerClassLevel)
+        .map((profile) => profile.chapterId),
+    [chapterById, plannerClassLevel, weakProfiles]
+  );
+  const topWeakProfile = weakProfiles[0] ?? null;
+  const topWeakChapter = topWeakProfile ? chapterById.get(topWeakProfile.chapterId) : undefined;
 
   // Recent studied (last 5)
   const recentStudied = useMemo(() => {
@@ -168,23 +187,50 @@ export default function DashboardPage() {
     setMounted(true);
     let quizSum = 0, quizCount = 0, due = 0;
     const now = new Date();
+    const chapterProfiles: LearningProfile[] = [];
     for (const ch of eligibleChapters) {
       const score = localStorage.getItem(`quiz-score-[${ch.id}]`);
       if (score) { quizCount++; quizSum += parseInt(score, 10); }
+      const parsedScore = Number(score);
+      const quizScore = Number.isFinite(parsedScore) && parsedScore > 0 ? parsedScore : null;
+      let chapterDue = 0;
       if (ch.flashcards) {
         for (let idx = 0; idx < ch.flashcards.length; idx++) {
           const s = localStorage.getItem(`fsrs-[${ch.id}]-${idx}`);
           if (s) {
-            try { if (new Date(JSON.parse(s).due) <= now) due++; }
-            catch { due++; }
-          } else { due++; }
+            try {
+              if (new Date(JSON.parse(s).due) <= now) {
+                due++;
+                chapterDue++;
+              }
+            }
+            catch {
+              due++;
+              chapterDue++;
+            }
+          } else {
+            due++;
+            chapterDue++;
+          }
         }
       }
+
+      chapterProfiles.push(
+        buildLearningProfile({
+          chapterId: ch.id,
+          quizScore,
+          flashcardsDue: chapterDue,
+          studied: studiedChapterIds.includes(ch.id),
+          bookmarked: bookmarkedChapterIds.includes(ch.id),
+          pyqAvgMarks: getPYQData(ch.id)?.avgMarks ?? 0,
+        })
+      );
     }
     setQuizzesTaken(quizCount);
     setAvgQuizScore(quizCount > 0 ? Math.round(quizSum / quizCount) : 0);
     setCardsDue(due);
-  }, [eligibleChapters]);
+    setWeakProfiles(rankWeakChapters(chapterProfiles).filter((profile) => profile.weakTags.length > 0).slice(0, 3));
+  }, [bookmarkedChapterIds, eligibleChapters, studiedChapterIds]);
 
   if (!mounted) {
     return (
@@ -350,6 +396,52 @@ export default function DashboardPage() {
                   ))}
                 </ul>
               </div>
+            )}
+
+            {weakProfiles.length > 0 && (
+              <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5">
+                <h2 className="font-fraunces text-base font-bold text-amber-800 mb-3 flex items-center gap-2">
+                  <Target className="w-4 h-4 text-amber-600" />
+                  Adaptive Focus Queue
+                </h2>
+                <div className="space-y-2">
+                  {weakProfiles.map((profile) => (
+                    <Link
+                      key={profile.chapterId}
+                      href={`/chapters/${profile.chapterId}`}
+                      className="flex items-start gap-2.5 p-2.5 rounded-xl bg-white border border-amber-100 hover:border-amber-300 transition-colors"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center text-[11px] font-bold shrink-0">
+                        {profile.weakTags.length}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-amber-900 truncate">
+                          {chapterById.get(profile.chapterId)?.title ?? profile.chapterId}
+                        </div>
+                        <div className="text-[11px] text-amber-700 mt-0.5 truncate">
+                          {profile.recommendedActions[0]}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <RevisionPlanCard
+              classLevel={plannerClassLevel}
+              weakChapterIds={plannerWeakChapterIds}
+            />
+
+            {topWeakProfile && topWeakChapter && (
+              <DashboardChapterCoach
+                chapterId={topWeakProfile.chapterId}
+                chapterTitle={topWeakChapter.title}
+                quizScore={topWeakProfile.quizScore}
+                flashcardsDue={topWeakProfile.flashcardsDue}
+                studied={topWeakProfile.studied}
+                bookmarked={topWeakProfile.bookmarked}
+              />
             )}
 
             {/* Papers quick link */}

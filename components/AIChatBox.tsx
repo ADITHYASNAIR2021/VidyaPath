@@ -400,7 +400,7 @@ export default function AIChatBox({
           </button>
         </div>
         <p className="text-xs text-[#8A8AAA] mt-1.5 text-center">
-          CBSE Science &amp; Math only - Powered by Groq LLaMA - Free
+          CBSE Science &amp; Math only - Powered by Gemini (with backup) - Free
         </p>
       </div>
     </div>

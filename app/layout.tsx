@@ -4,6 +4,7 @@ import './globals.css';
 import Navbar from '@/components/Navbar';
 import MobileBottomNav from '@/components/MobileBottomNav';
 import FloatingAIButton from '@/components/FloatingAIButton';
+import PrivacyAnalytics from '@/components/PrivacyAnalytics';
 
 const fraunces = Fraunces({
   subsets: ['latin'],
@@ -104,6 +105,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="min-h-screen bg-[#FDFAF6] pb-16 md:pb-0">
+        <PrivacyAnalytics />
         <Navbar />
         <main>{children}</main>
         <MobileBottomNav />

@@ -1,0 +1,197 @@
+import { NextResponse } from 'next/server';
+import { ALL_CHAPTERS } from '@/lib/data';
+import { getPYQData } from '@/lib/pyq';
+import { getContextPack } from '@/lib/ai/context-retriever';
+import { generateTaskJson } from '@/lib/ai/generator';
+import {
+  cleanTextList,
+  isAdaptiveTestResponse,
+  normalizeMCQs,
+  stripSourceTags,
+  type AdaptiveTestResponse,
+  type MCQItem,
+} from '@/lib/ai/validators';
+import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
+
+interface AdaptiveTestRequest {
+  classLevel: 10 | 12;
+  subject: string;
+  chapterIds: string[];
+  difficultyMix?: string;
+  questionCount?: number;
+  mode?: string;
+}
+
+function parseRequest(body: unknown): AdaptiveTestRequest | null {
+  if (!body || typeof body !== 'object') return null;
+  const record = body as Record<string, unknown>;
+  const classLevel = Number(record.classLevel) as 10 | 12;
+  const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
+  const chapterIds = Array.isArray(record.chapterIds)
+    ? record.chapterIds.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean)
+    : [];
+  if ((classLevel !== 10 && classLevel !== 12) || !subject || chapterIds.length === 0) return null;
+
+  return {
+    classLevel,
+    subject,
+    chapterIds,
+    difficultyMix: typeof record.difficultyMix === 'string' ? record.difficultyMix.trim() : '40% easy, 40% medium, 20% hard',
+    questionCount: Number.isFinite(Number(record.questionCount)) ? Number(record.questionCount) : 10,
+    mode: typeof record.mode === 'string' ? record.mode.trim() : 'board-practice',
+  };
+}
+
+function buildFallbackQuestions(req: AdaptiveTestRequest): AdaptiveTestResponse {
+  const chapters = ALL_CHAPTERS.filter((chapter) => req.chapterIds.includes(chapter.id));
+  const pool: MCQItem[] = chapters
+    .flatMap((chapter) =>
+      (chapter.quizzes ?? []).map((quiz) => ({
+        question: quiz.question,
+        options: quiz.options,
+        answer: quiz.correctAnswerIndex,
+        explanation: quiz.explanation ?? 'Review this chapter concept again.',
+      }))
+    )
+    .slice(0, Math.max(3, Math.min(20, req.questionCount ?? 10)));
+
+  const questions = pool.length > 0
+    ? normalizeMCQs(pool)
+    : [
+        {
+          question: `Which area should be prioritized first for ${req.subject} improvement?`,
+          options: [
+            'Low-frequency trivia topics',
+            'High-frequency PYQ topics',
+            'Only long derivations',
+            'Random sample questions',
+          ],
+          answer: 1,
+          explanation: 'High-frequency PYQ topics provide the strongest score impact in board exams.',
+        },
+      ];
+
+  const answerKey = questions.map((question) => question.answer);
+  const topicCoverage = chapters.map((chapter) => chapter.title).slice(0, 8);
+  const estimatedPct = Math.min(92, 55 + topicCoverage.length * 4);
+
+  return {
+    questions,
+    answerKey,
+    topicCoverage,
+    predictedScoreBand: `${Math.max(45, estimatedPct - 12)}-${estimatedPct}%`,
+  };
+}
+
+function tokenize(text: string): string[] {
+  return (text.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter(
+    (token) => !['which', 'what', 'following', 'correct', 'statement', 'about', 'this', 'that'].includes(token)
+  );
+}
+
+function isAlignedToChapter(question: string, allowText: string): boolean {
+  const allow = new Set(tokenize(allowText));
+  const qTokens = tokenize(question);
+  return qTokens.some((token) => allow.has(token));
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json().catch(() => null);
+    const parsed = parseRequest(body);
+    if (!parsed) {
+      return NextResponse.json(
+        { error: 'Invalid request. Required: { classLevel, subject, chapterIds[] }' },
+        { status: 400 }
+      );
+    }
+
+    const fallback = buildFallbackQuestions(parsed);
+    const chapter = ALL_CHAPTERS.find((item) => item.id === parsed.chapterIds[0]);
+    const pyqSummary = parsed.chapterIds
+      .map((id) => getPYQData(id))
+      .filter((item): item is NonNullable<ReturnType<typeof getPYQData>> => !!item)
+      .slice(0, 4)
+      .map((item) => `avg ${item.avgMarks} | topics: ${item.importantTopics.slice(0, 3).join(', ')}`)
+      .join('\n');
+
+    const contextPack = await getContextPack({
+      task: 'adaptive-test',
+      classLevel: parsed.classLevel,
+      subject: parsed.subject,
+      chapterId: chapter?.id,
+      chapterTopics: chapter?.topics ?? [],
+      query: `adaptive test ${parsed.subject} ${parsed.chapterIds.join(' ')}`,
+      topK: 5,
+    });
+
+    const userPrompt = `Create a weak-area adaptive CBSE test with:
+${JSON.stringify(parsed, null, 2)}
+
+PYQ signal:
+${pyqSummary || 'No PYQ data available.'}
+
+Return ONLY JSON:
+{
+  "questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}],
+  "answerKey":[0,2,1],
+  "topicCoverage":["..."],
+  "predictedScoreBand":"65-78%"
+}`;
+    const variation = buildVariationProfile({
+      task: 'adaptive-test',
+      contextHash: contextPack.contextHash,
+      chapterId: chapter?.id,
+      difficulty: parsed.difficultyMix,
+    });
+    const userPromptWithVariation = `${userPrompt}
+${buildVariationInstruction(variation)}`;
+
+    try {
+      const { data } = await generateTaskJson<AdaptiveTestResponse>({
+        task: 'adaptive-test',
+        contextHash: contextPack.contextHash,
+        contextSnippets: contextPack.snippets,
+        chapterId: chapter?.id,
+        difficulty: parsed.difficultyMix,
+        diversityKey: variation.diversityKey,
+        systemPrompt: `You are VidyaAI Adaptive Test Engine.
+- Generate exam-style MCQs with balanced difficulty.
+- Align questions with weak topics and PYQ-heavy areas.
+- Ensure answerKey matches generated questions.
+- Avoid repetitive phrasing across runs.
+- Output JSON only.`,
+        userPrompt: userPromptWithVariation,
+        temperature: 0.2,
+        maxOutputTokens: 2000,
+        validate: isAdaptiveTestResponse,
+      });
+
+      const selectedChapters = ALL_CHAPTERS.filter((item) => parsed.chapterIds.includes(item.id));
+      const allowText = selectedChapters.map((item) => `${item.title} ${item.topics.join(' ')}`).join(' ');
+      const normalized = normalizeMCQs(data.questions)
+        .filter((item) => (allowText ? isAlignedToChapter(item.question, allowText) : true))
+        .slice(0, Math.max(3, parsed.questionCount ?? 10));
+      const finalQuestions = normalized.length > 0 ? normalized : fallback.questions;
+      const answerKey = finalQuestions.map((question) => question.answer);
+      const response: AdaptiveTestResponse = {
+        questions: finalQuestions,
+        answerKey,
+        topicCoverage: cleanTextList(
+          Array.isArray(data.topicCoverage) ? data.topicCoverage : fallback.topicCoverage,
+          12
+        ),
+        predictedScoreBand: stripSourceTags(
+          typeof data.predictedScoreBand === 'string' ? data.predictedScoreBand : fallback.predictedScoreBand
+        ),
+      };
+      return NextResponse.json(response);
+    } catch (aiError) {
+      console.error('[adaptive-test] AI fallback triggered', aiError);
+      return NextResponse.json(fallback);
+    }
+  } catch (error) {
+    console.error('[adaptive-test] error', error);
+    return NextResponse.json({ error: 'Failed to generate adaptive test.' }, { status: 500 });
+  }
+}

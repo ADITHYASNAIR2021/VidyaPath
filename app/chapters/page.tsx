@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { Search, Atom, FlaskConical, Leaf, Calculator, SlidersHorizontal, CheckCircle2 } from 'lucide-react';
@@ -52,6 +52,7 @@ function ChaptersContent() {
     SUBJECTS.find((s) => s.value === initialSubject) ? initialSubject : 'All'
   );
   const [searchQuery, setSearchQuery] = useState('');
+  const trackedNoResultQueries = useRef(new Set<string>());
   const { studiedChapterIds } = useProgressStore();
 
   const chapterSearchDocs = useMemo(() => {
@@ -106,6 +107,22 @@ function ChaptersContent() {
     const filteredBySearch = base.filter((chapter) => searchOrder.has(chapter.id));
     return filteredBySearch.sort((a, b) => (searchOrder.get(a.id) ?? 9999) - (searchOrder.get(b.id) ?? 9999));
   }, [selectedClass, selectedSubject, searchOrder, searchQuery]);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query || filtered.length > 0) return;
+    const key = `${selectedClass}|${selectedSubject}|${query.toLowerCase()}`;
+    if (trackedNoResultQueries.current.has(key)) return;
+    trackedNoResultQueries.current.add(key);
+    fetch('/api/analytics/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventName: 'search_no_result', query }),
+      keepalive: true,
+    }).catch(() => {
+      // best-effort only
+    });
+  }, [filtered.length, searchQuery, selectedClass, selectedSubject]);
 
   const getPyqSearchInsight = (chapterId: string) => {
     const pyq = getPYQData(chapterId);

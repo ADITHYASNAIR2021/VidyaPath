@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "build:context": "python scripts/build_context_index.py --max-files 0",
+    "build:context:node": "node scripts/build_context_index.mjs",
+    "build:context:python": "python scripts/build_context_index.py --max-files 0",
+    "build:context:python:fast": "python scripts/build_context_index.py --max-files 220",
+    "verify:context": "node scripts/verify_context_index.mjs"
   },
   "dependencies": {
     "@serwist/next": "^9.5.7",

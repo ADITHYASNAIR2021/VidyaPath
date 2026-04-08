@@ -14,6 +14,8 @@ import {
   FlaskConical,
   Leaf,
   Calculator,
+  Camera,
+  Network,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { getChapterStats, PAPERS } from '@/lib/data';
@@ -207,6 +209,31 @@ export default function HomePage() {
               </Link>
             ))}
           </div>
+
+          <div className="mt-6 grid sm:grid-cols-2 gap-4">
+            <Link
+              href="/formulas"
+              className="group flex items-center justify-between bg-white border border-[#E8E4DC] rounded-2xl p-4 hover:shadow-md transition-shadow"
+            >
+              <div>
+                <p className="text-xs font-semibold text-purple-600">New</p>
+                <p className="font-semibold text-navy-700">Formula Database</p>
+                <p className="text-xs text-[#6E6984] mt-0.5">KaTeX formulas + SI units + JEE flag</p>
+              </div>
+              <Calculator className="w-5 h-5 text-purple-500" />
+            </Link>
+            <Link
+              href="/concept-web"
+              className="group flex items-center justify-between bg-white border border-[#E8E4DC] rounded-2xl p-4 hover:shadow-md transition-shadow"
+            >
+              <div>
+                <p className="text-xs font-semibold text-emerald-600">New</p>
+                <p className="font-semibold text-navy-700">Concept Web</p>
+                <p className="text-xs text-[#6E6984] mt-0.5">Visual graph of chapter/topic connections</p>
+              </div>
+              <Network className="w-5 h-5 text-emerald-500" />
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -248,6 +275,15 @@ export default function HomePage() {
                 href: '/chapters',
                 cta: 'Try AI Tutor',
                 color: 'text-saffron-600 bg-saffron-50',
+              },
+              {
+                icon: Camera,
+                title: 'Image Question Solver',
+                description:
+                  'Upload a textbook question photo and get a step-by-step board-style solution with formulas.',
+                href: '/chapters',
+                cta: 'Try Image Solver',
+                color: 'text-indigo-600 bg-indigo-50',
               },
               {
                 icon: Compass,

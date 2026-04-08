@@ -10,6 +10,30 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 // Prepare search data
 const searchData = [
+  {
+    type: 'page',
+    id: 'formulas',
+    title: 'Formula Database',
+    subtitle: 'Search all formulas with SI units and chapter mapping',
+    topics: 'formula katex equations',
+    url: '/formulas',
+  },
+  {
+    type: 'page',
+    id: 'concept-web',
+    title: 'Concept Web',
+    subtitle: 'Visual knowledge graph across chapters',
+    topics: 'concept graph interconnections',
+    url: '/concept-web',
+  },
+  {
+    type: 'page',
+    id: 'cbse-notes',
+    title: 'CBSE Notes',
+    subtitle: 'SEO notes pages by class and chapter',
+    topics: 'notes chapter wise',
+    url: '/cbse-notes',
+  },
   ...ALL_CHAPTERS.map(c => ({
     type: 'chapter',
     id: c.id,
@@ -127,9 +151,9 @@ export default function CommandPalette() {
                         <div className="flex items-center gap-3">
                           <div className={clsx(
                             'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
-                            item.type === 'subject' ? 'bg-indigo-50 text-indigo-500' : 'bg-saffron-50 text-saffron-500'
+                            item.type === 'page' ? 'bg-indigo-50 text-indigo-500' : 'bg-saffron-50 text-saffron-500'
                           )}>
-                            {item.type === 'subject' ? <Book className="w-5 h-5" /> : <Book className="w-5 h-5" />}
+                            <Book className="w-5 h-5" />
                           </div>
                           <div>
                             <div className="font-semibold text-navy-700">{item.title}</div>

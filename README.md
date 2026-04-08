@@ -87,6 +87,7 @@ Current scope:
 - Styling/UI: Tailwind CSS, `clsx`, Lucide icons, Framer Motion
 - State: Zustand (`persist` middleware)
 - Search: Fuse.js
+- Retrieval ranking: chapter/topic keyword overlap + lightweight local vector semantic scoring (hashed embeddings + cosine)
 - Spaced repetition: `ts-fsrs`
 - Math rendering: KaTeX (`katex`, `react-katex`)
 - Diagrams: Mermaid
@@ -102,8 +103,33 @@ Install and run:
 
 ```bash
 npm install
+npm run build:context
+npm run verify:context
 npm run dev
 ```
+
+Optional higher-fidelity context build from PDF text (requires Python + `pypdf`):
+
+```bash
+npm run build:context:python
+npm run verify:context
+```
+
+Fast subset mode (optional):
+
+```bash
+npm run build:context:python:fast
+npm run verify:context
+```
+
+What you will see during Python context build:
+- Live terminal progress with ETA for:
+- PDF scanning
+- chunk extraction
+- Final summary with dropped chunk counts:
+- `dropped_unmapped`
+- `dropped_non_english`
+- `dropped_instruction`
 
 Build and production run:
 
@@ -118,12 +144,25 @@ Optional lint:
 npm run lint
 ```
 
+Context troubleshooting quick checks:
+- If `npm run build:context` prints `chunks=0`, rerun after pulling latest code (older parser could fail on multiline chapter entries).
+- Run `npm run verify:context` and confirm:
+- `chunks > 0`
+- `mapped > 0` (chapter-linked chunks exist)
+- `unmapped = 0` (no null/empty chapter IDs)
+- `pre2019 > 0` (older-year coverage present when available)
+- `build:context:python` is optional and slower; it requires a working Python install plus `pypdf`.
+- `build:context:python` now indexes all matched PDFs by default (`--max-files 0`).
+- If you previously saw `Multiple definitions in dictionary ...` from `pypdf`, latest script suppresses this non-fatal parser noise.
+
 ## Environment Variables
 Create `.env.local` in project root:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
+# Optional (only if Python is installed in a non-standard path):
+# PYTHON_BIN=C:\Path\To\python.exe
 ```
 
 Notes:
@@ -150,7 +189,7 @@ Hugging Face paper URL pattern used in app:
 - `https://huggingface.co/datasets/<repo>/resolve/main/<dataset-relative-path>`
 
 ## API Routes
-Current API routes are **stable v1** and remain unchanged:
+Stable v1 routes (unchanged interface):
 
 - `POST /api/ai-tutor` (stable v1)
 - Input: chat messages plus optional `chapterContext`.
@@ -167,9 +206,54 @@ Current API routes are **stable v1** and remain unchanged:
 - Output: `{ success, data }` where `data` is quiz-question array.
 - Behavior: AI-generated quizzes with strict JSON parsing and provider fallback.
 
+New v2 routes (Gemini-first integrated intelligence):
+
+- `POST /api/context-pack` (v2 internal/debug)
+- Input: `{ classLevel, subject, chapterId?, chapterTopics?, query?, task? }`.
+- Output: `{ snippets, contextHash, usedOnDemandFallback }`.
+- Behavior: Returns ranked chapter-aware snippets from context cache with on-demand extraction fallback.
+
+- `POST /api/revision-plan` (v2)
+- Input: `{ classLevel, subject?, examDate?, weeklyHours, weakChapterIds?, targetScore? }`.
+- Output: `{ planWeeks: [{ week, focusChapters, tasks, targetMarks, reviewSlots?, miniTests? }] }`.
+- Behavior: Adaptive week-wise revision planner with fallback heuristic if AI is unavailable.
+
+- `POST /api/paper-evaluate` (v2)
+- Input: `{ paperId, answers: [{ questionNo, answerText }], classLevel?, subject? }`.
+- Output: `{ scoreEstimate, sectionBreakdown, mistakes, improvementTasks, weakTopics?, recommendedChapters? }`.
+- Behavior: Attempts AI evaluation with structured output; falls back to deterministic marking heuristics.
+
+- `POST /api/adaptive-test` (v2)
+- Input: `{ classLevel, subject, chapterIds, difficultyMix?, questionCount?, mode? }`.
+- Output: `{ questions, answerKey, topicCoverage, predictedScoreBand }`.
+- Behavior: Weak-area adaptive MCQ generation with schema validation and fallback question synthesis.
+
+- `POST /api/chapter-pack` (v2)
+- Input: `{ chapterId }`.
+- Output: `{ chapterId, chapterTitle, highYieldTopics, formulaFocus, pyqTrend, commonMistakes, examStrategy, sourceCitations }`.
+- Behavior: Builds a chapter-specific intelligence pack grounded in PYQ + retrieved paper snippets.
+
+- `POST /api/chapter-drill` (v2)
+- Input: `{ chapterId, questionCount?, difficulty? }`.
+- Output: `{ chapterId, difficulty, questions, answerKey, topicCoverage, sourceCitations }`.
+- Behavior: Generates chapter-targeted drill questions with fallback to local chapter quiz bank.
+
+- `POST /api/chapter-diagnose` (v2)
+- Input: `{ chapterId, quizScore?, flashcardsDue?, studied?, bookmarked?, recentMistakes? }`.
+- Output: `{ chapterId, riskLevel, weakTags, diagnosis, nextActions, recommendedTaskTypes }`.
+- Behavior: Diagnoses chapter risk from learning signals and returns action-oriented recommendations.
+
+- `POST /api/chapter-remediate` (v2)
+- Input: `{ chapterId, weakTags?, availableDays?, dailyMinutes? }`.
+- Output: `{ chapterId, dayPlan, checkpoints, expectedScoreLift }`.
+- Behavior: Produces a short corrective study plan for weak chapter outcomes.
+
 ## Scripts
 Utilities in `scripts/` (one-line purpose each):
 
+- `build_context_index.py`: Build/rebuild paper-context artifacts (`lib/context/chunks.jsonl`, `lib/context/chapter_index.json`) and support single-file on-demand extraction mode.
+- `build_context_index.mjs`: Node-based context index builder (no Python required) using chapter + PYQ + HF paper mapping.
+- `verify_context_index.mjs`: Validate context artifact health (chunk count, chapter mapping coverage, year-range coverage).
 - `download_dataset.py`: Download full or filtered CBSE papers dataset from Hugging Face into local `dataset/`.
 - `extract_ncert.py`: Extract text from NCERT PDFs into JSON chapter context artifacts.
 - `generate_hf_paper_index.ps1`: Build key-to-path mapping for dynamic Hugging Face paper URL resolution.
@@ -200,7 +284,7 @@ Utilities in `scripts/` (one-line purpose each):
 - No user accounts or cloud sync; notes/progress are browser-local.
 - AI output quality depends on provider quotas and model availability.
 - Gemini can return rate-limit errors on free-tier usage spikes.
-- Chapter context is static from local data definitions; no full NCERT RAG pipeline is active in runtime routes yet.
+- Paper-context retrieval is active via `lib/context` artifacts; full PDF text extraction quality depends on running `scripts/build_context_index.py` in a Python + `pypdf` environment.
 - Some legacy utility scripts still reference older Hugging Face repo naming and may require constant updates for consistency.
 
 ## Roadmap

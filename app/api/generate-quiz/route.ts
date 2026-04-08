@@ -1,192 +1,30 @@
 import { NextResponse } from 'next/server';
 import { getPYQData } from '@/lib/pyq';
+import { getChapterById } from '@/lib/data';
+import { getContextPack } from '@/lib/ai/context-retriever';
+import { generateTaskJson } from '@/lib/ai/generator';
+import { isMCQArray, normalizeMCQs, type MCQItem } from '@/lib/ai/validators';
+import { buildDynamicQuizFallback } from '@/lib/ai/dynamic-fallback';
+import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 
-// Type definition for the expected quiz output
-interface QuizQuestion {
-  question: string;
-  options: string[];
-  answer: number;
-  explanation: string;
-}
-
-const PRIMARY_MODEL = 'llama-3.3-70b-versatile';
-const FALLBACK_MODEL = 'llama-3.1-8b-instant';
-
-function isUsableGroqApiKey(key: string | undefined): key is string {
-  if (!key) return false;
-  const normalized = key.trim();
-  if (!normalized.startsWith('gsk_')) return false;
-
-  const lower = normalized.toLowerCase();
-  const blockedFragments = [
-    'placeholder',
-    'your_groq_api_key_here',
-    'your_api_key_here',
-    'replace_me',
-    'changeme',
-  ];
-
-  return !blockedFragments.some((fragment) => lower.includes(fragment));
-}
-
-function isUsableGeminiApiKey(key: string | undefined): key is string {
-  if (!key) return false;
-  const normalized = key.trim();
-  if (!normalized.startsWith('AIza')) return false;
-
-  const lower = normalized.toLowerCase();
-  const blockedFragments = [
-    'placeholder',
-    'your_gemini_api_key_here',
-    'your_api_key_here',
-    'replace_me',
-    'changeme',
-  ];
-
-  return !blockedFragments.some((fragment) => lower.includes(fragment));
-}
-
-function stripCodeFence(input: string): string {
-  return input
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-}
-
-function parseQuizQuestions(content: string): QuizQuestion[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripCodeFence(content));
-  } catch {
-    return [];
-  }
-
-  const rawArray = Array.isArray(parsed)
-    ? parsed
-    : parsed && typeof parsed === 'object'
-      ? (parsed as Record<string, unknown>).quiz ??
-        (parsed as Record<string, unknown>).data ??
-        (parsed as Record<string, unknown>).questions
-      : null;
-
-  if (!Array.isArray(rawArray)) return [];
-
-  return rawArray
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      const record = item as Record<string, unknown>;
-      const question = typeof record.question === 'string' ? record.question.trim() : '';
-      const explanation = typeof record.explanation === 'string' ? record.explanation.trim() : '';
-      const answer = typeof record.answer === 'number' ? record.answer : Number(record.answer);
-      const options = Array.isArray(record.options)
-        ? record.options.filter((opt): opt is string => typeof opt === 'string').map((opt) => opt.trim())
-        : [];
-
-      if (!question || options.length !== 4 || Number.isNaN(answer) || answer < 0 || answer > 3) {
-        return null;
-      }
-
-      return {
-        question,
-        options,
-        answer,
-        explanation: explanation || 'Review this concept in NCERT once more.',
-      } satisfies QuizQuestion;
-    })
-    .filter((q): q is QuizQuestion => q !== null);
-}
-
-function buildFallbackQuiz(subject: string, chapterTitle: string): QuizQuestion[] {
-  return [
-    {
-      question: `Which fundamental principle of ${subject} is highlighted in ${chapterTitle}?`,
-      options: [
-        'The Principle of Conservation',
-        'The Laws of Thermodynamics',
-        'The General Theory of Relativity',
-        'NCERT Specific Phenomenon XYZ',
-      ],
-      answer: 0,
-      explanation: `According to NCERT, conservation principles are central to ${chapterTitle}.`,
-    },
-    {
-      question: 'Based on NCERT, what is a key limitation of the ideal model discussed?',
-      options: [
-        'It only applies in perfectly elastic scenarios.',
-        'It is heavily dependent on temperature.',
-        'It neglects friction and air resistance.',
-        'It cannot be practically tested.',
-      ],
-      answer: 2,
-      explanation:
-        'Most textbook models assume ideal conditions and ignore real-world effects such as friction.',
-    },
-    {
-      question: `What happens when the key variable in ${chapterTitle} is doubled in a direct relation?`,
-      options: [
-        'The result is halved.',
-        'The result doubles.',
-        'The result is squared.',
-        'There is no effect.',
-      ],
-      answer: 1,
-      explanation: 'In direct proportionality, doubling input doubles output.',
-    },
-  ];
-}
-
-async function callGroq(apiKey: string, model: string, systemPrompt: string, userPrompt: string) {
-  return fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.1,
-      max_tokens: 1400,
-      stream: false,
-    }),
+function buildFallbackQuiz(input: {
+  subject: string;
+  chapterTitle: string;
+  chapterTopics: string[];
+  pyqTopics?: string[];
+  questionCount: number;
+  difficulty?: string;
+  seedText: string;
+}): MCQItem[] {
+  return buildDynamicQuizFallback({
+    subject: input.subject,
+    chapterTitle: input.chapterTitle,
+    chapterTopics: input.chapterTopics,
+    pyqTopics: input.pyqTopics,
+    questionCount: input.questionCount,
+    difficulty: input.difficulty,
+    seedText: input.seedText,
   });
-}
-
-async function callGemini(apiKey: string, systemPrompt: string, userPrompt: string) {
-  return fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-        generationConfig: {
-          temperature: 0.15,
-          maxOutputTokens: 1600,
-        },
-      }),
-    }
-  );
-}
-
-function readGeminiText(payload: unknown): string {
-  const root = payload as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{ text?: string }>;
-      };
-    }>;
-  };
-
-  return root?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text ?? '')
-    .join('')
-    .trim() ?? '';
 }
 
 export async function POST(req: Request) {
@@ -196,93 +34,114 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
     }
 
-    const subject = typeof body?.subject === 'string' && body.subject.trim() ? body.subject.trim() : 'CBSE subject';
-    const chapterTitle =
-      typeof body?.chapterTitle === 'string' && body.chapterTitle.trim()
+    const incomingSubject = typeof body.subject === 'string' && body.subject.trim() ? body.subject.trim() : 'CBSE subject';
+    const incomingChapterTitle =
+      typeof body.chapterTitle === 'string' && body.chapterTitle.trim()
         ? body.chapterTitle.trim()
         : 'this chapter';
-    const chapterId = typeof body?.chapterId === 'string' ? body.chapterId.trim() : '';
-    const nccontext = typeof body?.nccontext === 'string' ? body.nccontext.trim() : '';
+    const chapterId = typeof body.chapterId === 'string' ? body.chapterId.trim() : '';
+    const nccontext = typeof body.nccontext === 'string' ? body.nccontext.trim() : '';
+    const difficulty = typeof body.difficulty === 'string' ? body.difficulty.trim() : 'mixed';
+
+    const chapter = chapterId ? getChapterById(chapterId) : undefined;
+    const subject = chapter?.subject ?? incomingSubject;
+    const chapterTitle = chapter?.title ?? incomingChapterTitle;
+    const classLevel = chapter?.classLevel ?? (typeof body.classLevel === 'number' ? body.classLevel : 12);
     const pyq = chapterId ? getPYQData(chapterId) : null;
 
-    const groqApiKey = process.env.GROQ_API_KEY;
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-    const hasGroq = isUsableGroqApiKey(groqApiKey);
-    const hasGemini = isUsableGeminiApiKey(geminiApiKey);
-
-    if (!hasGroq && !hasGemini) {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      return NextResponse.json({ success: true, data: buildFallbackQuiz(subject, chapterTitle) });
-    }
-
-    const systemPrompt = `You are an expert CBSE/NCERT curriculum evaluator.
-Your job is to generate 5 multiple-choice questions for subject: ${subject}, chapter: ${chapterTitle}.
-All questions MUST be entirely factual, textbook-accurate, and grounded ONLY in the provided NCERT context.
-Return ONLY a strictly valid JSON array.
-Each object must include these keys exactly:
-- question (string)
-- options (array of exactly 4 strings)
-- answer (number from 0 to 3)
-- explanation (string)
-Do NOT use markdown fences. Return pure JSON only.`;
+    const contextPack = await getContextPack({
+      task: 'mcq',
+      classLevel,
+      subject: chapter?.subject ?? subject,
+      chapterId: chapter?.id ?? (chapterId || undefined),
+      chapterTopics: chapter?.topics ?? [],
+      query: `${chapterTitle} ${subject} ${pyq?.importantTopics.join(' ') ?? ''}`.trim(),
+      topK: 5,
+    });
 
     const pyqContext = pyq
-      ? `\nPYQ focus:\n- Avg marks: ${pyq.avgMarks}\n- Years asked: ${[...pyq.yearsAsked].sort((a, b) => b - a).slice(0, 6).join(', ')}\n- Important topics: ${pyq.importantTopics.join(', ')}`
-      : '';
+      ? `PYQ signal: avg marks ${pyq.avgMarks}, years ${[...pyq.yearsAsked].sort((a, b) => b - a).slice(0, 8).join(', ')}, top topics ${pyq.importantTopics.join(', ')}.`
+      : 'No PYQ signal available.';
 
-    const userPrompt = `NCERT Context snippet:\n"""${nccontext || 'General chapter logic...'}"""${pyqContext}\n\nGenerate the quiz JSON now.`;
+    const questionCount = Math.min(10, Math.max(3, Number(body.questionCount) || 5));
+    const variation = buildVariationProfile({
+      task: 'mcq',
+      contextHash: contextPack.contextHash,
+      chapterId: (chapter?.id ?? chapterId) || undefined,
+      difficulty,
+    });
+    const schema = `Return ONLY a JSON array of ${questionCount} MCQs:
+[{
+  "question":"...",
+  "options":["A","B","C","D"],
+  "answer":0,
+  "explanation":"..."
+}]`;
 
-    let content = '';
-    let lastGroqStatus = 0;
+    const userPrompt = `Create ${questionCount} board-style MCQs for Class ${classLevel} ${subject}, chapter "${chapterTitle}".
+Difficulty mix: ${difficulty}.
+${pyqContext}
+NCERT context (optional): ${nccontext || 'Use retrieved paper snippets and chapter fundamentals.'}
+Ensure concept coverage and no duplicate questions.
+${buildVariationInstruction(variation)}
 
-    if (hasGroq && groqApiKey) {
-      let response = await callGroq(groqApiKey, PRIMARY_MODEL, systemPrompt, userPrompt);
-      lastGroqStatus = response.status;
-      if (response.status === 429) {
-        response = await callGroq(groqApiKey, FALLBACK_MODEL, systemPrompt, userPrompt);
-        lastGroqStatus = response.status;
-      }
+${schema}`;
 
-      if (response.ok) {
-        const aiRes = await response.json();
-        content = aiRes?.choices?.[0]?.message?.content ?? '';
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('[Quiz Groq Error]:', response.status, errorData);
-      }
-    }
+    const { data } = await generateTaskJson<MCQItem[]>({
+      task: 'mcq',
+      contextHash: contextPack.contextHash,
+      contextSnippets: contextPack.snippets,
+      chapterId: chapter?.id ?? (chapterId || undefined),
+      difficulty,
+      diversityKey: variation.diversityKey,
+      systemPrompt: `You are VidyaAI Quiz Engine for CBSE.
+- Questions must be strictly factual and exam-relevant.
+- Keep options mutually exclusive and plausible.
+- Explanations should be one to three concise lines.
+- Produce varied question phrasings and varied distractor patterns across runs.
+- Do not include citation tokens like [S1] in the output.
+- Output JSON only.`,
+      userPrompt,
+      temperature: 0.15,
+      maxOutputTokens: 1800,
+      validate: isMCQArray,
+    });
 
-    if (!content && hasGemini && geminiApiKey) {
-      const geminiResponse = await callGemini(geminiApiKey, systemPrompt, userPrompt);
-      if (geminiResponse.ok) {
-        const geminiData = await geminiResponse.json().catch(() => ({}));
-        content = readGeminiText(geminiData);
-      } else {
-        const errorData = await geminiResponse.json().catch(() => ({}));
-        console.error('[Quiz Gemini Error]:', geminiResponse.status, errorData);
-      }
-    }
-
-    const parsedData = typeof content === 'string' ? parseQuizQuestions(content) : [];
-
-    if (parsedData.length === 0) {
-      if (lastGroqStatus === 429 && !hasGemini) {
-        return NextResponse.json(
-          { success: false, error: 'Quiz generation is busy right now. Please try again in 30 seconds.' },
-          { status: 429 }
-        );
-      }
+    const normalized = normalizeMCQs(data);
+    if (normalized.length === 0) {
       return NextResponse.json(
-        { success: false, error: 'AI returned an invalid quiz format. Please try again.' },
-        { status: 502 }
+        {
+          success: true,
+          data: buildFallbackQuiz({
+            subject,
+            chapterTitle,
+            chapterTopics: chapter?.topics ?? [],
+            pyqTopics: pyq?.importantTopics,
+            questionCount,
+            difficulty,
+            seedText: variation.diversityKey,
+          }),
+        },
+        { status: 200 }
       );
     }
 
-    return NextResponse.json({ success: true, data: parsedData });
-
-  } catch (error: unknown) {
+    return NextResponse.json({ success: true, data: normalized.slice(0, questionCount) });
+  } catch (error) {
     console.error('[Quiz API Error]:', error);
-    const message = error instanceof Error ? error.message : 'Unexpected quiz API error.';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    const questionCount = 5;
+    return NextResponse.json(
+      {
+        success: true,
+        data: buildFallbackQuiz({
+          subject: 'CBSE subject',
+          chapterTitle: 'this chapter',
+          chapterTopics: ['core concepts', 'definitions', 'applications'],
+          questionCount,
+          seedText: `fallback:${Date.now()}`,
+        }),
+      },
+      { status: 200 }
+    );
   }
 }

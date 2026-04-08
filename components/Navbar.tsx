@@ -3,13 +3,14 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, FileText, Compass, GraduationCap, Menu, X, Bookmark, Target } from 'lucide-react';
+import { BookOpen, FileText, Compass, GraduationCap, Menu, X, Bookmark, Target, Calculator } from 'lucide-react';
 import clsx from 'clsx';
 import CommandPalette from '@/components/CommandPalette';
 
 const NAV_LINKS = [
   { href: '/chapters', label: 'All Chapters', icon: BookOpen },
   { href: '/papers', label: 'Papers', icon: FileText },
+  { href: '/formulas', label: 'Formulas', icon: Calculator },
   { href: '/dashboard', label: 'Dashboard', icon: Target },
   { href: '/career', label: 'Career', icon: Compass },
   { href: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
