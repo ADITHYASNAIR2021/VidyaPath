@@ -11,8 +11,9 @@ export default function TeacherLoginPage() {
   const nextPath = searchParams.get('next')?.trim() || '/teacher';
   const reason = searchParams.get('reason')?.trim() || '';
 
-  const [phone, setPhone] = useState('');
-  const [pin, setPin] = useState('');
+  const [schoolCode, setSchoolCode] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -23,7 +24,7 @@ export default function TeacherLoginPage() {
       const response = await fetch('/api/teacher/session/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, pin }),
+        body: JSON.stringify({ schoolCode, identifier, password }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
@@ -45,7 +46,7 @@ export default function TeacherLoginPage() {
           <KeyRound className="w-5 h-5 text-saffron-500" />
           Teacher Login
         </h1>
-        <p className="text-sm text-[#5F5A73] mt-2">Sign in using your phone number and PIN assigned by admin.</p>
+        <p className="text-sm text-[#5F5A73] mt-2">Sign in with school code, teacher phone/staff code, and password.</p>
         {reason === 'auth-required' && (
           <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
             Teacher login is required to access that page.
@@ -54,15 +55,21 @@ export default function TeacherLoginPage() {
 
         <div className="space-y-3 mt-5">
           <input
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            placeholder="Phone number"
+            value={schoolCode}
+            onChange={(event) => setSchoolCode(event.target.value)}
+            placeholder="School code"
             className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
           />
           <input
-            value={pin}
-            onChange={(event) => setPin(event.target.value)}
-            placeholder="PIN"
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
+            placeholder="Phone or staff code"
+            className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+          />
+          <input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Password"
             type="password"
             className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
           />

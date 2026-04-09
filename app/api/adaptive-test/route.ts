@@ -12,6 +12,8 @@ import {
   type MCQItem,
 } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface AdaptiveTestRequest {
   classLevel: 10 | 12;
@@ -150,6 +152,9 @@ function isAlignedToChapter(question: string, allowText: string): boolean {
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     const parsed = parseRequest(body);
     if (!parsed) {
@@ -201,7 +206,7 @@ Return ONLY JSON:
 ${buildVariationInstruction(variation)}`;
 
     try {
-      const { data } = await generateTaskJson<AdaptiveTestResponse>({
+      const { data, result } = await generateTaskJson<AdaptiveTestResponse>({
         task: 'adaptive-test',
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
@@ -239,6 +244,15 @@ ${buildVariationInstruction(variation)}`;
           typeof data.predictedScoreBand === 'string' ? data.predictedScoreBand : fallback.predictedScoreBand
         ),
       };
+      await logAiUsage({
+        context,
+        endpoint: '/api/adaptive-test',
+        provider: result.provider,
+        model: result.model,
+        promptText: userPromptWithVariation,
+        completionText: JSON.stringify(response),
+        estimated: true,
+      });
       return NextResponse.json(response);
     } catch (aiError) {
       console.error('[adaptive-test] AI fallback triggered', aiError);

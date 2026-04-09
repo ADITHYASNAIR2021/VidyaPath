@@ -5,6 +5,8 @@ import type { TeacherSubmissionAnswer } from '@/lib/teacher-types';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 
+export const dynamic = 'force-dynamic';
+
 interface SubmissionRequestBody {
   packId: string;
   answers: TeacherSubmissionAnswer[];
@@ -32,7 +34,7 @@ function parseSubmissionBody(value: unknown): SubmissionRequestBody | null {
 export async function POST(req: Request) {
   try {
     await assertTeacherStorageWritable();
-    const studentSession = getStudentSessionFromRequestCookies();
+    const studentSession = await getStudentSessionFromRequestCookies();
     if (!studentSession) {
       return NextResponse.json({ error: 'Student login required.' }, { status: 401 });
     }

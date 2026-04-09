@@ -3,6 +3,8 @@ import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { updateAssignmentPackStatus } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   try {
     const teacherSession = await getTeacherSessionFromRequestCookies();

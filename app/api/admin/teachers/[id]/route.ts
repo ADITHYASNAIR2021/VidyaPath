@@ -3,6 +3,8 @@ import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/
 import { updateTeacher } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 interface PatchTeacherRequest {
   phone?: string;
   name?: string;
@@ -21,7 +23,8 @@ function parsePatch(value: unknown): PatchTeacherRequest | null {
 }
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  if (!getAdminSessionFromRequestCookies()) return unauthorizedJson('Admin session required.');
+  const adminSession = await getAdminSessionFromRequestCookies();
+  if (!adminSession) return unauthorizedJson('Admin session required.');
   const teacherId = params.id?.trim();
   if (!teacherId) return NextResponse.json({ error: 'Teacher id is required.' }, { status: 400 });
   const body = await req.json().catch(() => null);
@@ -29,7 +32,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (!parsed) return NextResponse.json({ error: 'Invalid patch payload.' }, { status: 400 });
   try {
     await assertTeacherStorageWritable();
-    const teacher = await updateTeacher(teacherId, parsed);
+    const teacher = await updateTeacher(teacherId, parsed, adminSession.role === 'admin' ? adminSession.schoolId : undefined);
     if (!teacher) return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 });
     return NextResponse.json({ teacher });
   } catch (error) {

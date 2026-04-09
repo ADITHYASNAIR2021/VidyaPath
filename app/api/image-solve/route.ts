@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface ImageSolveRequest {
   imageBase64?: string;
@@ -18,6 +20,9 @@ function cleanBase64(value: string): string {
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = (await req.json().catch(() => null)) as ImageSolveRequest | null;
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Invalid request payload.' }, { status: 400 });
@@ -93,11 +98,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const payload = (await response.json()) as {
+    const geminiJson = (await response.json()) as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
 
-    const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('').trim() ?? '';
+    const text = geminiJson.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('').trim() ?? '';
     if (!text) {
       return NextResponse.json({ error: 'No solution generated from image.' }, { status: 502 });
     }
@@ -121,14 +126,25 @@ export async function POST(req: Request) {
       }
     })();
 
-    return NextResponse.json({
+    const resultPayload = {
       solution: String(parsed.solution ?? '').trim(),
       detectedTopic: String(parsed.detectedTopic ?? 'Detected from image').trim(),
       confidence: ['high', 'medium', 'low'].includes(String(parsed.confidence ?? '').toLowerCase())
         ? String(parsed.confidence).toLowerCase()
         : 'medium',
       followUp: String(parsed.followUp ?? 'Practice one similar question to lock this concept.').trim(),
+    };
+    await logAiUsage({
+      context,
+      endpoint: '/api/image-solve',
+      provider: 'gemini',
+      model,
+      promptText: `${instruction}\n${prompt}`,
+      completionText: resultPayload.solution,
+      estimated: true,
     });
+
+    return NextResponse.json(resultPayload);
   } catch (error) {
     console.error('[image-solve] error', error);
     return NextResponse.json({ error: 'Failed to solve the image question.' }, { status: 500 });

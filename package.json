@@ -14,7 +14,9 @@
     "verify:context": "node scripts/verify_context_index.mjs",
     "migrate:supabase-state": "node scripts/migrate_state_to_supabase.mjs",
     "migrate:teacher-normalized": "node scripts/migrate_teacher_blob_to_normalized.mjs",
-    "check:supabase-teacher": "node scripts/check_supabase_teacher_setup.mjs"
+    "check:supabase-teacher": "node scripts/check_supabase_teacher_setup.mjs",
+    "reset:supabase-soft": "node scripts/soft_reset_supabase.mjs",
+    "seed:supabase-mock": "node scripts/seed_supabase_mock_data.mjs"
   },
   "dependencies": {
     "@serwist/next": "^9.5.7",

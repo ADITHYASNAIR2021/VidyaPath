@@ -12,6 +12,9 @@ export default function AdminLoginPage() {
   const reason = searchParams.get('reason')?.trim() || '';
 
   const [key, setKey] = useState(bootstrapKey);
+  const [schoolCode, setSchoolCode] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -23,14 +26,19 @@ export default function AdminLoginPage() {
       const response = await fetch('/api/admin/session/bootstrap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: candidateKey }),
+        body: JSON.stringify(
+          candidateKey
+            ? { key: candidateKey }
+            : { schoolCode, identifier, password }
+        ),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
         setError(data?.error || 'Invalid admin key.');
         return;
       }
-      router.replace(nextPath);
+      const redirectTo = data?.role === 'developer' ? '/developer' : nextPath;
+      router.replace(redirectTo);
     } catch {
       setError('Failed to login.');
     } finally {
@@ -45,12 +53,37 @@ export default function AdminLoginPage() {
           <ShieldCheck className="w-5 h-5 text-indigo-600" />
           Admin Access
         </h1>
-        <p className="text-sm text-[#5F5A73] mt-2">Bootstrap admin session with secret key URL credential.</p>
+        <p className="text-sm text-[#5F5A73] mt-2">Sign in with school admin credentials, or use bootstrap key for emergency access.</p>
         {reason === 'auth-required' && (
           <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
             Admin login is required to access that page.
           </p>
         )}
+        {reason === 'developer-required' && (
+          <p className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-800">
+            Developer privileges are required for this page.
+          </p>
+        )}
+        <input
+          value={schoolCode}
+          onChange={(event) => setSchoolCode(event.target.value)}
+          placeholder="School code (e.g. VIDYAPATH-001)"
+          className="w-full mt-4 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+        />
+        <input
+          value={identifier}
+          onChange={(event) => setIdentifier(event.target.value)}
+          placeholder="Admin ID or phone"
+          className="w-full mt-3 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+        />
+        <input
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder="Password"
+          type="password"
+          className="w-full mt-3 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+        />
+        <p className="mt-3 text-[11px] text-[#7A7490]">Or enter bootstrap key below (optional fallback).</p>
         <input
           value={key}
           onChange={(event) => setKey(event.target.value)}
@@ -63,7 +96,7 @@ export default function AdminLoginPage() {
           disabled={loading}
           className="w-full mt-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm px-4 py-2.5 rounded-xl disabled:opacity-50"
         >
-          {loading ? 'Authorizing...' : 'Enter Admin'}
+          {loading ? 'Authorizing...' : 'Login'}
         </button>
         {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
       </div>

@@ -3,6 +3,8 @@ import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { deleteTeacherQuestionBankItem, updateTeacherQuestionBankItem } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
     const session = await getTeacherSessionFromRequestCookies();

@@ -7,7 +7,7 @@ import { exportToSheets } from '@/lib/sheets-bridge';
 
 export async function POST(req: Request) {
   try {
-    const admin = getAdminSessionFromRequestCookies();
+    const admin = await getAdminSessionFromRequestCookies();
     const teacher = await getTeacherSessionFromRequestCookies();
     if (!admin && !teacher) {
       return NextResponse.json({ error: 'Unauthorized access.' }, { status: 401 });

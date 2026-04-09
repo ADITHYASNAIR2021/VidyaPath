@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { isValidPin } from '@/lib/auth/pin';
-import { resetTeacherPin } from '@/lib/teacher-admin-db';
+import { getTeacherById, resetTeacherPin } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!getAdminSessionFromRequestCookies()) return unauthorizedJson('Admin session required.');
+  const adminSession = await getAdminSessionFromRequestCookies();
+  if (!adminSession) return unauthorizedJson('Admin session required.');
   const teacherId = params.id?.trim();
   if (!teacherId) return NextResponse.json({ error: 'Teacher id is required.' }, { status: 400 });
   const body = await req.json().catch(() => null);
@@ -16,6 +19,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
   try {
     await assertTeacherStorageWritable();
+    const teacher = await getTeacherById(teacherId, adminSession.role === 'admin' ? adminSession.schoolId : undefined);
+    if (!teacher) return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 });
     const ok = await resetTeacherPin(teacherId, pin);
     if (!ok) return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 });
     return NextResponse.json({ ok: true });

@@ -4,6 +4,8 @@ import { getPYQData } from '@/lib/pyq';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskText, type ChatMessage } from '@/lib/ai/generator';
 import { trackAiQuestion } from '@/lib/analytics-store';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface ChapterContext {
   chapterId?: string;
@@ -112,6 +114,9 @@ function fallbackError(error: unknown): NextResponse {
 
 export async function POST(req: NextRequest) {
   try {
+    const { context, response } = await requireInteractiveAuth();
+    if (response) return response;
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
@@ -170,6 +175,15 @@ export async function POST(req: NextRequest) {
         // best-effort analytics only
       });
     }
+    await logAiUsage({
+      context,
+      endpoint: '/api/ai-tutor',
+      provider: generated.provider,
+      model: generated.model,
+      promptText: lastUserMessage,
+      completionText: message,
+      estimated: true,
+    });
 
     return NextResponse.json({ message, isOffTopic });
   } catch (error) {

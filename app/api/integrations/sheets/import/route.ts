@@ -3,6 +3,8 @@ import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { gradeSubmission, releaseSubmissionResults } from '@/lib/teacher-admin-db';
 import { importFromSheets } from '@/lib/sheets-bridge';
 
+export const dynamic = 'force-dynamic';
+
 interface ImportGradeRow {
   submissionId: string;
   packId?: string;

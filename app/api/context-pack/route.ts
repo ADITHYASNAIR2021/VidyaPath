@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getContextPack, type ContextTask } from '@/lib/ai/context-retriever';
 import { getChapterById } from '@/lib/data';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 const ALLOWED_TASKS: ContextTask[] = [
   'chat',
@@ -17,6 +19,9 @@ const ALLOWED_TASKS: ContextTask[] = [
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
@@ -66,7 +71,7 @@ export async function POST(req: Request) {
       topK: 6,
     });
 
-    return NextResponse.json({
+    const payload = {
       snippets: contextPack.snippets.map((snippet) => ({
         text: snippet.text,
         sourcePath: snippet.sourcePath,
@@ -75,7 +80,17 @@ export async function POST(req: Request) {
       })),
       contextHash: contextPack.contextHash,
       usedOnDemandFallback: contextPack.usedOnDemandFallback,
+    };
+    await logAiUsage({
+      context,
+      endpoint: '/api/context-pack',
+      provider: 'local-retriever',
+      model: 'context-index',
+      promptText: query,
+      completionText: JSON.stringify({ snippets: payload.snippets.length, usedOnDemandFallback: payload.usedOnDemandFallback }),
+      estimated: true,
     });
+    return NextResponse.json(payload);
   } catch (error) {
     console.error('[context-pack] error', error);
     return NextResponse.json({ error: 'Failed to build context pack.' }, { status: 500 });

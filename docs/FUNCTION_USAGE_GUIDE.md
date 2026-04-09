@@ -1,109 +1,80 @@
-# VidyaPath Function Usage Guide
+# VidyaPath Function Usage Guide (User + Developer)
 
-This guide documents the implemented functions from small UI helpers to full AI workflows.
+Last updated: 2026-04-09
 
-It is written in a `what it does + how to use it + request/response + fallback` format so teachers, students, and developers can use everything correctly.
+This guide explains every implemented function from small UX helpers to full assessment workflows.
 
-## 1) Quick Setup For All Functions
+## 1) Roles and Access
 
-## Required environment variables
+## Roles
+- `anonymous`: public browsing only
+- `student`: learning + assignments + exam mode + personal results
+- `teacher`: chapter controls + assignment lifecycle + grading + release
+- `admin`: teacher/student management + school analytics
+- `developer`: cross-school observability and provisioning
 
-```env
-GEMINI_API_KEY=...
-GROQ_API_KEY=...
-ADMIN_PORTAL_KEY=...
-SESSION_SIGNING_SECRET=...
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-```
+## Login routes
+- Student: `/student/login`
+- Teacher: `/teacher/login`
+- Admin: `/admin/login`
+- Developer: `/admin/login` (developer-role identity)
 
-`GEMINI_API_KEY` is primary for generation features.  
-`GROQ_API_KEY` is backup.  
-`ADMIN_PORTAL_KEY` bootstraps admin session.  
-Teacher login uses phone + PIN from admin-created teacher profiles.
+## Session API to check current role
+- `GET /api/auth/session`
 
-## Run locally
-
-```bash
-npm install
-npm run build:context
-npm run verify:context
-npm run dev
-```
-
-## Production sanity check
-
-```bash
-npm run build
-npm run start
-```
-
----
-
-## 2) Core User Flows
-
-## Student flow
-1. Open `/chapters`.
-2. Pick chapter.
-3. Use:
-- AI Mentor (`AIChatBox`)
-- Quiz (`QuizEngine`)
-- Flashcards (`FlashcardDeck`)
-- Chapter Intelligence (`ChapterIntelligenceHub`)
-- Notes (`ChapterNotes`)
-4. Track progress in `/dashboard`.
-5. For controlled tests, use `/exam/assignment/[packId]` with Proctored Lite policy.
-
-## Teacher flow
-1. Open `/teacher/login (phone + PIN)`.
-2. Set chapter priority topics.
-3. Set chapter quiz links.
-4. Publish announcements.
-5. Generate assignment pack (MCQ + short answers + formula drill).
-6. Share student link, collect submissions, review summary.
-7. Publish weekly plan and next-week plan.
-
----
-
-## 3) API Function Catalog
-
-Most routes are `POST`; read routes include `GET /api/teacher`, `GET /api/teacher/assignment-pack`, and `GET /api/teacher/submission-summary`.
-
-## 3.1 Stable v1 APIs
-
-### Function: `ai-tutor`
-- Route: `/api/ai-tutor`
-- Purpose: chapter-aware CBSE tutor response
-- Called from: `components/AIChatBox.tsx`, `components/FloatingAIButton.tsx`
-- Request:
+Example response:
 ```json
 {
-  "messages": [{"role": "user", "content": "Explain Nernst equation"}],
+  "role": "teacher",
+  "authenticated": true,
+  "schoolId": "...",
+  "availableRoles": ["teacher"]
+}
+```
+
+## 2) Feature-by-Feature Usage
+
+## 2.1 Student learning functions
+
+## AI Tutor
+- UI: chapter page chat + floating AI button
+- API: `POST /api/ai-tutor`
+- Purpose: chapter-aware board-focused explanation
+
+Minimal request:
+```json
+{
+  "messages": [{ "role": "user", "content": "Explain Nernst equation with one solved example." }],
   "chapterContext": {
     "chapterId": "c12-chem-2",
     "title": "Electrochemistry",
     "subject": "Chemistry",
     "classLevel": 12,
-    "topics": ["Nernst equation", "Cell potential"]
+    "topics": ["Nernst Equation", "Cell Potential"]
   }
 }
 ```
-- Response:
+
+## Quiz generation
+- UI: `QuizEngine`
+- API: `POST /api/generate-quiz`
+- Purpose: variable chapter MCQ sets
+
+Example request:
 ```json
 {
-  "message": "....",
-  "isOffTopic": false
+  "chapterId": "c12-chem-2",
+  "questionCount": 10,
+  "difficulty": "mixed"
 }
 ```
-- Fallback behavior:
-- returns `503` if no AI key configured
-- returns `502` if AI provider fails
 
-### Function: `generate-flashcards`
-- Route: `/api/generate-flashcards`
-- Purpose: generate chapter flashcards
-- Called from: `components/FlashcardDeck.tsx`
-- Request:
+## Flashcards generation
+- UI: `FlashcardDeck`
+- API: `POST /api/generate-flashcards`
+- Purpose: chapter-focused recall cards
+
+Example request:
 ```json
 {
   "chapterId": "c12-chem-2",
@@ -111,618 +82,239 @@ Most routes are `POST`; read routes include `GET /api/teacher`, `GET /api/teache
   "chapterTitle": "Electrochemistry"
 }
 ```
-- Response:
-```json
-{
-  "success": true,
-  "data": [{"front": "...", "back": "..."}]
-}
-```
-- Fallback behavior:
-- deterministic local cards if AI output fails
 
-### Function: `generate-quiz`
-- Route: `/api/generate-quiz`
-- Purpose: generate chapter MCQ set
-- Called from: `components/QuizEngine.tsx`
-- Request:
-```json
-{
-  "chapterId": "c12-chem-2",
-  "subject": "Chemistry",
-  "chapterTitle": "Electrochemistry",
-  "questionCount": 5,
-  "difficulty": "mixed"
-}
-```
-- Response:
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "question": "...",
-      "options": ["A", "B", "C", "D"],
-      "answer": 0,
-      "explanation": "..."
-    }
-  ]
-}
-```
-
-## 3.2 v2 Integrated Intelligence APIs
-
-### Function: `context-pack`
-- Route: `/api/context-pack`
-- Purpose: retrieve ranked context snippets for a task
-- Primary users: developers, internal debug
-- Request:
-```json
-{
-  "classLevel": 12,
-  "subject": "Chemistry",
-  "chapterId": "c12-chem-2",
-  "chapterTopics": ["Nernst equation"],
-  "query": "high yield revision",
-  "task": "chapter-pack"
-}
-```
-- Response:
-```json
-{
-  "snippets": [{"text": "...", "sourcePath": "...", "year": 2025, "relevanceScore": 91.2}],
-  "contextHash": "...",
-  "usedOnDemandFallback": false
-}
-```
-
-### Function: `revision-plan`
-- Route: `/api/revision-plan`
-- Purpose: adaptive week plan from weak chapters and available time
-- Called from: `components/RevisionPlanCard.tsx`
-- Request:
-```json
-{
-  "classLevel": 12,
-  "subject": "Chemistry",
-  "weeklyHours": 8,
-  "examDate": "2026-03-15",
-  "weakChapterIds": ["c12-chem-2"],
-  "targetScore": 85
-}
-```
-- Response:
-```json
-{
-  "planWeeks": [
-    {
-      "week": 1,
-      "focusChapters": ["c12-chem-2"],
-      "tasks": ["..."],
-      "targetMarks": 10,
-      "reviewSlots": ["..."],
-      "miniTests": ["..."]
-    }
-  ]
-}
-```
-
-### Function: `paper-evaluate`
-- Route: `/api/paper-evaluate`
-- Purpose: estimate score and mistakes from submitted descriptive answers
-- Request:
-```json
-{
-  "paperId": "b12-chem-2024-d",
-  "classLevel": 12,
-  "subject": "Chemistry",
-  "answers": [{"questionNo": "Q1", "answerText": "..."}]
-}
-```
-- Response:
-```json
-{
-  "scoreEstimate": 64,
-  "sectionBreakdown": [{"section": "Concept Accuracy", "score": 22, "maxScore": 35}],
-  "mistakes": ["..."],
-  "improvementTasks": ["..."],
-  "weakTopics": ["..."],
-  "recommendedChapters": ["c12-chem-2"]
-}
-```
-
-### Function: `adaptive-test`
-- Route: `/api/adaptive-test`
-- Purpose: weak-area targeted mixed-difficulty MCQ paper
-- Request:
-```json
-{
-  "classLevel": 12,
-  "subject": "Chemistry",
-  "chapterIds": ["c12-chem-2", "c12-chem-12"],
-  "difficultyMix": "40% easy, 40% medium, 20% hard",
-  "questionCount": 10,
-  "mode": "board-practice"
-}
-```
-- Response:
-```json
-{
-  "questions": [{"question": "...", "options": ["A","B","C","D"], "answer": 1, "explanation": "..."}],
-  "answerKey": [1],
-  "topicCoverage": ["..."],
-  "predictedScoreBand": "65-78%"
-}
-```
-
-### Function: `chapter-pack`
-- Route: `/api/chapter-pack`
-- Purpose: chapter intelligence summary with PYQ trend and strategy
-- Called from: `components/ChapterIntelligenceHub.tsx`
-- Request:
-```json
-{"chapterId":"c12-chem-2"}
-```
-- Response:
-```json
-{
-  "chapterId":"c12-chem-2",
-  "chapterTitle":"...",
-  "highYieldTopics":["..."],
-  "formulaFocus":["..."],
-  "pyqTrend":{"yearsAsked":[2025,2024], "avgMarks":8, "frequencyLabel":"High Frequency"},
-  "commonMistakes":["..."],
-  "examStrategy":["..."],
-  "sourceCitations":[{"sourcePath":"...","year":2025}]
-}
-```
-
-### Function: `chapter-drill`
-- Route: `/api/chapter-drill`
-- Purpose: chapter-specific drill questions
-- Called from: `components/ChapterIntelligenceHub.tsx`
-- Request:
-```json
-{
-  "chapterId":"c12-chem-2",
-  "questionCount":12,
-  "difficulty":"hard-heavy"
-}
-```
-- Response:
-```json
-{
-  "chapterId":"c12-chem-2",
-  "difficulty":"hard-heavy",
-  "questions":[{"question":"...","options":["A","B","C","D"],"answer":0,"explanation":"..."}],
-  "answerKey":[0],
-  "topicCoverage":["..."],
-  "sourceCitations":[{"sourcePath":"...","year":2024}]
-}
-```
-- Reliability details:
-- generator now tries JSON recovery + strict retry
-- route tops up from deterministic fallback so requested count is preserved
-
-### Function: `chapter-diagnose`
-- Route: `/api/chapter-diagnose`
-- Purpose: identify chapter risk and next actions
-- Called from: `components/ChapterIntelligenceHub.tsx`, `components/DashboardChapterCoach.tsx`
-- Request:
-```json
-{
-  "chapterId":"c12-chem-2",
-  "quizScore":58,
-  "flashcardsDue":6,
-  "studied":true,
-  "bookmarked":true,
-  "recentMistakes":["Wrong sign in Nernst equation"]
-}
-```
-- Response:
-```json
-{
-  "chapterId":"c12-chem-2",
-  "riskLevel":"medium",
-  "weakTags":["Nernst equation","unit conversion"],
-  "diagnosis":["..."],
-  "nextActions":["..."],
-  "recommendedTaskTypes":["chapter-drill","flashcards"]
-}
-```
-
-### Function: `chapter-remediate`
-- Route: `/api/chapter-remediate`
-- Purpose: create short day-by-day correction plan
-- Called from: `components/ChapterIntelligenceHub.tsx`, `components/DashboardChapterCoach.tsx`
-- Request:
-```json
-{
-  "chapterId":"c12-chem-2",
-  "weakTags":["Low Quiz Accuracy"],
-  "availableDays":7,
-  "dailyMinutes":45
-}
-```
-- Response:
-```json
-{
-  "chapterId":"c12-chem-2",
-  "dayPlan":[{"day":1,"focus":"...","tasks":["..."],"targetOutcome":"..."}],
-  "checkpoints":["..."],
-  "expectedScoreLift":"6-10 marks"
-}
-```
-
-### Function: `image-solve`
-- Route: `/api/image-solve`
-- Purpose: solve textbook/photo question with Gemini vision
-- Called from: `components/ImageQuestionSolver.tsx`
-- Request:
-```json
-{
-  "imageBase64":"data:image/jpeg;base64,...",
-  "prompt":"Solve this for Class 12 chemistry",
-  "subject":"Chemistry",
-  "classLevel":12,
-  "chapterTitle":"Electrochemistry"
-}
-```
-- Response:
-```json
-{
-  "solution":"...",
-  "steps":["..."],
-  "formulaLatex":["E = E^0 - (0.0591/n) log Q"],
-  "citations":[]
-}
-```
-
-### Function: `analytics-track`
-- Route: `/api/analytics/track`
-- Purpose: privacy-respecting event tracking
-- Called from: `components/AnalyticsTracker.tsx`
-- Supported events:
-- `chapter_view` with `chapterId`
-- `ai_question` with `chapterId`
-- `search_no_result` with `query`
-- Response:
-```json
-{"ok": true}
-```
-
-### Function: `teacher-get`
-- Route: `GET /api/teacher`
-- Purpose: return teacher config
-- Access behavior:
-- valid teacher session cookie -> private config with analytics
-- no teacher session -> public config only
-
-### Function: `teacher-post`
-- Route: `POST /api/teacher`
-- Purpose: mutate teacher configuration
-- Actions:
-- `set-important-topics`
-- `set-quiz-link`
-- `add-announcement`
-- `remove-announcement`
-- `create-assignment-pack`
-- `publish-weekly-plan`
-- `archive-weekly-plan`
+## Image question solver
+- UI: `ImageQuestionSolver`
+- API: `POST /api/image-solve`
+- Purpose: solve textbook/handwritten problem image via Gemini Vision
 
 Example request:
 ```json
 {
-  "action":"set-important-topics",
-  "chapterId":"c12-chem-2",
-  "topics":["Nernst equation","Electrolysis"]
+  "imageBase64": "data:image/jpeg;base64,...",
+  "mimeType": "image/jpeg",
+  "prompt": "Solve step by step for Class 12 boards",
+  "classLevel": 12,
+  "subject": "Chemistry"
 }
 ```
 
----
+## Chapter Intelligence hub
+- UI: `ChapterIntelligenceHub`
+- APIs:
+  - `POST /api/chapter-pack`
+  - `POST /api/chapter-drill`
+  - `POST /api/chapter-diagnose`
+  - `POST /api/chapter-remediate`
 
-## 4) UI Component Function Catalog
+## Adaptive assessment functions
+- `POST /api/adaptive-test`
+- `POST /api/revision-plan`
+- `POST /api/paper-evaluate`
 
-Each entry follows: `Function name -> where -> how to use`.
+## Student assignment and exam functions
 
-### AI and Learning
-- `AIChatBox` -> chapter page -> ask chapter-specific doubts, derivations, MCQs.
-- `FloatingAIButton` -> global mobile/quick access -> ask short doubts from any page.
-- `ChapterIntelligenceHub` -> chapter page -> run chapter pack, drill, diagnose, 7-day remediation.
-- `ImageQuestionSolver` -> chapter page -> upload image and get stepwise solution.
-- `QuizEngine` -> chapter page -> attempt quiz, auto-saves `quiz-score-[chapterId]`.
-- `FlashcardDeck` -> chapter page -> FSRS rating (`Again/Hard/Good/Easy`) with due scheduling.
-- `FormulaCard` -> chapter page -> view chapter formulas with KaTeX.
-- `MermaidRenderer` -> chapter page -> view process diagrams.
-- `TextToSpeechButton` -> chapter header -> read chapter topics aloud.
-- `PomodoroTimer` -> chapter sidebar -> start suggested high-yield focus session.
-- `ChapterNotes` -> chapter page -> personal notes saved in local storage.
+## Practice mode
+- Page: `/practice/assignment/[packId]`
+- APIs used:
+  - `GET /api/teacher/assignment-pack?id=...`
+  - `POST /api/teacher/submission`
+  - `GET /api/student/submission-results?packId=...`
 
-### Teacher and Insights
-- `TeacherChapterPanel` -> chapter page -> show teacher priority topics, announcements, and quiz link.
-- `DashboardChapterCoach` -> dashboard -> diagnose/remediate top weak chapter.
-- `RevisionPlanCard` -> dashboard -> generate weekly revision plan.
-- `LearningProfileInsights` -> chapter sidebar -> show risk and recommended actions from local signals.
+## Exam mode (proctored-lite)
+- Page: `/exam/assignment/[packId]`
+- APIs used:
+  - `POST /api/exam/session/start`
+  - `POST /api/exam/session/heartbeat`
+  - `POST /api/exam/session/submit`
 
-### Navigation and Utility
-- `Navbar` -> top navigation.
-- `MobileBottomNav` -> mobile route shortcuts.
-- `CommandPalette` -> quick jump to chapters/features.
-- `InlinePDFViewer` -> chapter page NCERT PDF inline/expand.
-- `BookmarkButton` -> chapter save for revision.
-- `StudiedButton` -> mark complete for dashboard progress.
-- `AnalyticsTracker` -> page-level event tracking.
-- `PrivacyAnalytics` -> privacy-safe analytics loader.
+Important behavior:
+- Only published packs are available.
+- class/section mismatch is blocked with `403`.
+- heartbeat and submit require session ownership match.
 
----
+## 2.2 Teacher functions
 
-## 5) Page-Level Function Guide
+## Teacher chapter controls
+- UI: `/teacher` -> Chapter Controls
+- API: `POST /api/teacher`
+- actions:
+  - `set-important-topics`
+  - `set-quiz-link`
+  - `add-announcement`
+  - `remove-announcement`
 
-- `/` Home: platform overview, feature entry points, CBSE pattern quick reference.
-- `/chapters`: chapter discovery by class/subject + fuzzy search.
-- `/chapters/[id]`: full chapter workspace (study + AI + teacher + productivity).
-- `/papers`: paper browser with Hugging Face PDF links.
-- `/dashboard`: local profile analytics + adaptive planning.
-- `/bookmarks`: saved chapter list.
-- `/career`: exam and college guidance.
-- `/formulas`: searchable formula database.
-- `/concept-web`: topic graph view.
-- `/teacher`: teacher control room.
-- `/practice/assignment/[packId]`: shareable student assignment + printable view.
-- `/cbse-notes` and `/cbse-notes/...`: SEO notes pages.
+## Assignment lifecycle (teacher-controlled)
+- Create draft: `POST /api/teacher/assignment-pack`
+- Regenerate: `POST /api/teacher/assignment-pack/regenerate`
+- Approve: `POST /api/teacher/assignment-pack/approve`
+- Publish: `POST /api/teacher/assignment-pack/publish`
+- Archive: `POST /api/teacher/assignment-pack/archive`
 
----
+## Question builder
+- Create: `POST /api/teacher/question-bank/item`
+- List: `GET /api/teacher/question-bank/item?chapterId=...`
+- Update: `PATCH /api/teacher/question-bank/item/[id]`
+- Delete: `DELETE /api/teacher/question-bank/item/[id]`
 
-## 6) Local State Keys (Small But Important Functions)
+## Manual grading and result release
+- Load summary: `GET /api/teacher/submission-summary?packId=...`
+- Grade: `POST /api/teacher/submission/grade`
+- Release marks: `POST /api/teacher/submission/release-results`
 
-- `notes-[chapterId]`: chapter private notes.
-- `quiz-score-[chapterId]`: last quiz score.
-- `fsrs-[chapterId]-[index]`: spaced repetition card state.
-- `vidyapath-progress`: studied chapters store.
-- `vidyapath-bookmarks`: bookmarked chapters store.
-
----
-
-## 7) Internal Engine Functions
-
-- `getContextPack` (`lib/ai/context-retriever.ts`): retrieves top snippets + context hash.
-- `generateTaskText` / `generateTaskJson` (`lib/ai/generator.ts`): Gemini-first generation with Groq fallback and JSON hardening.
-- `buildVariationProfile` (`lib/ai/variation.ts`): prompt diversity rotation by task/chapter/time bucket.
-- `buildLearningProfile` + `rankWeakChapters` (`lib/learning-profile.ts`): weak area scoring.
-- `teacher-store` (`lib/teacher-store.ts`): persistent teacher topics, quiz links, announcements.
-- `analytics-store` (`lib/analytics-store.ts`): counters for chapter views, AI questions, and search misses.
-
----
-
-## 8) Teacher Portal Action Guide
-
-## A) Set chapter important topics
-1. Open `/teacher/login (phone + PIN)`
-2. Select chapter
-3. Enter comma-separated topics
-4. Click `Save Important Topics`
-
-## B) Set chapter quiz link
-1. Paste Google Form URL
-2. Click `Save Quiz Link`
-
-## C) Publish announcement
-1. Add title and body
-2. Click `Publish Announcement`
-
-## D) Remove announcement
-1. Click `Remove` on announcement card
-
-## E) Monitor demand signals
-1. Use `AI Hot Chapters` card
-2. Use `Search Misses` card for content gaps
-
----
-
-## 9) AI Mentor Usage Guide (Student)
-
-1. Open any chapter.
-2. Ask specific question in VidyaAI:
-- "Explain Nernst equation with one board-level solved example."
-3. Ask revision mode:
-- "Give 5 high-yield MCQs from this chapter."
-4. Ask exam mode:
-- "What mistakes reduce marks in this chapter?"
-5. If off-topic, AI returns scope-safe guidance.
-
-Best prompt format:
-- Concept + class + output format.
-- Example: `Class 12 Chemistry: Explain electrolysis in 5 bullet points + one numerical.`
-
----
-
-## 10) End-to-End Testing Checklist
-
-## Small function checks
-- Bookmark/unbookmark chapter.
-- Mark studied/unmark studied.
-- Write notes and refresh page.
-- Solve one quiz and verify score persists.
-- Flip and rate flashcards.
-
-## Mid-size function checks
-- Generate chapter pack.
-- Generate chapter drill (6/8/10/12 questions).
-- Run diagnose and remediate.
-- Run image question solver.
-
-## Large workflow checks
-- Generate revision plan from dashboard.
-- Generate adaptive test for multiple chapters.
-- Evaluate paper answers.
-- Teacher publishes announcement and quiz link, then verify student chapter page reflects it.
-
-## API checks (Postman)
-- Hit each route with sample payload.
-- Validate response shape and status code.
-- Validate fallback behavior by temporarily disabling one provider key.
-
----
-
-## 11) Troubleshooting
-
-- Build fails on JSX `->`:
-- replace with `{'->'}` or `&gt;`.
-
-- `EADDRINUSE: 3000`:
-- stop process on port 3000 or run `npm run start -- -p 3001`.
-
-- AI returns fallback often:
-- verify `GEMINI_API_KEY`
-- verify `GROQ_API_KEY`
-- run `npm run build:context` and `npm run verify:context`
-
-- Teacher panel unauthorized:
-- sign in at `/teacher/login` and verify teacher status/scopes in `/admin`.
-
----
-
-## 12) Developer Notes
-
-- Keep existing API contracts stable for v1 routes.
-- Add new capabilities under v2 routes.
-- For new AI features, use shared `context-retriever` + `generator` instead of one-off LLM calls.
-- Prefer deterministic fallback for each route to avoid hard failures during provider outages.
-
-
-
-
-## 13) Teacher Assignment APIs (New)
-
-### Function: `teacher-assignment-pack-create`
-- Route: `POST /api/teacher/assignment-pack`
-- Purpose: generate and persist a classroom assignment pack.
-- Request:
+Grade payload example:
 ```json
 {
-  "chapterId":"c12-chem-2",
-  "classLevel":12,
-  "subject":"Chemistry",
-  "questionCount":12,
-  "difficultyMix":"40% easy, 40% medium, 20% hard",
-  "includeShortAnswers":true,
-  "includeFormulaDrill":true,
-  "dueDate":"2026-05-01"
+  "submissionId": "<submission-id>",
+  "questionGrades": [
+    { "questionNo": "Q1", "scoreAwarded": 1, "maxScore": 1, "feedback": "Good" },
+    { "questionNo": "Q2", "scoreAwarded": 3, "maxScore": 5, "feedback": "Need final step" }
+  ]
 }
 ```
 
-### Function: `teacher-assignment-pack-get`
-- Route: `GET /api/teacher/assignment-pack?id=<packId>`
-- Purpose: fetch assignment pack for student render or teacher export.
-- Access behavior:
-- public returns active pack with hidden answer key
-- teacher session returns full pack
+## 2.3 Admin functions
 
-### Function: `teacher-submission`
-- Route: `POST /api/teacher/submission`
-- Purpose: accept no-login student attempt.
-- Request:
-```json
-{
-  "packId":"<uuid-pack-id>",
-  "studentName":"Adithya S Nair",
-  "submissionCode":"XII-A-23",
-  "answers":[{"questionNo":"Q1","answerText":"option:2"}]
-}
+## Session
+- Bootstrap/login: `POST /api/admin/session/bootstrap`
+- Me: `GET /api/admin/session/me`
+- Logout: `POST /api/admin/session/logout`
+
+## Teacher management
+- List/create: `GET|POST /api/admin/teachers`
+- Update: `PATCH /api/admin/teachers/[id]`
+- Reset PIN: `POST /api/admin/teachers/[id]/reset-pin`
+- Add scope: `POST /api/admin/teachers/[id]/scopes`
+- Remove scope: `DELETE /api/admin/teachers/[id]/scopes/[scopeId]`
+
+## Student roster management
+- List/create: `GET|POST /api/admin/students`
+- Update: `PATCH /api/admin/students/[id]`
+
+## School overview
+- `GET /api/admin/overview`
+
+## 2.4 Developer functions
+- `GET|POST /api/developer/schools`
+- `PATCH /api/developer/schools/[id]`
+- `GET /api/developer/schools/[id]/overview`
+- `GET /api/developer/usage/tokens`
+- `GET /api/developer/audit`
+
+## 2.5 Integrations functions (Google Sheets bridge)
+- status: `GET /api/integrations/sheets/status`
+- export: `POST /api/integrations/sheets/export`
+- import: `POST /api/integrations/sheets/import`
+
+## 3) Public chapter feed function
+
+## Endpoint
+- `GET /api/teacher?chapterId=...&classLevel=...&subject=...&section=...`
+
+## Purpose
+Fetch student-safe teacher signals:
+- announcements
+- quiz links
+- important topics
+- published assignment packs
+
+This is what chapter pages use after refresh. If data disappears on refresh, validate this endpoint first.
+
+## 4) API Lab function (run all endpoints in browser)
+
+## Page
+- `/api-lab`
+
+## What it does
+- provides prefilled payloads
+- executes endpoint calls with current browser cookies
+- shows status, latency, response body
+
+## When to use
+- verify auth behavior (`401/403/200`)
+- validate payload shapes quickly
+- regression-check route behavior after code changes
+
+## 5) Environment Variables (current required set)
+
+```env
+GEMINI_API_KEY=...
+GROQ_API_KEY=...
+
+SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_SECRET_KEY=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+
+ADMIN_PORTAL_KEY=...
+SESSION_SIGNING_SECRET=...
 ```
-- Response keys: `scoreEstimate`, `mistakes`, `weakTopics`, `nextActions`, `duplicate`.
 
-### Function: `teacher-submission-summary`
-- Route: `GET /api/teacher/submission-summary?packId=<id>`
-- Purpose: teacher-side class trend summary.
-- Response keys: `attempts`, `averageScore`, `topMistakes`, `weakTopics`, `recommendedNextChapterIds`, `attemptsByStudent[]`, `questionStats[]`, `scoreTrend[]`.
+Notes:
+- Interactive AI routes require authenticated session.
+- Teacher/Admin writes fail fast in production if Supabase is not healthy.
 
+## 6) Storage and data model references
 
+Primary schema file:
+- `scripts/sql/supabase_init.sql`
 
+Primary runtime data modules:
+- `lib/teacher-admin-db.ts`
+- `lib/platform-rbac-db.ts`
+- `lib/ai/context-retriever.ts`
+- `lib/ai/generator.ts`
 
+## 7) Verification Checklist (end-to-end)
 
-## 14) Optional Supabase Persistence
+1. Auth
+- login/logout each role works
+- role in `/api/auth/session` changes correctly
 
-VidyaPath now supports optional remote state persistence for teacher + analytics stores.
+2. Student flow
+- chapter AI functions return `200`
+- practice submission stores attempt
+- exam mode start/heartbeat/submit works
 
-Environment variables:
-- SUPABASE_URL
-- SUPABASE_SERVICE_ROLE_KEY
-- SUPABASE_STATE_TABLE (optional, default app_state)
-- SUPABASE_STATE_SCHEMA (optional, default public)
+3. Teacher flow
+- create draft pack
+- approve + publish pack
+- pack visible in matching student chapter/practice flow
+- grading + release flow updates student-visible result state
 
-One-time SQL:
-- run scripts/sql/supabase_init.sql in Supabase SQL editor.
+4. Admin flow
+- create teacher + scopes
+- create student roster row
+- teacher and student can log in with assigned identities
 
-Behavior:
-- if configured, server state reads/writes use Supabase REST API.
-- teacher/admin writes in production fail fast with actionable `503` errors if Supabase/schema is not ready.
+5. Developer flow
+- schools/usage/audit endpoints return data
 
-## 15) Supabase Migration Runbook
+6. Integrations
+- sheets status ok
+- export works
+- import updates grades idempotently
 
-1. Ensure env vars are set:
-- SUPABASE_URL
-- SUPABASE_SERVICE_ROLE_KEY
-- SUPABASE_STATE_TABLE (optional)
-- SUPABASE_STATE_SCHEMA (optional)
+## 8) Troubleshooting
 
-2. Run SQL setup in Supabase SQL editor:
-- scripts/sql/supabase_init.sql
+## `401 Unauthorized`
+- session cookie missing/expired
+- login again from the matching role page
 
-3. Backfill local runtime state to Supabase:
-```bash
-npm run migrate:supabase-state
-```
+## `403 Forbidden`
+- class/section/scope mismatch
+- teacher trying to mutate out-of-scope chapter
 
-4. Verify rows:
-```sql
-select state_key, updated_at from public.app_state order by updated_at desc;
-```
+## `503` on teacher/admin write routes
+- Supabase env/schema not ready
+- run `scripts/sql/supabase_init.sql` and verify env vars
 
-5. Start app and trigger writes:
-- open /teacher
-- perform one teacher update
-- open chapter/dashboard for analytics events
+## chapter page not showing teacher assignment
+- check pack status is `published`
+- verify class/section matches student session
+- test public feed endpoint: `/api/teacher?chapterId=...&classLevel=...&subject=...`
 
-
-
-
-
-
-
-### Function: `exam-session-start`
-- Route: `POST /api/exam/session/start`
-- Purpose: begin Proctored Lite exam attempt for assignment pack.
-- Request:
-```json
-{
-  "packId":"<uuid-pack-id>",
-  "studentName":"Adithya S Nair",
-  "submissionCode":"XII-A-23"
-}
-```
-- Response: `{ "session": { "sessionId":"...", "status":"active" } }`
-
-### Function: `exam-session-heartbeat`
-- Route: `POST /api/exam/session/heartbeat`
-- Purpose: record visibility/fullscreen/copy-paste integrity events.
-- Request:
-```json
-{
-  "sessionId":"<session-id>",
-  "events":[{"type":"tab-hidden","occurredAt":"2026-04-09T12:30:00.000Z"}]
-}
-```
-- Response includes updated `integritySummary`.
-
-### Function: `exam-session-submit`
-- Route: `POST /api/exam/session/submit`
-- Purpose: submit proctored attempt and attach integrity summary.
-- Request:
-```json
-{
-  "sessionId":"<session-id>",
-  "answers":[{"questionNo":"Q1","answerText":"option:1"}]
-}
-```
-- Response includes `attemptDetail` + `integritySummary`.
+## 9) Deprecated/legacy notes
+- weekly plan table (`teacher_weekly_plans`) still exists for compatibility, but primary assessment workflow is assignment lifecycle + manual grading.

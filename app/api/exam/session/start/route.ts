@@ -3,12 +3,14 @@ import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage'
 import { getAssignmentPack, startExamSession } from '@/lib/teacher-admin-db';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   try {
     await assertTeacherStorageWritable();
     const body = await req.json().catch(() => null);
     const packId = typeof body?.packId === 'string' ? body.packId.trim() : '';
-    const studentSession = getStudentSessionFromRequestCookies();
+    const studentSession = await getStudentSessionFromRequestCookies();
     if (!studentSession) {
       return NextResponse.json({ error: 'Student login required.' }, { status: 401 });
     }

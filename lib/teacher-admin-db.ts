@@ -3,6 +3,7 @@ import { ALL_CHAPTERS, getChapterById } from '@/lib/data';
 import { isSupportedSubject } from '@/lib/academic-taxonomy';
 import { getAnalyticsSummary } from '@/lib/analytics-store';
 import { hashPin, verifyPin } from '@/lib/auth/pin';
+import { createSupabaseAuthUser } from '@/lib/auth/supabase-auth';
 import type {
   ExamIntegritySummary,
   ExamSession,
@@ -53,6 +54,10 @@ type RowId = string;
 
 interface TeacherProfileRow {
   id: RowId;
+  school_id?: RowId | null;
+  auth_user_id?: RowId | null;
+  auth_email?: string | null;
+  staff_code?: string | null;
   phone: string;
   name: string;
   pin_hash: string;
@@ -63,6 +68,7 @@ interface TeacherProfileRow {
 
 interface TeacherScopeRow {
   id: RowId;
+  school_id?: RowId | null;
   teacher_id: RowId;
   class_level: number;
   subject: string;
@@ -157,6 +163,11 @@ interface TeacherSubmissionRow {
 
 interface StudentProfileRow {
   id: RowId;
+  school_id?: RowId | null;
+  auth_user_id?: RowId | null;
+  auth_email?: string | null;
+  batch?: string | null;
+  roll_no?: string | null;
   name: string;
   roll_code: string;
   class_level: number;
@@ -165,6 +176,22 @@ interface StudentProfileRow {
   status: 'active' | 'inactive';
   created_at: string;
   updated_at: string;
+}
+
+interface PlatformUserRoleRow {
+  id: RowId;
+  auth_user_id: RowId;
+  role: 'student' | 'teacher' | 'admin' | 'developer';
+  school_id: RowId | null;
+  profile_id: RowId | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SchoolRow {
+  id: RowId;
+  school_code: string;
 }
 
 interface TeacherQuestionBankRow {
@@ -222,6 +249,8 @@ interface TeacherWeeklyPlanRow {
 }
 
 const TABLES = {
+  schools: 'schools',
+  platformRoles: 'platform_user_roles',
   profiles: 'teacher_profiles',
   scopes: 'teacher_scopes',
   activity: 'teacher_activity',
@@ -254,6 +283,77 @@ function normalizeRollCode(value: string): string {
   return sanitizeText(value, 80).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
 }
 
+function normalizeRosterToken(value: string, max = 64): string {
+  return sanitizeText(value, max).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+}
+
+function normalizeAuthLocalPart(value: string, max = 40): string {
+  const cleaned = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, max);
+  return cleaned || randomUUID().slice(0, 12);
+}
+
+async function getSchoolCodeById(schoolId: string): Promise<string | null> {
+  if (!isSupabaseServiceConfigured()) return null;
+  const cleanSchoolId = sanitizeText(schoolId, 80);
+  if (!cleanSchoolId) return null;
+  const rows = await supabaseSelect<SchoolRow>(TABLES.schools, {
+    select: 'id,school_code',
+    filters: [{ column: 'id', value: cleanSchoolId }],
+    limit: 1,
+  }).catch(() => []);
+  const schoolCode = rows[0]?.school_code;
+  if (typeof schoolCode !== 'string' || schoolCode.trim().length === 0) return null;
+  return normalizeAuthLocalPart(schoolCode, 30);
+}
+
+function buildProvisionedAuthEmail(input: {
+  role: 'teacher' | 'student' | 'admin';
+  schoolToken: string;
+  userToken: string;
+  profileId: string;
+}): string {
+  const role = normalizeAuthLocalPart(input.role, 20);
+  const school = normalizeAuthLocalPart(input.schoolToken, 30);
+  const user = normalizeAuthLocalPart(input.userToken, 30);
+  const profile = normalizeAuthLocalPart(input.profileId, 36);
+  return `${role}.${school}.${user}.${profile}@vidyapath.local`;
+}
+
+async function ensurePlatformRole(input: {
+  authUserId: string;
+  role: PlatformUserRoleRow['role'];
+  schoolId: string;
+  profileId: string;
+}): Promise<void> {
+  const authUserId = sanitizeText(input.authUserId, 80);
+  const schoolId = sanitizeText(input.schoolId, 80);
+  const profileId = sanitizeText(input.profileId, 80);
+  if (!authUserId || !schoolId || !profileId) return;
+  const existing = await supabaseSelect<PlatformUserRoleRow>(TABLES.platformRoles, {
+    select: '*',
+    filters: [
+      { column: 'auth_user_id', value: authUserId },
+      { column: 'role', value: input.role },
+      { column: 'school_id', value: schoolId },
+      { column: 'profile_id', value: profileId },
+    ],
+    limit: 1,
+  }).catch(() => []);
+  if (existing[0]) return;
+  await supabaseInsert<PlatformUserRoleRow>(TABLES.platformRoles, {
+    id: randomUUID(),
+    auth_user_id: authUserId,
+    role: input.role,
+    school_id: schoolId,
+    profile_id: profileId,
+    is_active: true,
+  });
+}
+
 function normalizeTopicList(topics: string[]): string[] {
   const seen = new Set<string>();
   const cleaned: string[] = [];
@@ -273,7 +373,10 @@ function toStudentProfile(row: StudentProfileRow): StudentProfile | null {
   if (row.class_level !== 10 && row.class_level !== 12) return null;
   return {
     id: row.id,
+    schoolId: row.school_id ?? undefined,
     name: row.name,
+    rollNo: row.roll_no ?? undefined,
+    batch: row.batch ?? undefined,
     rollCode: row.roll_code,
     classLevel: row.class_level,
     section: row.section ?? undefined,
@@ -387,16 +490,20 @@ export async function logTeacherActivity(input: {
   }).catch(() => undefined);
 }
 
-export async function listTeachers(): Promise<TeacherProfile[]> {
+export async function listTeachers(schoolId?: string): Promise<TeacherProfile[]> {
   if (!isSupabaseServiceConfigured()) return [];
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [];
+  if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
   const rows = await supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
     select: '*',
+    filters,
     orderBy: 'updated_at',
     ascending: false,
     limit: 500,
   });
   const scopes = await supabaseSelect<TeacherScopeRow>(TABLES.scopes, {
     select: '*',
+    filters: schoolId ? [{ column: 'school_id', value: sanitizeText(schoolId, 80) }] : undefined,
     limit: 2000,
   }).catch(() => []);
   const scopeMap = new Map<string, TeacherScope[]>();
@@ -410,16 +517,17 @@ export async function listTeachers(): Promise<TeacherProfile[]> {
   return rows.map((row) => toTeacherProfile(row, scopeMap.get(row.id) ?? []));
 }
 
-export async function getTeacherById(teacherId: string): Promise<TeacherProfile | null> {
+export async function getTeacherById(teacherId: string, schoolId?: string): Promise<TeacherProfile | null> {
   if (!isSupabaseServiceConfigured()) return null;
   const row = await getTeacherProfileRow(teacherId);
   if (!row) return null;
+  if (schoolId && row.school_id && row.school_id !== sanitizeText(schoolId, 80)) return null;
   const scopes = await getTeacherScopes(row.id);
   return toTeacherProfile(row, scopes);
 }
 
-export async function getTeacherSessionById(teacherId: string): Promise<TeacherSession | null> {
-  const teacher = await getTeacherById(teacherId);
+export async function getTeacherSessionById(teacherId: string, schoolId?: string): Promise<TeacherSession | null> {
+  const teacher = await getTeacherById(teacherId, schoolId);
   if (!teacher || teacher.status !== 'active') return null;
   return {
     teacher,
@@ -427,27 +535,33 @@ export async function getTeacherSessionById(teacherId: string): Promise<TeacherS
   };
 }
 
-export async function authenticateTeacher(phone: string, pin: string): Promise<TeacherSession | null> {
+export async function authenticateTeacher(phone: string, pin: string, schoolId?: string): Promise<TeacherSession | null> {
   if (!isSupabaseServiceConfigured()) return null;
   const cleanPhone = normalizePhone(phone);
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'phone', value: cleanPhone },
+  ];
+  if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
   const rows = await supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
     select: '*',
-    filters: [{ column: 'phone', value: cleanPhone }],
+    filters,
     limit: 1,
   }).catch(() => []);
   const row = rows[0];
   if (!row || row.status !== 'active') return null;
   if (!verifyPin(pin, row.pin_hash)) return null;
-  return getTeacherSessionById(row.id);
+  return getTeacherSessionById(row.id, schoolId);
 }
 
 export async function listStudents(filters?: {
+  schoolId?: string;
   classLevel?: 10 | 12;
   section?: string;
   status?: 'active' | 'inactive';
 }): Promise<StudentProfile[]> {
   if (!isSupabaseServiceConfigured()) return [];
   const where: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [];
+  if (filters?.schoolId) where.push({ column: 'school_id', value: sanitizeText(filters.schoolId, 80) });
   if (filters?.classLevel) where.push({ column: 'class_level', value: filters.classLevel });
   if (typeof filters?.section === 'string' && filters.section.trim().length > 0) where.push({ column: 'section', value: sanitizeText(filters.section, 40) });
   if (filters?.status) where.push({ column: 'status', value: filters.status });
@@ -467,45 +581,93 @@ export async function listStudents(filters?: {
   return students;
 }
 
-export async function getStudentById(studentId: string): Promise<StudentProfile | null> {
+export async function getStudentById(studentId: string, schoolId?: string): Promise<StudentProfile | null> {
   if (!isSupabaseServiceConfigured()) return null;
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'id', value: sanitizeText(studentId, 80) },
+  ];
+  if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
   const rows = await supabaseSelect<StudentProfileRow>(TABLES.students, {
     select: '*',
-    filters: [{ column: 'id', value: sanitizeText(studentId, 80) }],
+    filters,
     limit: 1,
   }).catch(() => []);
   return rows.map(toStudentProfile).find((item): item is StudentProfile => !!item) ?? null;
 }
 
-export async function getStudentByRollCode(rollCode: string): Promise<StudentProfileRow | null> {
+export async function getStudentByRollCode(rollCode: string, schoolId?: string): Promise<StudentProfileRow | null> {
   if (!isSupabaseServiceConfigured()) return null;
   const normalized = normalizeRollCode(rollCode);
   if (!normalized) return null;
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'roll_code', value: normalized },
+  ];
+  if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
   const rows = await supabaseSelect<StudentProfileRow>(TABLES.students, {
     select: '*',
-    filters: [{ column: 'roll_code', value: normalized }],
+    filters,
     limit: 1,
   }).catch(() => []);
   return rows[0] ?? null;
 }
 
 export async function createStudent(input: {
+  schoolId?: string;
   name: string;
-  rollCode: string;
+  rollCode?: string;
+  rollNo?: string;
+  batch?: string;
   classLevel: 10 | 12;
   section?: string;
   pin?: string;
+  password?: string;
 }): Promise<StudentProfile> {
   if (!isSupabaseServiceConfigured()) {
     throw new Error('Supabase is not configured.');
   }
+  const schoolId = input.schoolId ? sanitizeText(input.schoolId, 80) : '';
   const name = sanitizeText(input.name, 120);
-  const rollCode = normalizeRollCode(input.rollCode);
+  const rollNo = normalizeRosterToken(input.rollNo || input.rollCode || '', 50);
+  const rollCode = normalizeRollCode(
+    input.rollCode ||
+      `${input.classLevel}${input.section ? `-${sanitizeText(input.section, 20)}` : ''}-${rollNo || randomUUID().slice(0, 8)}`
+  );
+  const batch = input.batch ? sanitizeText(input.batch, 40) : null;
   const section = input.section ? sanitizeText(input.section, 40) : null;
-  if (!name || !rollCode) throw new Error('Valid student name and rollCode are required.');
+  if (!schoolId) throw new Error('schoolId is required to create student.');
+  if (!name || !rollCode || !rollNo) throw new Error('Valid student name, rollCode, and rollNo are required.');
+  const studentId = randomUUID();
+  const schoolCodeToken = (await getSchoolCodeById(schoolId)) || normalizeAuthLocalPart(schoolId, 30);
+  const authEmail = buildProvisionedAuthEmail({
+    role: 'student',
+    schoolToken: schoolCodeToken,
+    userToken: rollNo,
+    profileId: studentId,
+  });
+  const authUser = await createSupabaseAuthUser({
+    email: authEmail,
+    password: input.password?.trim() || input.pin?.trim() || rollNo,
+    emailConfirm: true,
+    userMetadata: {
+      role: 'student',
+      school_id: schoolId,
+      profile_id: studentId,
+      class_level: input.classLevel,
+      section: section ?? undefined,
+      roll_no: rollNo,
+      roll_code: rollCode,
+      batch: batch ?? undefined,
+      name,
+    },
+  });
   const pinHash = input.pin ? hashPin(input.pin) : null;
   const [row] = await supabaseInsert<StudentProfileRow>(TABLES.students, {
-    id: randomUUID(),
+    id: studentId,
+    school_id: schoolId,
+    auth_user_id: authUser.id,
+    auth_email: authUser.email ?? authEmail,
+    batch,
+    roll_no: rollNo,
     name,
     roll_code: rollCode,
     class_level: input.classLevel,
@@ -514,10 +676,16 @@ export async function createStudent(input: {
     status: 'active',
   });
   if (!row) throw new Error('Failed to create student.');
+  await ensurePlatformRole({
+    authUserId: authUser.id,
+    role: 'student',
+    schoolId,
+    profileId: row.id,
+  });
   await logTeacherActivity({
     actorType: 'admin',
     action: 'create-student',
-    metadata: { rollCode, classLevel: input.classLevel, section: section ?? undefined },
+    metadata: { rollCode, rollNo, classLevel: input.classLevel, section: section ?? undefined, batch: batch ?? undefined },
   });
   const student = toStudentProfile(row);
   if (!student) throw new Error('Student created but unavailable.');
@@ -526,7 +694,17 @@ export async function createStudent(input: {
 
 export async function updateStudent(
   studentId: string,
-  updates: Partial<{ name: string; rollCode: string; classLevel: 10 | 12; section?: string; status: 'active' | 'inactive'; pin?: string }>
+  updates: Partial<{
+    name: string;
+    rollCode: string;
+    rollNo: string;
+    batch: string;
+    classLevel: 10 | 12;
+    section?: string;
+    status: 'active' | 'inactive';
+    pin?: string;
+  }>,
+  schoolId?: string
 ): Promise<StudentProfile | null> {
   if (!isSupabaseServiceConfigured()) {
     throw new Error('Supabase is not configured.');
@@ -542,6 +720,14 @@ export async function updateStudent(
     if (!rollCode) throw new Error('Valid rollCode is required.');
     patch.roll_code = rollCode;
   }
+  if (typeof updates.rollNo === 'string') {
+    const rollNo = normalizeRosterToken(updates.rollNo, 50);
+    if (!rollNo) throw new Error('Valid rollNo is required.');
+    patch.roll_no = rollNo;
+  }
+  if (typeof updates.batch === 'string') {
+    patch.batch = updates.batch.trim().length > 0 ? sanitizeText(updates.batch, 40) : null;
+  }
   if (updates.classLevel === 10 || updates.classLevel === 12) {
     patch.class_level = updates.classLevel;
   }
@@ -554,12 +740,16 @@ export async function updateStudent(
   if (typeof updates.pin === 'string') {
     patch.pin_hash = updates.pin.trim().length > 0 ? hashPin(updates.pin) : null;
   }
-  if (Object.keys(patch).length === 0) return getStudentById(studentId);
+  if (Object.keys(patch).length === 0) return getStudentById(studentId, schoolId);
 
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'id', value: sanitizeText(studentId, 80) },
+  ];
+  if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
   const rows = await supabaseUpdate<StudentProfileRow>(
     TABLES.students,
     patch,
-    [{ column: 'id', value: sanitizeText(studentId, 80) }]
+    filters
   ).catch(() => []);
   const row = rows[0];
   if (!row) return null;
@@ -571,8 +761,8 @@ export async function updateStudent(
   return toStudentProfile(row);
 }
 
-export async function authenticateStudent(rollCode: string, pin?: string): Promise<StudentSession | null> {
-  const row = await getStudentByRollCode(rollCode);
+export async function authenticateStudent(rollCode: string, pin?: string, schoolId?: string): Promise<StudentSession | null> {
+  const row = await getStudentByRollCode(rollCode, schoolId);
   if (!row || row.status !== 'active') return null;
   if (row.pin_hash) {
     if (!pin || !verifyPin(pin, row.pin_hash)) return null;
@@ -588,25 +778,62 @@ export async function authenticateStudent(rollCode: string, pin?: string): Promi
 }
 
 export async function createTeacher(input: {
+  schoolId?: string;
   phone: string;
   name: string;
   pin: string;
+  staffCode?: string;
+  password?: string;
   scopes?: Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }>;
 }): Promise<TeacherProfile> {
   if (!isSupabaseServiceConfigured()) {
     throw new Error('Supabase is not configured.');
   }
+  const schoolId = input.schoolId ? sanitizeText(input.schoolId, 80) : '';
   const phone = normalizePhone(input.phone);
   const name = sanitizeText(input.name, 120);
+  const staffCode = input.staffCode ? normalizeRosterToken(input.staffCode, 50) : null;
+  if (!schoolId) throw new Error('schoolId is required to create teacher.');
   if (!phone || !name) throw new Error('Valid phone and name are required.');
+  const teacherId = randomUUID();
+  const schoolCodeToken = (await getSchoolCodeById(schoolId)) || normalizeAuthLocalPart(schoolId, 30);
+  const authEmail = buildProvisionedAuthEmail({
+    role: 'teacher',
+    schoolToken: schoolCodeToken,
+    userToken: staffCode || phone,
+    profileId: teacherId,
+  });
+  const authUser = await createSupabaseAuthUser({
+    email: authEmail,
+    password: input.password?.trim() || input.pin,
+    emailConfirm: true,
+    userMetadata: {
+      role: 'teacher',
+      school_id: schoolId,
+      profile_id: teacherId,
+      phone,
+      staff_code: staffCode ?? undefined,
+      name,
+    },
+  });
   const [row] = await supabaseInsert<TeacherProfileRow>(TABLES.profiles, {
-    id: randomUUID(),
+    id: teacherId,
+    school_id: schoolId,
+    auth_user_id: authUser.id,
+    auth_email: authUser.email ?? authEmail,
     phone,
+    staff_code: staffCode,
     name,
     pin_hash: hashPin(input.pin),
     status: 'active',
   });
   if (!row) throw new Error('Failed to create teacher.');
+  await ensurePlatformRole({
+    authUserId: authUser.id,
+    role: 'teacher',
+    schoolId,
+    profileId: row.id,
+  });
   for (const scope of input.scopes ?? []) {
     if (!isSubjectAllowedForClass(scope.classLevel, scope.subject)) {
       throw new Error(`Subject ${scope.subject} is not allowed for Class ${scope.classLevel}.`);
@@ -626,7 +853,8 @@ export async function createTeacher(input: {
 
 export async function updateTeacher(
   teacherId: string,
-  updates: Partial<{ phone: string; name: string; status: 'active' | 'inactive' }>
+  updates: Partial<{ phone: string; name: string; status: 'active' | 'inactive' }>,
+  schoolId?: string
 ): Promise<TeacherProfile | null> {
   if (!isSupabaseServiceConfigured()) {
     throw new Error('Supabase is not configured.');
@@ -643,15 +871,19 @@ export async function updateTeacher(
     patch.name = normalizedName;
   }
   if (updates.status === 'active' || updates.status === 'inactive') patch.status = updates.status;
-  if (Object.keys(patch).length === 0) return getTeacherById(teacherId);
-  await supabaseUpdate<TeacherProfileRow>(TABLES.profiles, patch, [{ column: 'id', value: teacherId }]);
+  if (Object.keys(patch).length === 0) return getTeacherById(teacherId, schoolId);
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'id', value: teacherId },
+  ];
+  if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
+  await supabaseUpdate<TeacherProfileRow>(TABLES.profiles, patch, filters);
   await logTeacherActivity({
     actorType: 'admin',
     action: 'update-teacher',
     teacherId,
     metadata: patch,
   });
-  return getTeacherById(teacherId);
+  return getTeacherById(teacherId, schoolId);
 }
 
 export async function addTeacherScope(
@@ -667,22 +899,30 @@ export async function addTeacherScope(
   if (!isSubjectAllowedForClass(scope.classLevel, scope.subject)) {
     throw new Error(`Subject ${scope.subject} is not allowed for Class ${scope.classLevel}.`);
   }
+  const teacherRow = await getTeacherProfileRow(teacherId);
+  if (!teacherRow) {
+    throw new Error('Teacher not found.');
+  }
   const section = scope.section ? sanitizeText(scope.section, 40) : null;
+  const schoolId = teacherRow.school_id ? sanitizeText(String(teacherRow.school_id), 80) : null;
+  const existingFilters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'teacher_id', value: teacherId },
+    { column: 'class_level', value: scope.classLevel },
+    { column: 'subject', value: scope.subject },
+    section ? { column: 'section', value: section } : { column: 'section', op: 'is', value: null },
+    { column: 'is_active', value: true },
+  ];
+  if (schoolId) existingFilters.push({ column: 'school_id', value: schoolId });
   const existing = await supabaseSelect<TeacherScopeRow>(TABLES.scopes, {
     select: '*',
-    filters: [
-      { column: 'teacher_id', value: teacherId },
-      { column: 'class_level', value: scope.classLevel },
-      { column: 'subject', value: scope.subject },
-      section ? { column: 'section', value: section } : { column: 'section', op: 'is', value: null },
-      { column: 'is_active', value: true },
-    ],
+    filters: existingFilters,
     limit: 1,
   }).catch(() => []);
   if (existing[0]) return toScope(existing[0]);
 
   const [row] = await supabaseInsert<TeacherScopeRow>(TABLES.scopes, {
     id: randomUUID(),
+    school_id: schoolId,
     teacher_id: teacherId,
     class_level: scope.classLevel,
     subject: scope.subject,
@@ -2279,7 +2519,7 @@ export async function completeExamSession(sessionId: string): Promise<ExamIntegr
   return summary;
 }
 
-export async function getAdminOverview(): Promise<{
+export async function getAdminOverview(schoolId?: string): Promise<{
   totalTeachers: number;
   activeTeachers: number;
   scopesByClass: Array<{ classLevel: 10 | 12; count: number }>;
@@ -2308,14 +2548,37 @@ export async function getAdminOverview(): Promise<{
       highRiskExamSessions: 0,
     };
   }
+  const scopedSchoolId = schoolId ? sanitizeText(schoolId, 80) : undefined;
   const [teachers, scopes, submissions, packs, analytics, examSessions] = await Promise.all([
-    supabaseSelect<TeacherProfileRow>(TABLES.profiles, { select: '*', limit: 500 }).catch(() => []),
-    supabaseSelect<TeacherScopeRow>(TABLES.scopes, { select: '*', filters: [{ column: 'is_active', value: true }], limit: 2000 }).catch(() => []),
+    supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
+      select: '*',
+      filters: scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : undefined,
+      limit: 500,
+    }).catch(() => []),
+    supabaseSelect<TeacherScopeRow>(TABLES.scopes, {
+      select: '*',
+      filters: [
+        { column: 'is_active', value: true },
+        ...(scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : []),
+      ],
+      limit: 2000,
+    }).catch(() => []),
     supabaseSelect<TeacherSubmissionRow>(TABLES.submissions, { select: '*', orderBy: 'created_at', ascending: false, limit: 3000 }).catch(() => []),
-    supabaseSelect<TeacherAssignmentPackRow>(TABLES.assignmentPacks, { select: '*', limit: 2000 }).catch(() => []),
+    supabaseSelect<TeacherAssignmentPackRow>(TABLES.assignmentPacks, {
+      select: '*',
+      filters: scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : undefined,
+      limit: 2000,
+    }).catch(() => []),
     getAnalyticsSummary(12),
     supabaseSelect<ExamSessionRow>(TABLES.examSessions, { select: '*', limit: 3000 }).catch(() => []),
   ]);
+  const scopedPackIds = scopedSchoolId ? new Set(packs.map((pack) => pack.id)) : null;
+  const scopedSubmissions = scopedPackIds
+    ? submissions.filter((submission) => scopedPackIds.has(submission.pack_id))
+    : submissions;
+  const scopedExamSessions = scopedPackIds
+    ? examSessions.filter((session) => scopedPackIds.has(session.pack_id))
+    : examSessions;
 
   const classMap = new Map<10 | 12, number>();
   const subjectMap = new Map<string, number>();
@@ -2329,7 +2592,7 @@ export async function getAdminOverview(): Promise<{
     sectionMap.set(scope.section || 'All Sections', (sectionMap.get(scope.section || 'All Sections') ?? 0) + 1);
   }
   const weakMap = new Map<string, number>();
-  for (const row of submissions) {
+  for (const row of scopedSubmissions) {
     for (const topic of row.result?.weakTopics ?? []) {
       const key = sanitizeText(topic, 120).toLowerCase();
       if (!key) continue;
@@ -2353,9 +2616,9 @@ export async function getAdminOverview(): Promise<{
     scopesBySection: [...sectionMap.entries()].sort((a, b) => b[1] - a[1]).map(([section, count]) => ({ section, count })),
     topWeakTopics: [...weakMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([topic, count]) => ({ topic, count })),
     topChapters: [...chapterMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([chapterId, count]) => ({ chapterId, count })),
-    assignmentCompletionsThisWeek: submissions.filter((row) => new Date(row.created_at).getTime() >= weekStart.getTime()).length,
+    assignmentCompletionsThisWeek: scopedSubmissions.filter((row) => new Date(row.created_at).getTime() >= weekStart.getTime()).length,
     analytics,
     storageStatus,
-    highRiskExamSessions: examSessions.filter((item) => Number(item.total_violations) >= 6).length,
+    highRiskExamSessions: scopedExamSessions.filter((item) => Number(item.total_violations) >= 6).length,
   };
 }

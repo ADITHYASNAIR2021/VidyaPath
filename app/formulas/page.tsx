@@ -61,7 +61,7 @@ export default function FormulasPage() {
   }, [fuse, jeeOnly, query, selectedClass, selectedSubject]);
 
   return (
-    <div className="min-h-screen bg-[#FDFAF6]">
+    <div className="min-h-screen bg-[#FDFAF6] overflow-x-hidden">
       <div className="bg-gradient-to-br from-purple-700 to-indigo-700 text-white px-4 py-12">
         <div className="max-w-6xl mx-auto">
           <h1 className="font-fraunces text-3xl sm:text-4xl font-bold">Formula Database</h1>
@@ -87,45 +87,51 @@ export default function FormulasPage() {
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="space-y-2">
             <span className="text-xs font-semibold text-[#6A6A84] inline-flex items-center gap-1">
               <Filter className="w-3.5 h-3.5" />
               Filters
             </span>
-            {SUBJECTS.map((subject) => (
+            <div className="-mx-1 overflow-x-auto pb-1">
+              <div className="px-1 inline-flex gap-2 min-w-max">
+                {SUBJECTS.map((subject) => (
+                  <button
+                    key={subject}
+                    onClick={() => setSelectedSubject(subject)}
+                    className={`text-xs px-3 py-1.5 rounded-full border whitespace-nowrap ${
+                      selectedSubject === subject
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-indigo-700 border-indigo-200'
+                    }`}
+                  >
+                    {subject}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {CLASSES.map((classLevel) => (
+                <button
+                  key={classLevel}
+                  onClick={() => setSelectedClass(classLevel)}
+                  className={`text-xs px-3 py-1.5 rounded-full border ${
+                    selectedClass === classLevel
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-emerald-700 border-emerald-200'
+                  }`}
+                >
+                  {classLevel === 'All' ? 'All classes' : `Class ${classLevel}`}
+                </button>
+              ))}
               <button
-                key={subject}
-                onClick={() => setSelectedSubject(subject)}
+                onClick={() => setJeeOnly((value) => !value)}
                 className={`text-xs px-3 py-1.5 rounded-full border ${
-                  selectedSubject === subject
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-indigo-700 border-indigo-200'
+                  jeeOnly ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-amber-700 border-amber-200'
                 }`}
               >
-                {subject}
+                JEE formulas only
               </button>
-            ))}
-            {CLASSES.map((classLevel) => (
-              <button
-                key={classLevel}
-                onClick={() => setSelectedClass(classLevel)}
-                className={`text-xs px-3 py-1.5 rounded-full border ${
-                  selectedClass === classLevel
-                    ? 'bg-emerald-600 text-white border-emerald-600'
-                    : 'bg-white text-emerald-700 border-emerald-200'
-                }`}
-              >
-                {classLevel === 'All' ? 'All classes' : `Class ${classLevel}`}
-              </button>
-            ))}
-            <button
-              onClick={() => setJeeOnly((value) => !value)}
-              className={`text-xs px-3 py-1.5 rounded-full border ${
-                jeeOnly ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-amber-700 border-amber-200'
-              }`}
-            >
-              JEE formulas only
-            </button>
+            </div>
           </div>
         </div>
 
@@ -139,7 +145,7 @@ export default function FormulasPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="font-semibold text-navy-700 text-sm">{item.name}</h2>
-                  <p className="text-xs text-[#6A6A84] mt-0.5">
+                  <p className="text-xs text-[#6A6A84] mt-0.5 break-words">
                     Class {item.classLevel} - {item.subject} - Chapter {item.chapterNumber}
                   </p>
                 </div>

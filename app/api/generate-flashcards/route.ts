@@ -6,6 +6,8 @@ import { generateTaskJson } from '@/lib/ai/generator';
 import { isFlashcardArray, normalizeFlashcards, type FlashcardItem } from '@/lib/ai/validators';
 import { buildDynamicFlashcardFallback } from '@/lib/ai/dynamic-fallback';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 function buildFallbackCards(input: {
   subject: string;
@@ -25,6 +27,9 @@ function buildFallbackCards(input: {
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
@@ -74,7 +79,7 @@ ${buildVariationInstruction(variation)}
 
 ${schemaNote}`;
 
-    const { data } = await generateTaskJson<FlashcardItem[]>({
+    const { data, result } = await generateTaskJson<FlashcardItem[]>({
       task: 'flashcards',
       contextHash: contextPack.contextHash,
       contextSnippets: contextPack.snippets,
@@ -118,6 +123,15 @@ ${schemaNote}`;
       seen.add(key);
       merged.push(card);
     }
+    await logAiUsage({
+      context,
+      endpoint: '/api/generate-flashcards',
+      provider: result.provider,
+      model: result.model,
+      promptText: userPrompt,
+      completionText: JSON.stringify(merged.slice(0, 5)),
+      estimated: true,
+    });
     return NextResponse.json({ success: true, data: merged.slice(0, 5) });
   } catch (error) {
     console.error('[Flashcard API Error]:', error);

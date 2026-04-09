@@ -6,6 +6,8 @@ import { generateTaskJson } from '@/lib/ai/generator';
 import { isMCQArray, normalizeMCQs, type MCQItem } from '@/lib/ai/validators';
 import { buildDynamicQuizFallback } from '@/lib/ai/dynamic-fallback';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 function buildFallbackQuiz(input: {
   subject: string;
@@ -29,6 +31,9 @@ function buildFallbackQuiz(input: {
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
@@ -87,7 +92,7 @@ ${buildVariationInstruction(variation)}
 
 ${schema}`;
 
-    const { data } = await generateTaskJson<MCQItem[]>({
+    const { data, result } = await generateTaskJson<MCQItem[]>({
       task: 'mcq',
       contextHash: contextPack.contextHash,
       contextSnippets: contextPack.snippets,
@@ -133,6 +138,15 @@ ${schema}`;
       seen.add(key);
       merged.push(question);
     }
+    await logAiUsage({
+      context,
+      endpoint: '/api/generate-quiz',
+      provider: result.provider,
+      model: result.model,
+      promptText: userPrompt,
+      completionText: JSON.stringify(merged.slice(0, questionCount)),
+      estimated: true,
+    });
 
     return NextResponse.json({ success: true, data: merged.slice(0, questionCount) });
   } catch (error) {

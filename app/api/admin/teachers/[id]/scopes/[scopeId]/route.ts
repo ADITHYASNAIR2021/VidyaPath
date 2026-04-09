@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
-import { deleteTeacherScope } from '@/lib/teacher-admin-db';
+import { deleteTeacherScope, getTeacherById } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 export async function DELETE(_req: Request, { params }: { params: { id: string; scopeId: string } }) {
-  if (!getAdminSessionFromRequestCookies()) return unauthorizedJson('Admin session required.');
+  const adminSession = await getAdminSessionFromRequestCookies();
+  if (!adminSession) return unauthorizedJson('Admin session required.');
   const teacherId = params.id?.trim();
   const scopeId = params.scopeId?.trim();
   if (!teacherId || !scopeId) {
@@ -12,6 +15,8 @@ export async function DELETE(_req: Request, { params }: { params: { id: string; 
   }
   try {
     await assertTeacherStorageWritable();
+    const teacher = await getTeacherById(teacherId, adminSession.role === 'admin' ? adminSession.schoolId : undefined);
+    if (!teacher) return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 });
     const ok = await deleteTeacherScope(teacherId, scopeId);
     if (!ok) return NextResponse.json({ error: 'Scope not found.' }, { status: 404 });
     return NextResponse.json({ ok: true });

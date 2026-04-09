@@ -10,6 +10,8 @@ import {
   type ChapterRemediateDay,
   type ChapterRemediateResponse,
 } from '@/lib/ai/validators';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface ChapterRemediateRequest {
   chapterId: string;
@@ -97,6 +99,9 @@ function alignFocus(focus: string, chapterTitle: string, chapterTopics: string[]
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     const parsed = parseRequest(body);
     if (!parsed) {
@@ -142,7 +147,7 @@ Return ONLY JSON:
 }`;
 
     try {
-      const { data } = await generateTaskJson<ChapterRemediateResponse>({
+      const { data, result } = await generateTaskJson<ChapterRemediateResponse>({
         task: 'chapter-remediate',
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
@@ -172,12 +177,22 @@ Return ONLY JSON:
 
       if (dayPlan.length === 0) return NextResponse.json(fallback);
 
-      return NextResponse.json({
+      const payload = {
         chapterId: chapter.id,
         dayPlan,
         checkpoints: cleanTextList(data.checkpoints, 8).length > 0 ? cleanTextList(data.checkpoints, 8) : fallback.checkpoints,
         expectedScoreLift: stripSourceTags(data.expectedScoreLift || fallback.expectedScoreLift),
+      };
+      await logAiUsage({
+        context,
+        endpoint: '/api/chapter-remediate',
+        provider: result.provider,
+        model: result.model,
+        promptText: prompt,
+        completionText: JSON.stringify(payload),
+        estimated: true,
       });
+      return NextResponse.json(payload);
     } catch (aiError) {
       console.error('[chapter-remediate] AI fallback triggered', aiError);
       return NextResponse.json(fallback);

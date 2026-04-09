@@ -11,8 +11,14 @@ export default function StudentLoginPage() {
   const nextPath = searchParams.get('next')?.trim() || '/dashboard';
   const reason = searchParams.get('reason')?.trim() || '';
 
-  const [rollCode, setRollCode] = useState('');
-  const [pin, setPin] = useState('');
+  const [schoolCode, setSchoolCode] = useState('');
+  const [classLevel, setClassLevel] = useState<'10' | '12'>('12');
+  const [section, setSection] = useState('');
+  const [batch, setBatch] = useState('');
+  const [rollNo, setRollNo] = useState('');
+  const [password, setPassword] = useState('');
+  const [legacyRollCode, setLegacyRollCode] = useState('');
+  const [legacyPin, setLegacyPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -23,7 +29,18 @@ export default function StudentLoginPage() {
       const response = await fetch('/api/student/session/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rollCode, pin: pin.trim() || undefined }),
+        body: JSON.stringify(
+          schoolCode && rollNo
+            ? {
+                schoolCode,
+                classLevel: Number(classLevel),
+                section: section || undefined,
+                batch: batch || undefined,
+                rollNo,
+                password,
+              }
+            : { rollCode: legacyRollCode, pin: legacyPin.trim() || undefined }
+        ),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
@@ -46,7 +63,7 @@ export default function StudentLoginPage() {
           Student Login
         </h1>
         <p className="text-sm text-[#5F5A73] mt-2">
-          Login with roll code (and PIN if enabled by admin) before assignments/exam mode.
+          Login with school-based roster credentials before assignments/exam mode.
         </p>
         {reason === 'auth-required' && (
           <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
@@ -56,14 +73,58 @@ export default function StudentLoginPage() {
 
         <div className="space-y-3 mt-5">
           <input
-            value={rollCode}
-            onChange={(event) => setRollCode(event.target.value)}
+            value={schoolCode}
+            onChange={(event) => setSchoolCode(event.target.value)}
+            placeholder="School code"
+            className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <select
+              value={classLevel}
+              onChange={(event) => setClassLevel(event.target.value === '10' ? '10' : '12')}
+              className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 bg-white"
+            >
+              <option value="10">Class 10</option>
+              <option value="12">Class 12</option>
+            </select>
+            <input
+              value={section}
+              onChange={(event) => setSection(event.target.value)}
+              placeholder="Section"
+              className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              value={batch}
+              onChange={(event) => setBatch(event.target.value)}
+              placeholder="Batch (optional)"
+              className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+            />
+            <input
+              value={rollNo}
+              onChange={(event) => setRollNo(event.target.value)}
+              placeholder="Roll no"
+              className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+            />
+          </div>
+          <input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Password"
+            type="password"
+            className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+          />
+          <p className="text-[11px] text-[#7A7490]">Legacy fallback (if roster auth is not configured):</p>
+          <input
+            value={legacyRollCode}
+            onChange={(event) => setLegacyRollCode(event.target.value)}
             placeholder="Roll code"
             className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
           />
           <input
-            value={pin}
-            onChange={(event) => setPin(event.target.value)}
+            value={legacyPin}
+            onChange={(event) => setLegacyPin(event.target.value)}
             placeholder="PIN (optional)"
             type="password"
             className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"

@@ -59,9 +59,12 @@ export default function AdminPage() {
   const [newStudent, setNewStudent] = useState({
     name: '',
     rollCode: '',
+    rollNo: '',
+    batch: '',
     classLevel: 12 as 10 | 12,
     section: '',
     pin: '',
+    password: '',
   });
 
   async function load() {
@@ -161,9 +164,12 @@ export default function AdminPage() {
         body: JSON.stringify({
           name: newStudent.name,
           rollCode: newStudent.rollCode,
+          rollNo: newStudent.rollNo || undefined,
+          batch: newStudent.batch || undefined,
           classLevel: newStudent.classLevel,
           section: newStudent.section || undefined,
           pin: newStudent.pin || undefined,
+          password: newStudent.password || undefined,
         }),
       });
       const data = await response.json().catch(() => null);
@@ -171,7 +177,7 @@ export default function AdminPage() {
         setError(data?.error || 'Failed to create student.');
         return;
       }
-      setNewStudent({ name: '', rollCode: '', classLevel: 12, section: '', pin: '' });
+      setNewStudent({ name: '', rollCode: '', rollNo: '', batch: '', classLevel: 12, section: '', pin: '', password: '' });
       await load();
     } catch {
       setError('Failed to create student.');
@@ -557,15 +563,18 @@ export default function AdminPage() {
 
         <div className="bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-4">
           <h2 className="font-fraunces text-lg font-bold text-navy-700">Student Roster</h2>
-          <div className="grid md:grid-cols-6 gap-2 mt-3">
+          <div className="grid md:grid-cols-8 gap-2 mt-3">
             <input value={newStudent.name} onChange={(e) => setNewStudent((prev) => ({ ...prev, name: e.target.value }))} placeholder="Student name" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
             <input value={newStudent.rollCode} onChange={(e) => setNewStudent((prev) => ({ ...prev, rollCode: e.target.value }))} placeholder="Roll code" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
+            <input value={newStudent.rollNo} onChange={(e) => setNewStudent((prev) => ({ ...prev, rollNo: e.target.value }))} placeholder="Roll no" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
+            <input value={newStudent.batch} onChange={(e) => setNewStudent((prev) => ({ ...prev, batch: e.target.value }))} placeholder="Batch (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
             <select value={newStudent.classLevel} onChange={(e) => setNewStudent((prev) => ({ ...prev, classLevel: Number(e.target.value) as 10 | 12 }))} className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2">
               <option value={10}>Class 10</option>
               <option value={12}>Class 12</option>
             </select>
             <input value={newStudent.section} onChange={(e) => setNewStudent((prev) => ({ ...prev, section: e.target.value }))} placeholder="Section (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
             <input value={newStudent.pin} onChange={(e) => setNewStudent((prev) => ({ ...prev, pin: e.target.value }))} placeholder="PIN (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
+            <input value={newStudent.password} onChange={(e) => setNewStudent((prev) => ({ ...prev, password: e.target.value }))} placeholder="Password (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
             <button disabled={loading} onClick={createStudent} className="text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl disabled:opacity-50">Create student</button>
           </div>
 
@@ -574,7 +583,13 @@ export default function AdminPage() {
               <div key={student.id} className="rounded-xl border border-[#E8E4DC] bg-[#FAF9F5] px-3 py-2 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-[#21213A]">{student.name}</p>
-                  <p className="text-xs text-[#6E6984]">{student.rollCode} | Class {student.classLevel}{student.section ? ` | Section ${student.section}` : ''}</p>
+                  <p className="text-xs text-[#6E6984]">
+                    {student.rollCode}
+                    {student.rollNo ? ` | Roll ${student.rollNo}` : ''}
+                    {student.batch ? ` | Batch ${student.batch}` : ''}
+                    {` | Class ${student.classLevel}`}
+                    {student.section ? ` | Section ${student.section}` : ''}
+                  </p>
                 </div>
                 <button onClick={() => toggleStudentStatus(student)} className="text-xs font-semibold border border-[#DCD7CC] bg-white px-3 py-1.5 rounded-lg hover:bg-[#F1EEE8]">
                   {student.status === 'active' ? 'Deactivate' : 'Activate'}

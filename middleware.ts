@@ -4,6 +4,9 @@ import type { NextRequest } from 'next/server';
 const ADMIN_SESSION_COOKIE = 'vp_admin_session';
 const TEACHER_SESSION_COOKIE = 'vp_teacher_session';
 const STUDENT_SESSION_COOKIE = 'vp_student_session';
+const SUPABASE_ACCESS_COOKIE = 'vp_sb_access_token';
+const SUPABASE_REFRESH_COOKIE = 'vp_sb_refresh_token';
+const SUPABASE_ROLE_HINT_COOKIE = 'vp_role_hint';
 const DEFAULT_SESSION_SECRET = 'vidyapath-dev-session-secret';
 
 interface SessionPayload {
@@ -15,6 +18,34 @@ interface SessionPayload {
   classLevel?: number;
   section?: string;
   expiresAt: number;
+}
+
+function parseSupabaseRoleHint(value: string | undefined): 'student' | 'teacher' | 'admin' | 'developer' | null {
+  if (value === 'student' || value === 'teacher' || value === 'admin' || value === 'developer') return value;
+  return null;
+}
+
+function decodeJwtPayload(token: string | undefined): { exp?: number } | null {
+  if (!token) return null;
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+  try {
+    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const decoded = atob(padded);
+    const payload = JSON.parse(decoded) as { exp?: number };
+    return payload && typeof payload === 'object' ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasValidSupabaseSession(accessToken: string | undefined, refreshToken: string | undefined): boolean {
+  if (!accessToken && !refreshToken) return false;
+  if (!accessToken && refreshToken) return true;
+  const payload = decodeJwtPayload(accessToken);
+  if (!payload || typeof payload.exp !== 'number') return !!refreshToken;
+  return payload.exp > Math.floor(Date.now() / 1000);
 }
 
 function redirectToLogin(request: NextRequest, loginPath: '/admin/login' | '/teacher/login') {
@@ -111,11 +142,19 @@ export async function middleware(request: NextRequest) {
   const adminToken = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
   const teacherToken = request.cookies.get(TEACHER_SESSION_COOKIE)?.value;
   const studentToken = request.cookies.get(STUDENT_SESSION_COOKIE)?.value;
-  const [hasAdminSession, hasTeacherSession, hasStudentSession] = await Promise.all([
+  const supabaseAccess = request.cookies.get(SUPABASE_ACCESS_COOKIE)?.value;
+  const supabaseRefresh = request.cookies.get(SUPABASE_REFRESH_COOKIE)?.value;
+  const supabaseRoleHint = parseSupabaseRoleHint(request.cookies.get(SUPABASE_ROLE_HINT_COOKIE)?.value);
+  const hasSupabaseSession = hasValidSupabaseSession(supabaseAccess, supabaseRefresh);
+  const [legacyHasAdminSession, legacyHasTeacherSession, legacyHasStudentSession] = await Promise.all([
     isValidSignedSessionToken(adminToken, 'admin'),
     isValidSignedSessionToken(teacherToken, 'teacher'),
     isValidSignedSessionToken(studentToken, 'student'),
   ]);
+  const hasDeveloperSession = hasSupabaseSession && supabaseRoleHint === 'developer';
+  const hasAdminSession = legacyHasAdminSession || (hasSupabaseSession && (supabaseRoleHint === 'admin' || supabaseRoleHint === 'developer'));
+  const hasTeacherSession = legacyHasTeacherSession || (hasSupabaseSession && supabaseRoleHint === 'teacher');
+  const hasStudentSession = legacyHasStudentSession || (hasSupabaseSession && supabaseRoleHint === 'student');
 
   if (pathname.startsWith('/teacher/assignment/')) {
     const url = request.nextUrl.clone();
@@ -125,7 +164,7 @@ export async function middleware(request: NextRequest) {
 
   if (pathname === '/admin/login' && hasAdminSession) {
     const url = request.nextUrl.clone();
-    url.pathname = '/admin';
+    url.pathname = hasDeveloperSession ? '/developer' : '/admin';
     return NextResponse.redirect(url);
   }
   if (pathname === '/teacher/login' && hasTeacherSession) {
@@ -142,8 +181,44 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
     if (!hasAdminSession) return redirectToLogin(request, '/admin/login');
   }
+  if (pathname.startsWith('/developer')) {
+    if (!hasDeveloperSession) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin/login';
+      url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+      url.searchParams.set('reason', 'developer-required');
+      return NextResponse.redirect(url);
+    }
+  }
   if (pathname.startsWith('/teacher') && pathname !== '/teacher/login') {
     if (!hasTeacherSession) return redirectToLogin(request, '/teacher/login');
+  }
+  if (pathname.startsWith('/student') && pathname !== '/student/login') {
+    if (!hasStudentSession && !hasAdminSession) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/student/login';
+      url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+      url.searchParams.set('reason', 'auth-required');
+      return NextResponse.redirect(url);
+    }
+  }
+  if (pathname.startsWith('/dashboard') || pathname.startsWith('/bookmarks')) {
+    if (!hasStudentSession && !hasAdminSession && !hasDeveloperSession) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/student/login';
+      url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+      url.searchParams.set('reason', 'auth-required');
+      return NextResponse.redirect(url);
+    }
+  }
+  if (pathname.startsWith('/api-lab')) {
+    if (!hasAdminSession && !hasDeveloperSession) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin/login';
+      url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+      url.searchParams.set('reason', 'auth-required');
+      return NextResponse.redirect(url);
+    }
   }
   if (pathname.startsWith('/exam/assignment/')) {
     if (!hasStudentSession) {
@@ -158,5 +233,15 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/teacher/:path*', '/student/:path*', '/exam/assignment/:path*', '/helper/:path*'],
+  matcher: [
+    '/admin/:path*',
+    '/teacher/:path*',
+    '/student/:path*',
+    '/developer/:path*',
+    '/dashboard/:path*',
+    '/bookmarks/:path*',
+    '/api-lab/:path*',
+    '/exam/assignment/:path*',
+    '/helper/:path*',
+  ],
 };

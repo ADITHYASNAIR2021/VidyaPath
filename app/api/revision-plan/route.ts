@@ -10,6 +10,8 @@ import {
   type RevisionPlanResponse,
   type RevisionWeek,
 } from '@/lib/ai/validators';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface RevisionRequest {
   classLevel: 10 | 12;
@@ -97,6 +99,9 @@ function buildHeuristicPlan(req: RevisionRequest): RevisionPlanResponse {
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     const parsed = parseRequest(body);
     if (!parsed) {
@@ -146,7 +151,7 @@ Return ONLY JSON in this shape:
 }`;
 
     try {
-      const { data } = await generateTaskJson<RevisionPlanResponse>({
+      const { data, result } = await generateTaskJson<RevisionPlanResponse>({
         task: 'revision-plan',
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
@@ -188,13 +193,23 @@ Return ONLY JSON in this shape:
           }))
         : fallback.planWeeks;
 
-      return NextResponse.json({
+      const payload = {
         planWeeks: finalWeeks.map((week) => ({
           ...week,
           reviewSlots: (week.reviewSlots ?? []).map((slot) => stripSourceTags(slot)),
           miniTests: (week.miniTests ?? []).map((test) => stripSourceTags(test)),
         })),
+      };
+      await logAiUsage({
+        context,
+        endpoint: '/api/revision-plan',
+        provider: result.provider,
+        model: result.model,
+        promptText: prompt,
+        completionText: JSON.stringify(payload),
+        estimated: true,
       });
+      return NextResponse.json(payload);
     } catch (aiError) {
       console.error('[revision-plan] AI fallback triggered', aiError);
       return NextResponse.json(fallback);

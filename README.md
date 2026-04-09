@@ -9,12 +9,15 @@ Primary audience:
 
 Current scope:
 - Web app with chapter-wise learning, PYQ insights, AI tutor, quizzes, flashcards, papers, and career guidance.
-- No login required; progress and notes are stored locally in the browser.
+- Public browsing is open; interactive features (AI, assignments, exams, role consoles) require login.
+- Progress and notes are still stored locally in the browser for student convenience.
 - Class 11 content exists in `lib/data.ts`, while current user flows are centered on Class 10 and Class 12.
 
 ## Function Usage Guide
 - Detailed function-by-function usage (teacher portal, AI mentor, chapter intelligence, APIs, local state, testing):
 - `docs/FUNCTION_USAGE_GUIDE.md`
+- Deep engineering map (UI -> API -> service -> storage):
+- `docs/FUNCTION_TO_FUNCTION_MAPPING.md`
 - Operator runbook: `docs/OPERATOR_RUNBOOK.md`
 
 ## Implemented Features

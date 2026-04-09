@@ -33,7 +33,7 @@ export async function GET(req: Request) {
       const config = await getPrivateTeacherConfig(session.teacher.id);
       return NextResponse.json(config);
     }
-    const studentSession = getStudentSessionFromRequestCookies();
+    const studentSession = await getStudentSessionFromRequestCookies();
     const url = new URL(req.url);
     const chapterId = url.searchParams.get('chapterId')?.trim() || undefined;
     const classLevelRaw = Number(url.searchParams.get('classLevel'));

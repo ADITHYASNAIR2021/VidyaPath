@@ -382,7 +382,10 @@ export interface ExamViolationEvent {
 
 export interface StudentProfile {
   id: string;
+  schoolId?: string;
   name: string;
+  rollNo?: string;
+  batch?: string;
   rollCode: string;
   classLevel: 10 | 12;
   section?: string;

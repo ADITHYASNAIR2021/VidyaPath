@@ -5,7 +5,7 @@ import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies 
 import { getSheetsStatus } from '@/lib/sheets-bridge';
 
 export async function GET() {
-  const admin = getAdminSessionFromRequestCookies();
+  const admin = await getAdminSessionFromRequestCookies();
   const teacher = await getTeacherSessionFromRequestCookies();
   if (!admin && !teacher) {
     return NextResponse.json({ error: 'Unauthorized access.' }, { status: 401 });

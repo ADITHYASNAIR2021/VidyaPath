@@ -3,6 +3,8 @@ import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { releaseSubmissionResults } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 function parseSubmissionIds(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const ids: string[] = [];

@@ -7,6 +7,63 @@
 create extension if not exists pgcrypto;
 
 -- ---------------------------------------------------------------------------
+-- 0) Multi-school + RBAC core
+-- ---------------------------------------------------------------------------
+create table if not exists public.schools (
+  id uuid primary key default gen_random_uuid(),
+  school_name text not null,
+  school_code text not null unique,
+  board text not null default 'CBSE',
+  city text,
+  state text,
+  contact_phone text,
+  contact_email text,
+  status text not null default 'active' check (status in ('active', 'inactive', 'archived')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.school_admin_profiles (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  auth_user_id uuid,
+  auth_email text,
+  admin_identifier text not null,
+  phone text,
+  name text not null,
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.platform_user_roles (
+  id uuid primary key default gen_random_uuid(),
+  auth_user_id uuid not null,
+  role text not null check (role in ('student', 'teacher', 'admin', 'developer')),
+  school_id uuid references public.schools(id) on delete cascade,
+  profile_id uuid,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.token_usage_events (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid references public.schools(id) on delete set null,
+  auth_user_id uuid,
+  role text,
+  endpoint text not null,
+  provider text,
+  model text,
+  request_id text,
+  prompt_tokens int not null default 0,
+  completion_tokens int not null default 0,
+  total_tokens int not null default 0,
+  estimated boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
 -- 1) Generic app state blob table
 -- ---------------------------------------------------------------------------
 create table if not exists public.app_state (
@@ -22,7 +79,11 @@ create index if not exists app_state_updated_at_idx on public.app_state (updated
 -- ---------------------------------------------------------------------------
 create table if not exists public.teacher_profiles (
   id uuid primary key default gen_random_uuid(),
-  phone text not null unique,
+  school_id uuid references public.schools(id) on delete set null,
+  auth_user_id uuid,
+  auth_email text,
+  phone text not null,
+  staff_code text,
   name text not null,
   pin_hash text not null,
   status text not null default 'active' check (status in ('active', 'inactive')),
@@ -32,6 +93,7 @@ create table if not exists public.teacher_profiles (
 
 create table if not exists public.teacher_scopes (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid references public.schools(id) on delete set null,
   teacher_id uuid not null references public.teacher_profiles(id) on delete cascade,
   class_level int not null check (class_level in (10, 12)),
   subject text not null,
@@ -123,8 +185,13 @@ create table if not exists public.teacher_submissions (
 
 create table if not exists public.student_profiles (
   id uuid primary key default gen_random_uuid(),
+  school_id uuid references public.schools(id) on delete set null,
+  auth_user_id uuid,
+  auth_email text,
+  batch text,
+  roll_no text,
   name text not null,
-  roll_code text not null unique,
+  roll_code text not null,
   class_level int not null check (class_level in (10, 12)),
   section text,
   pin_hash text,
@@ -201,6 +268,128 @@ alter table if exists public.teacher_submissions
   add column if not exists released_at timestamptz;
 alter table if exists public.teacher_assignment_packs
   add column if not exists status text not null default 'draft';
+alter table if exists public.teacher_profiles
+  add column if not exists school_id uuid references public.schools(id) on delete set null;
+alter table if exists public.teacher_profiles
+  add column if not exists auth_user_id uuid;
+alter table if exists public.teacher_profiles
+  add column if not exists auth_email text;
+alter table if exists public.teacher_profiles
+  add column if not exists staff_code text;
+alter table if exists public.teacher_scopes
+  add column if not exists school_id uuid references public.schools(id) on delete set null;
+alter table if exists public.student_profiles
+  add column if not exists school_id uuid references public.schools(id) on delete set null;
+alter table if exists public.student_profiles
+  add column if not exists auth_user_id uuid;
+alter table if exists public.student_profiles
+  add column if not exists auth_email text;
+alter table if exists public.student_profiles
+  add column if not exists batch text;
+alter table if exists public.student_profiles
+  add column if not exists roll_no text;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'teacher_assignment_packs_status_check'
+      and conrelid = 'public.teacher_assignment_packs'::regclass
+  ) then
+    alter table public.teacher_assignment_packs
+      drop constraint teacher_assignment_packs_status_check;
+  end if;
+exception
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  update public.teacher_assignment_packs
+  set status = case
+    when status = 'active' then 'published'
+    when status = 'archived' then 'archived'
+    else status
+  end
+  where status in ('active', 'archived');
+exception
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  alter table public.teacher_assignment_packs
+    add constraint teacher_assignment_packs_status_check
+    check (status in ('draft', 'review', 'published', 'archived'));
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'teacher_submissions_status_check'
+      and conrelid = 'public.teacher_submissions'::regclass
+  ) then
+    alter table public.teacher_submissions
+      drop constraint teacher_submissions_status_check;
+  end if;
+exception
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  update public.teacher_submissions
+  set status = case
+    when status = 'active' then 'pending_review'
+    when status = 'archived' then 'released'
+    else status
+  end
+  where status in ('active', 'archived');
+exception
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  alter table public.teacher_submissions
+    add constraint teacher_submissions_status_check
+    check (status in ('pending_review', 'graded', 'released'));
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'teacher_profiles_phone_key'
+      and conrelid = 'public.teacher_profiles'::regclass
+  ) then
+    alter table public.teacher_profiles
+      drop constraint teacher_profiles_phone_key;
+  end if;
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'student_profiles_roll_code_key'
+      and conrelid = 'public.student_profiles'::regclass
+  ) then
+    alter table public.student_profiles
+      drop constraint student_profiles_roll_code_key;
+  end if;
+end $$;
 
 do $$
 begin
@@ -234,8 +423,13 @@ begin
 end $$;
 
 create index if not exists teacher_profiles_phone_idx on public.teacher_profiles (phone);
+create index if not exists teacher_profiles_school_idx on public.teacher_profiles (school_id, status);
+create index if not exists teacher_profiles_auth_user_idx on public.teacher_profiles (auth_user_id);
+create unique index if not exists teacher_profiles_school_staff_code_uniq on public.teacher_profiles (school_id, staff_code) where staff_code is not null;
+create unique index if not exists teacher_profiles_school_phone_uniq on public.teacher_profiles (school_id, phone);
 create index if not exists teacher_scopes_teacher_idx on public.teacher_scopes (teacher_id, is_active);
 create index if not exists teacher_scopes_lookup_idx on public.teacher_scopes (class_level, subject, section, is_active);
+create index if not exists teacher_scopes_school_idx on public.teacher_scopes (school_id, class_level, subject, section, is_active);
 create index if not exists teacher_announcements_scope_idx on public.teacher_announcements (class_level, subject, section, is_active, created_at desc);
 create index if not exists teacher_quiz_links_chapter_idx on public.teacher_quiz_links (chapter_id, is_active, updated_at desc);
 create index if not exists teacher_topic_priority_chapter_idx on public.teacher_topic_priority (chapter_id, is_active, updated_at desc);
@@ -244,7 +438,11 @@ create index if not exists teacher_assignment_packs_chapter_idx on public.teache
 create index if not exists teacher_submissions_pack_idx on public.teacher_submissions (pack_id, created_at desc);
 create index if not exists teacher_submissions_student_idx on public.teacher_submissions (pack_id, submission_code, created_at desc);
 create index if not exists student_profiles_roll_code_idx on public.student_profiles (roll_code);
+create unique index if not exists student_profiles_school_roll_code_uniq on public.student_profiles (school_id, roll_code);
 create index if not exists student_profiles_class_section_idx on public.student_profiles (class_level, section, status);
+create index if not exists student_profiles_school_idx on public.student_profiles (school_id, class_level, section, status);
+create index if not exists student_profiles_auth_user_idx on public.student_profiles (auth_user_id);
+create unique index if not exists student_profiles_roster_uniq on public.student_profiles (school_id, class_level, coalesce(section, ''), coalesce(batch, ''), roll_no) where roll_no is not null;
 create index if not exists teacher_question_bank_teacher_idx on public.teacher_question_bank (teacher_id, updated_at desc);
 create index if not exists teacher_question_bank_chapter_idx on public.teacher_question_bank (chapter_id, is_active, updated_at desc);
 create index if not exists teacher_activity_teacher_idx on public.teacher_activity (teacher_id, created_at desc);
@@ -253,3 +451,14 @@ create unique index if not exists teacher_topic_priority_scope_uniq on public.te
 create index if not exists exam_sessions_pack_idx on public.exam_sessions (pack_id, status, started_at desc);
 create index if not exists exam_sessions_submission_idx on public.exam_sessions (pack_id, submission_code, started_at desc);
 create index if not exists exam_violations_session_idx on public.exam_violations (session_id, occurred_at desc);
+create index if not exists schools_status_idx on public.schools (status, updated_at desc);
+create unique index if not exists schools_code_uniq on public.schools (school_code);
+create index if not exists school_admin_profiles_school_idx on public.school_admin_profiles (school_id, status);
+create unique index if not exists school_admin_profiles_identifier_uniq on public.school_admin_profiles (school_id, admin_identifier);
+create index if not exists school_admin_profiles_auth_user_idx on public.school_admin_profiles (auth_user_id);
+create index if not exists platform_user_roles_auth_idx on public.platform_user_roles (auth_user_id, is_active);
+create index if not exists platform_user_roles_school_role_idx on public.platform_user_roles (school_id, role, is_active);
+create unique index if not exists platform_user_roles_unique_assignment on public.platform_user_roles (auth_user_id, role, coalesce(school_id::text, ''), coalesce(profile_id::text, ''));
+create index if not exists token_usage_events_school_idx on public.token_usage_events (school_id, created_at desc);
+create index if not exists token_usage_events_endpoint_idx on public.token_usage_events (endpoint, created_at desc);
+create index if not exists token_usage_events_auth_idx on public.token_usage_events (auth_user_id, created_at desc);

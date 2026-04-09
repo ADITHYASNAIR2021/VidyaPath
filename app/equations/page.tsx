@@ -37,7 +37,7 @@ export default function EquationsPage() {
   }, [filtered]);
 
   return (
-    <div className="min-h-screen bg-[#FDFAF6]">
+    <div className="min-h-screen bg-[#FDFAF6] overflow-x-hidden">
       <div className="bg-gradient-to-br from-indigo-700 to-sky-700 text-white px-4 py-12">
         <div className="max-w-7xl mx-auto">
           <h1 className="font-fraunces text-3xl sm:text-4xl font-bold">Equations Library</h1>
@@ -52,32 +52,38 @@ export default function EquationsPage() {
 
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="rounded-2xl border border-[#E8E4DC] bg-white p-4 mb-5">
-          <div className="flex flex-wrap gap-2 items-center">
-            {CLASS_FILTERS.map((value) => (
-              <button
-                key={value}
-                onClick={() => setSelectedClass(value)}
-                className={`text-xs px-3 py-1.5 rounded-full border ${selectedClass === value ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-200'}`}
+          <div className="space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
+            <div className="-mx-1 overflow-x-auto pb-1">
+              <div className="px-1 inline-flex min-w-max gap-2">
+                {CLASS_FILTERS.map((value) => (
+                  <button
+                    key={value}
+                    onClick={() => setSelectedClass(value)}
+                    className={`text-xs px-3 py-1.5 rounded-full border whitespace-nowrap ${selectedClass === value ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-200'}`}
+                  >
+                    {value === 'All' ? 'All classes' : `Class ${value}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 min-w-0">
+              <select
+                value={selectedSubject}
+                onChange={(event) => setSelectedSubject(event.target.value)}
+                className="text-xs border border-[#E8E4DC] rounded-lg px-2 py-1.5 max-w-[48vw] sm:max-w-none"
               >
-                {value === 'All' ? 'All classes' : `Class ${value}`}
-              </button>
-            ))}
-            <select
-              value={selectedSubject}
-              onChange={(event) => setSelectedSubject(event.target.value)}
-              className="ml-2 text-xs border border-[#E8E4DC] rounded-lg px-2 py-1.5"
-            >
-              <option value="All">All subjects</option>
-              {SUBJECT_ORDER.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
-            </select>
-            <Link href="/formulas" className="ml-auto text-xs font-semibold text-indigo-700 hover:text-indigo-800">
-              Open searchable formulas
-            </Link>
+                <option value="All">All subjects</option>
+                {SUBJECT_ORDER.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
+              </select>
+              <Link href="/formulas" className="text-xs font-semibold text-indigo-700 hover:text-indigo-800 whitespace-nowrap">
+                Open searchable formulas
+              </Link>
+            </div>
           </div>
         </div>
 
         <div className="grid xl:grid-cols-[1fr_280px] gap-5">
-          <div className="space-y-4">
+          <div className="space-y-4 min-w-0">
             {SUBJECT_ORDER.filter((subject) => grouped.has(subject)).map((subject) => {
               const chapters = grouped.get(subject)!;
               return (
@@ -89,16 +95,16 @@ export default function EquationsPage() {
                       .map(([chapterKey, formulas]) => {
                         const [chapterId, chapterTitle] = chapterKey.split('|');
                         return (
-                          <div key={chapterKey} className="rounded-xl border border-[#E8E4DC] bg-[#FAF9F5] p-3">
+                          <div key={chapterKey} className="rounded-xl border border-[#E8E4DC] bg-[#FAF9F5] p-3 min-w-0">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-sm font-semibold text-navy-700">{chapterTitle}</p>
                               <Link href={`/chapters/${chapterId}`} className="text-xs font-semibold text-indigo-700 hover:text-indigo-800">
                                 Open chapter
                               </Link>
                             </div>
-                            <div className="mt-2 grid md:grid-cols-2 gap-2">
+                            <div className="mt-2 grid md:grid-cols-2 gap-2 min-w-0">
                               {formulas.map((formula) => (
-                                <div key={formula.id} className="rounded-lg border border-[#E8E4DC] bg-white px-2.5 py-2">
+                                <div key={formula.id} className="rounded-lg border border-[#E8E4DC] bg-white px-2.5 py-2 min-w-0">
                                   <p className="text-xs font-semibold text-[#1F1F35]">{formula.name}</p>
                                   <div className="mt-1 overflow-x-auto">
                                     <BlockMath math={formula.latex} />

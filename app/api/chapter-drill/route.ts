@@ -13,6 +13,8 @@ import {
   type MCQItem,
 } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface ChapterDrillRequest {
   chapterId: string;
@@ -155,6 +157,9 @@ function ensureExactDrillCount(
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     const parsed = parseRequest(body);
     if (!parsed) {
@@ -210,7 +215,7 @@ Return ONLY JSON:
 ${buildVariationInstruction(variation)}`;
 
     try {
-      const { data } = await generateTaskJson<ChapterDrillResponse>({
+      const { data, result } = await generateTaskJson<ChapterDrillResponse>({
         task: 'chapter-drill',
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
@@ -265,6 +270,15 @@ ${buildVariationInstruction(variation)}`;
         ]),
       };
 
+      await logAiUsage({
+        context,
+        endpoint: '/api/chapter-drill',
+        provider: result.provider,
+        model: result.model,
+        promptText: promptWithVariation,
+        completionText: JSON.stringify(response),
+        estimated: true,
+      });
       return NextResponse.json(response);
     } catch (aiError) {
       const reason = aiError instanceof Error ? aiError.message : String(aiError);

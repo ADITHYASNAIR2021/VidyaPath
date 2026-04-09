@@ -4,11 +4,13 @@ import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const session = getAdminSessionFromRequestCookies();
+  const session = await getAdminSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Admin session required.');
   return NextResponse.json({
-    role: 'admin',
+    role: session.role,
     issuedAt: session.issuedAt,
     expiresAt: session.expiresAt,
+    schoolId: session.schoolId,
+    authUserId: session.authUserId,
   });
 }

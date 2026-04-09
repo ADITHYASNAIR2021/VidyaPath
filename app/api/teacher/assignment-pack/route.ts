@@ -43,7 +43,7 @@ export async function GET(req: Request) {
     }
 
     if (!canViewFullPack) {
-      const studentSession = getStudentSessionFromRequestCookies();
+      const studentSession = await getStudentSessionFromRequestCookies();
       if (!studentSession) {
         return NextResponse.json({ error: 'Student login required.' }, { status: 401 });
       }

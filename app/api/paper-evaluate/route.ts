@@ -10,6 +10,8 @@ import {
   stripSourceTags,
   type PaperEvaluateResponse,
 } from '@/lib/ai/validators';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface AnswerInput {
   questionNo: string;
@@ -83,6 +85,9 @@ function buildHeuristicEvaluation(payload: PaperEvaluateRequest): PaperEvaluateR
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     const parsed = parseRequest(body);
     if (!parsed) {
@@ -135,7 +140,7 @@ Return ONLY JSON:
 }`;
 
     try {
-      const { data } = await generateTaskJson<PaperEvaluateResponse>({
+      const { data, result } = await generateTaskJson<PaperEvaluateResponse>({
         task: 'paper-evaluate',
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
@@ -158,7 +163,7 @@ Return ONLY JSON:
         .filter((id) => validChapterIds.has(id))
         .slice(0, 6);
 
-      return NextResponse.json({
+      const payload = {
         ...fallback,
         ...data,
         scoreEstimate: Math.max(0, Math.min(100, Number(data.scoreEstimate))),
@@ -171,7 +176,17 @@ Return ONLY JSON:
           score: Math.max(0, Math.min(100, Number(section.score) || 0)),
           maxScore: Math.max(1, Math.min(100, Number(section.maxScore) || 1)),
         })),
+      };
+      await logAiUsage({
+        context,
+        endpoint: '/api/paper-evaluate',
+        provider: result.provider,
+        model: result.model,
+        promptText: prompt,
+        completionText: JSON.stringify(payload),
+        estimated: true,
       });
+      return NextResponse.json(payload);
     } catch (aiError) {
       console.error('[paper-evaluate] AI fallback triggered', aiError);
       return NextResponse.json(fallback);

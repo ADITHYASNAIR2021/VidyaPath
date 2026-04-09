@@ -10,6 +10,8 @@ import { evaluateTeacherAssignmentSubmission } from '@/lib/teacher-assignment';
 import type { TeacherSubmissionAnswer } from '@/lib/teacher-types';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 
+export const dynamic = 'force-dynamic';
+
 function parseAnswers(value: unknown): TeacherSubmissionAnswer[] {
   if (!Array.isArray(value)) return [];
   const answers: TeacherSubmissionAnswer[] = [];
@@ -27,7 +29,7 @@ function parseAnswers(value: unknown): TeacherSubmissionAnswer[] {
 export async function POST(req: Request) {
   try {
     await assertTeacherStorageWritable();
-    const studentSession = getStudentSessionFromRequestCookies();
+    const studentSession = await getStudentSessionFromRequestCookies();
     if (!studentSession) {
       return NextResponse.json({ error: 'Student login required.' }, { status: 401 });
     }

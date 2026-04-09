@@ -5,7 +5,7 @@ import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { getStudentSubmissionResults } from '@/lib/teacher-admin-db';
 
 export async function GET(req: Request) {
-  const student = getStudentSessionFromRequestCookies();
+  const student = await getStudentSessionFromRequestCookies();
   if (!student) {
     return NextResponse.json({ error: 'Student login required.' }, { status: 401 });
   }

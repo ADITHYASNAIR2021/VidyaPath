@@ -10,6 +10,8 @@ import {
   stripSourceTags,
   type ChapterPackResponse,
 } from '@/lib/ai/validators';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface ChapterPackRequest {
   chapterId: string;
@@ -83,6 +85,9 @@ function filterTopicsForChapter(candidates: string[], chapterTitle: string, chap
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     const parsed = parseRequest(body);
     if (!parsed) {
@@ -137,7 +142,7 @@ Return ONLY JSON:
 }`;
 
     try {
-      const { data } = await generateTaskJson<ChapterPackResponse>({
+      const { data, result } = await generateTaskJson<ChapterPackResponse>({
         task: 'chapter-pack',
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
@@ -164,7 +169,7 @@ Return ONLY JSON:
         ...(data.sourceCitations ?? []),
       ]);
 
-      return NextResponse.json({
+      const payload = {
         ...data,
         chapterId: chapter.id,
         chapterTitle: chapter.title,
@@ -182,7 +187,18 @@ Return ONLY JSON:
         commonMistakes: cleanTextList(data.commonMistakes, 6).length > 0 ? cleanTextList(data.commonMistakes, 6) : fallback.commonMistakes,
         examStrategy: cleanTextList(data.examStrategy, 6).length > 0 ? cleanTextList(data.examStrategy, 6) : fallback.examStrategy,
         sourceCitations,
+      };
+      await logAiUsage({
+        context,
+        endpoint: '/api/chapter-pack',
+        provider: result.provider,
+        model: result.model,
+        promptText: prompt,
+        completionText: JSON.stringify(payload),
+        estimated: true,
       });
+
+      return NextResponse.json(payload);
     } catch (aiError) {
       console.error('[chapter-pack] AI fallback triggered', aiError);
       return NextResponse.json(fallback);

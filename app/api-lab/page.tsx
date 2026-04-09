@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { Play, RefreshCcw, Search, ShieldAlert, Terminal } from 'lucide-react';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
-type AuthScope = 'none' | 'student' | 'teacher' | 'admin' | 'mixed';
+type AuthScope = 'none' | 'student' | 'teacher' | 'admin' | 'developer' | 'mixed';
 
 interface EndpointPreset {
   id: string;
@@ -41,6 +41,7 @@ const AUTH_LABEL: Record<AuthScope, string> = {
   student: 'Student session',
   teacher: 'Teacher session',
   admin: 'Admin session',
+  developer: 'Developer session',
   mixed: 'Role-dependent',
 };
 
@@ -52,7 +53,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Chapter-aware tutor response.',
     method: 'POST',
     path: '/api/ai-tutor',
-    auth: 'none',
+    auth: 'student',
     sampleBody: {
       messages: [{ role: 'user', content: 'Explain Nernst equation with one solved example.' }],
       chapterContext: {
@@ -71,7 +72,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Chapter MCQ generation.',
     method: 'POST',
     path: '/api/generate-quiz',
-    auth: 'none',
+    auth: 'student',
     sampleBody: { chapterId: 'c12-chem-2', questionCount: 10, difficulty: 'mixed' },
   },
   {
@@ -81,7 +82,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Chapter flashcard generation.',
     method: 'POST',
     path: '/api/generate-flashcards',
-    auth: 'none',
+    auth: 'student',
     sampleBody: { chapterId: 'c12-chem-2', subject: 'Chemistry', chapterTitle: 'Electrochemistry' },
   },
   {
@@ -91,7 +92,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Gemini vision question solver.',
     method: 'POST',
     path: '/api/image-solve',
-    auth: 'none',
+    auth: 'student',
     sampleBody: {
       imageBase64: '<paste-base64-here>',
       mimeType: 'image/jpeg',
@@ -107,7 +108,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'High-yield chapter analysis.',
     method: 'POST',
     path: '/api/chapter-pack',
-    auth: 'none',
+    auth: 'student',
     sampleBody: { chapterId: 'c12-chem-2' },
   },
   {
@@ -117,7 +118,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Question drill generation.',
     method: 'POST',
     path: '/api/chapter-drill',
-    auth: 'none',
+    auth: 'student',
     sampleBody: { chapterId: 'c12-chem-2', questionCount: 12, difficulty: 'hard-heavy' },
   },
   {
@@ -127,7 +128,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Weakness diagnosis.',
     method: 'POST',
     path: '/api/chapter-diagnose',
-    auth: 'none',
+    auth: 'student',
     sampleBody: {
       chapterId: 'c12-chem-2',
       quizScore: 58,
@@ -144,7 +145,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: '7-day corrective plan.',
     method: 'POST',
     path: '/api/chapter-remediate',
-    auth: 'none',
+    auth: 'student',
     sampleBody: {
       chapterId: 'c12-chem-2',
       weakTags: ['Low Quiz Accuracy', 'High Recall Debt'],
@@ -159,7 +160,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Context retriever debug endpoint.',
     method: 'POST',
     path: '/api/context-pack',
-    auth: 'none',
+    auth: 'student',
     sampleBody: {
       classLevel: 12,
       subject: 'Chemistry',
@@ -176,7 +177,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Weak-area mixed test generation.',
     method: 'POST',
     path: '/api/adaptive-test',
-    auth: 'none',
+    auth: 'student',
     sampleBody: {
       classLevel: 12,
       subject: 'Chemistry',
@@ -193,7 +194,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Exam-date aware revision planner.',
     method: 'POST',
     path: '/api/revision-plan',
-    auth: 'none',
+    auth: 'student',
     sampleBody: {
       classLevel: 12,
       subject: 'Chemistry',
@@ -210,7 +211,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Answer quality estimate from submitted text.',
     method: 'POST',
     path: '/api/paper-evaluate',
-    auth: 'none',
+    auth: 'student',
     sampleBody: {
       paperId: 'b12-chem-2024-d',
       classLevel: 12,
@@ -240,8 +241,9 @@ const ENDPOINTS: EndpointPreset[] = [
     auth: 'teacher',
     sampleBody: {
       chapterId: 'c12-chem-2',
-      action: 'upsert-topic-priority',
-      payload: { topics: ['Nernst equation', 'Electrolysis'], section: 'A' },
+      action: 'set-important-topics',
+      section: 'A',
+      topics: ['Nernst equation', 'Electrolysis'],
     },
   },
   {
@@ -323,7 +325,7 @@ const ENDPOINTS: EndpointPreset[] = [
     auth: 'teacher',
     sampleBody: {
       chapterId: 'c12-chem-2',
-      type: 'mcq',
+      kind: 'mcq',
       prompt: 'Which equation is used to compute cell potential under non-standard conditions?',
       options: ['Arrhenius equation', 'Nernst equation', 'Van der Waals equation', 'Clausius equation'],
       answerIndex: 1,
@@ -370,13 +372,10 @@ const ENDPOINTS: EndpointPreset[] = [
     auth: 'student',
     sampleBody: {
       packId: '<packId>',
-      studentName: 'Adithya',
-      submissionCode: 'A1201',
       answers: [
         { questionNo: 'Q1', answerText: 'My answer 1' },
         { questionNo: 'Q2', answerText: 'My answer 2' },
       ],
-      integritySummary: { violationCount: 0, warningCount: 0, autoSubmitted: false },
     },
   },
   {
@@ -422,7 +421,7 @@ const ENDPOINTS: EndpointPreset[] = [
     method: 'POST',
     path: '/api/exam/session/start',
     auth: 'student',
-    sampleBody: { packId: '<packId>', studentName: 'Adithya', submissionCode: 'A1201' },
+    sampleBody: { packId: '<packId>' },
   },
   {
     id: 'exam-heartbeat',
@@ -458,7 +457,14 @@ const ENDPOINTS: EndpointPreset[] = [
     method: 'POST',
     path: '/api/student/session/login',
     auth: 'none',
-    sampleBody: { rollCode: 'A1201', pin: '1234', studentName: 'Adithya' },
+    sampleBody: {
+      schoolCode: 'VIDYAPATH-001',
+      classLevel: 12,
+      section: 'A',
+      batch: '2026',
+      rollNo: '23',
+      password: 'Student@123',
+    },
   },
   {
     id: 'student-me',
@@ -491,11 +497,11 @@ const ENDPOINTS: EndpointPreset[] = [
     id: 'teacher-login',
     group: 'Teacher Session',
     name: 'Teacher Login',
-    description: 'Phone + PIN teacher login.',
+    description: 'School scoped teacher login.',
     method: 'POST',
     path: '/api/teacher/session/login',
     auth: 'none',
-    sampleBody: { phone: '9876543210', pin: '1234' },
+    sampleBody: { schoolCode: 'VIDYAPATH-001', identifier: '9876543210', password: 'Teacher@123' },
   },
   {
     id: 'teacher-me',
@@ -519,10 +525,11 @@ const ENDPOINTS: EndpointPreset[] = [
     id: 'admin-bootstrap',
     group: 'Admin Session',
     name: 'Admin Bootstrap',
-    description: 'Admin login using bootstrap key query.',
+    description: 'Admin login using school credentials (key fallback supported).',
     method: 'POST',
-    path: '/api/admin/session/bootstrap?key=<ADMIN_PORTAL_KEY>',
+    path: '/api/admin/session/bootstrap',
     auth: 'none',
+    sampleBody: { schoolCode: 'VIDYAPATH-001', identifier: 'ADMIN01', password: 'Admin@123' },
   },
   {
     id: 'admin-me',
@@ -653,7 +660,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Bridge health and connectivity.',
     method: 'GET',
     path: '/api/integrations/sheets/status',
-    auth: 'teacher',
+    auth: 'admin',
   },
   {
     id: 'sheets-export',
@@ -662,7 +669,7 @@ const ENDPOINTS: EndpointPreset[] = [
     description: 'Export tests/submissions/grades to master sheet.',
     method: 'POST',
     path: '/api/integrations/sheets/export',
-    auth: 'teacher',
+    auth: 'admin',
     sampleBody: { mode: 'grades', packId: '<packId>' },
   },
   {
@@ -688,6 +695,49 @@ const ENDPOINTS: EndpointPreset[] = [
     },
   },
   {
+    id: 'developer-schools',
+    group: 'Developer',
+    name: 'Schools List',
+    description: 'Platform-wide school registry.',
+    method: 'GET',
+    path: '/api/developer/schools',
+    auth: 'developer',
+  },
+  {
+    id: 'developer-usage',
+    group: 'Developer',
+    name: 'Token Usage Rollup',
+    description: 'Cross-school token consumption details.',
+    method: 'GET',
+    path: '/api/developer/usage/tokens?limit=100',
+    auth: 'developer',
+  },
+  {
+    id: 'developer-audit',
+    group: 'Developer',
+    name: 'Audit Feed',
+    description: 'Platform audit stream for role/activity/token events.',
+    method: 'GET',
+    path: '/api/developer/audit?limit=100',
+    auth: 'developer',
+  },
+  {
+    id: 'developer-school-create',
+    group: 'Developer',
+    name: 'Create School',
+    description: 'Provision a new school tenant.',
+    method: 'POST',
+    path: '/api/developer/schools',
+    auth: 'developer',
+    sampleBody: {
+      schoolName: 'VidyaPath Public School',
+      schoolCode: 'VIDYAPATH-001',
+      board: 'CBSE',
+      city: 'Kochi',
+      state: 'Kerala',
+    },
+  },
+  {
     id: 'analytics-track',
     group: 'Platform',
     name: 'Analytics Track',
@@ -695,7 +745,7 @@ const ENDPOINTS: EndpointPreset[] = [
     method: 'POST',
     path: '/api/analytics/track',
     auth: 'none',
-    sampleBody: { event: 'chapter_open', chapterId: 'c12-chem-2', subject: 'Chemistry', classLevel: 12 },
+    sampleBody: { eventName: 'chapter_view', chapterId: 'c12-chem-2' },
   },
 ];
 

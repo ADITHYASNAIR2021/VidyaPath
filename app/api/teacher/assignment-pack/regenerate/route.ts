@@ -9,6 +9,8 @@ import {
 import { buildTeacherAssignmentPackDraft, buildTeacherPackUrls, toAnswerKey } from '@/lib/teacher-assignment';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 interface RegenerateBody {
   packId: string;
   feedback?: string;

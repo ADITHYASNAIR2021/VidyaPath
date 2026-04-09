@@ -3,6 +3,8 @@ import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { createTeacherQuestionBankItem, listTeacherQuestionBank } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: Request) {
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return NextResponse.json({ error: 'Unauthorized teacher access.' }, { status: 401 });

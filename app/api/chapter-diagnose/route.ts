@@ -9,6 +9,8 @@ import {
   isChapterDiagnoseResponse,
   type ChapterDiagnoseResponse,
 } from '@/lib/ai/validators';
+import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { logAiUsage } from '@/lib/ai/token-usage';
 
 interface ChapterDiagnoseRequest {
   chapterId: string;
@@ -123,6 +125,9 @@ function normalizeTaskTypes(taskTypes: string[], fallback: string[]): string[] {
 
 export async function POST(req: Request) {
   try {
+    const { context, response: authResponse } = await requireInteractiveAuth();
+    if (authResponse) return authResponse;
+
     const body = await req.json().catch(() => null);
     const parsed = parseRequest(body);
     if (!parsed) {
@@ -170,7 +175,7 @@ Return ONLY JSON:
 }`;
 
     try {
-      const { data } = await generateTaskJson<ChapterDiagnoseResponse>({
+      const { data, result } = await generateTaskJson<ChapterDiagnoseResponse>({
         task: 'chapter-diagnose',
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
@@ -187,14 +192,24 @@ Return ONLY JSON:
       });
 
       const riskLevel = ['low', 'medium', 'high'].includes(data.riskLevel) ? data.riskLevel : fallback.riskLevel;
-      return NextResponse.json({
+      const payload = {
         chapterId: chapter.id,
         riskLevel,
         weakTags: normalizeWeakTags(data.weakTags, fallback.weakTags),
         diagnosis: cleanTextList(data.diagnosis, 6).length > 0 ? cleanTextList(data.diagnosis, 6) : fallback.diagnosis,
         nextActions: cleanTextList(data.nextActions, 6).length > 0 ? cleanTextList(data.nextActions, 6) : fallback.nextActions,
         recommendedTaskTypes: normalizeTaskTypes(data.recommendedTaskTypes, fallback.recommendedTaskTypes),
+      };
+      await logAiUsage({
+        context,
+        endpoint: '/api/chapter-diagnose',
+        provider: result.provider,
+        model: result.model,
+        promptText: prompt,
+        completionText: JSON.stringify(payload),
+        estimated: true,
       });
+      return NextResponse.json(payload);
     } catch (aiError) {
       console.error('[chapter-diagnose] AI fallback triggered', aiError);
       return NextResponse.json(fallback);

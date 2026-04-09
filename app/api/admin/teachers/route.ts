@@ -6,10 +6,14 @@ import { createTeacher, listTeachers } from '@/lib/teacher-admin-db';
 import type { TeacherScope } from '@/lib/teacher-types';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 
+export const dynamic = 'force-dynamic';
+
 interface CreateTeacherRequest {
   phone: string;
   name: string;
   pin: string;
+  staffCode?: string;
+  password?: string;
   scopes?: Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }>;
 }
 
@@ -19,6 +23,8 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
   const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const pin = typeof body.pin === 'string' ? body.pin.trim() : '';
+  const staffCode = typeof body.staffCode === 'string' ? body.staffCode.trim() : undefined;
+  const password = typeof body.password === 'string' ? body.password.trim() : undefined;
   if (!phone || !name || !pin) return null;
   if (!isValidPin(pin)) return null;
   const scopes: Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }> = [];
@@ -33,17 +39,19 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
       scopes.push({ classLevel: classLevel as 10 | 12, subject: subject as TeacherScope['subject'], section });
     });
   }
-  return { phone, name, pin, scopes };
+  return { phone, name, pin, staffCode, password, scopes };
 }
 
 export async function GET() {
-  if (!getAdminSessionFromRequestCookies()) return unauthorizedJson('Admin session required.');
-  const teachers = await listTeachers();
+  const adminSession = await getAdminSessionFromRequestCookies();
+  if (!adminSession) return unauthorizedJson('Admin session required.');
+  const teachers = await listTeachers(adminSession.role === 'admin' ? adminSession.schoolId : undefined);
   return NextResponse.json({ teachers });
 }
 
 export async function POST(req: Request) {
-  if (!getAdminSessionFromRequestCookies()) return unauthorizedJson('Admin session required.');
+  const adminSession = await getAdminSessionFromRequestCookies();
+  if (!adminSession) return unauthorizedJson('Admin session required.');
   const body = await req.json().catch(() => null);
   const parsed = parseCreateTeacher(body);
   if (!parsed) {
@@ -54,7 +62,15 @@ export async function POST(req: Request) {
   }
   try {
     await assertTeacherStorageWritable();
-    const teacher = await createTeacher(parsed);
+    const schoolId = adminSession.role === 'developer'
+      ? (body && typeof body === 'object' && typeof (body as Record<string, unknown>).schoolId === 'string'
+          ? String((body as Record<string, unknown>).schoolId).trim()
+          : undefined)
+      : adminSession.schoolId;
+    if (!schoolId) {
+      return NextResponse.json({ error: 'School scope missing for admin session.' }, { status: 400 });
+    }
+    const teacher = await createTeacher({ ...parsed, schoolId });
     return NextResponse.json({ teacher });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create teacher.';

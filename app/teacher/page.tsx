@@ -476,16 +476,16 @@ export default function TeacherPortalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FDFAF6] px-4 py-8">
+    <div className="min-h-screen bg-[#FDFAF6] px-4 py-8 overflow-x-hidden">
       <div className="max-w-7xl mx-auto space-y-5">
         <div className="rounded-2xl bg-gradient-to-br from-amber-600 to-orange-600 text-white px-5 py-6">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h1 className="font-fraunces text-3xl font-bold">Teacher Assessment Desk</h1>
+              <h1 className="font-fraunces text-2xl sm:text-3xl font-bold">Teacher Assessment Desk</h1>
               <p className="text-amber-100 text-sm mt-1.5">Welcome, {teacherName}.</p>
               <p className="text-amber-100 text-sm mt-1">Draft to Review to Publish. Teacher grading is final. Results release is manual.</p>
             </div>
-            <button onClick={logout} className="text-xs font-semibold bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30">Logout</button>
+            <button onClick={logout} className="self-start text-xs font-semibold bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30">Logout</button>
           </div>
           <p className="text-[11px] mt-2 text-amber-50">Updated: {fmt(config?.updatedAt)}</p>
         </div>
@@ -494,8 +494,8 @@ export default function TeacherPortalPage() {
           <span className="font-semibold">Storage:</span> {config?.storageStatus?.message || 'Status unavailable'}
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-5">
-          <div className="lg:col-span-2 space-y-5">
+        <div className="grid lg:grid-cols-3 gap-5 min-w-0">
+          <div className="lg:col-span-2 space-y-5 min-w-0">
             <div className="bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-4">
               <h2 className="font-fraunces text-lg font-bold text-navy-700">Chapter Controls</h2>
               <div className="grid sm:grid-cols-2 gap-3 mt-3">
@@ -590,7 +590,7 @@ export default function TeacherPortalPage() {
             </div>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-5 min-w-0">
             <div className="bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-4">
               <p className="text-xs font-semibold text-indigo-900">Assignments completed this week</p>
               <p className="text-xl font-bold text-indigo-700">{config?.assignmentAnalytics?.assignmentsCompletedThisWeek ?? 0}</p>
@@ -602,7 +602,7 @@ export default function TeacherPortalPage() {
               <p className="text-xs font-semibold text-[#2C2A3A]">Assignment packs</p>
               <div className="mt-2 space-y-2 max-h-72 overflow-y-auto pr-1">
                 {packs.slice(0, 20).map((pack) => (
-                  <div key={pack.packId} className="rounded-xl border border-[#E8E4DC] bg-[#F9F8F4] px-3 py-2">
+                  <div key={pack.packId} className="rounded-xl border border-[#E8E4DC] bg-[#F9F8F4] px-3 py-2 min-w-0">
                     <p className="text-xs font-semibold text-[#20203A]">{pack.title}</p>
                     <p className="text-[11px] text-[#6A6A84] mt-0.5">{pack.status} | due {pack.dueDate || 'NA'}</p>
                     <div className="mt-1.5 flex gap-2 text-[11px] flex-wrap">
@@ -621,7 +621,7 @@ export default function TeacherPortalPage() {
                 <button onClick={releaseResults} disabled={loading || !selectedPackId} className="text-[11px] font-semibold bg-emerald-600 text-white px-2.5 py-1 rounded-lg disabled:opacity-50">Release Results</button>
               </div>
               {selectedPack && (
-                <div className="mt-2 rounded-lg border border-[#E8E4DC] bg-[#F9F8F4] px-2.5 py-2 text-[11px] text-[#4A4A6A]">
+                <div className="mt-2 rounded-lg border border-[#E8E4DC] bg-[#F9F8F4] px-2.5 py-2 text-[11px] text-[#4A4A6A] break-words">
                   <p className="font-semibold text-[#1F1F35]">{selectedPack.title}</p>
                   <p className="mt-0.5">
                     Chapter: {selectedChapter?.title ?? selectedPack.chapterId}
@@ -651,11 +651,11 @@ export default function TeacherPortalPage() {
                             (existingGrade ? String(existingGrade.maxScore) : String(questionRow.defaultMax));
                           const feedbackValue = draftRows[questionNo]?.f ?? (existingGrade?.feedback ?? '');
                           return (
-                          <div key={`${attempt.submissionId}-${questionNo}`} className="grid grid-cols-12 gap-1 items-center">
-                            <span className="col-span-2 text-[11px] text-[#4a4a6a]">{questionNo}</span>
-                            <input value={scoreValue} onChange={(e) => setGradeDrafts((prev) => ({ ...prev, [attempt.submissionId]: { ...(prev[attempt.submissionId] ?? {}), [questionNo]: { s: e.target.value, m: maxValue, f: feedbackValue } } }))} placeholder="score" className="col-span-2 text-[11px] border border-[#E8E4DC] rounded px-1 py-1" />
-                            <input value={maxValue} onChange={(e) => setGradeDrafts((prev) => ({ ...prev, [attempt.submissionId]: { ...(prev[attempt.submissionId] ?? {}), [questionNo]: { s: scoreValue || '0', m: e.target.value, f: feedbackValue } } }))} placeholder="max" className="col-span-2 text-[11px] border border-[#E8E4DC] rounded px-1 py-1" />
-                            <input value={feedbackValue} onChange={(e) => setGradeDrafts((prev) => ({ ...prev, [attempt.submissionId]: { ...(prev[attempt.submissionId] ?? {}), [questionNo]: { s: scoreValue || '0', m: maxValue, f: e.target.value } } }))} placeholder="feedback" className="col-span-6 text-[11px] border border-[#E8E4DC] rounded px-1 py-1" />
+                          <div key={`${attempt.submissionId}-${questionNo}`} className="grid grid-cols-1 sm:grid-cols-12 gap-1.5 items-center">
+                            <span className="text-[11px] text-[#4a4a6a] sm:col-span-2">{questionNo}</span>
+                            <input value={scoreValue} onChange={(e) => setGradeDrafts((prev) => ({ ...prev, [attempt.submissionId]: { ...(prev[attempt.submissionId] ?? {}), [questionNo]: { s: e.target.value, m: maxValue, f: feedbackValue } } }))} placeholder="score" className="text-[11px] border border-[#E8E4DC] rounded px-1.5 py-1.5 sm:col-span-2 w-full" />
+                            <input value={maxValue} onChange={(e) => setGradeDrafts((prev) => ({ ...prev, [attempt.submissionId]: { ...(prev[attempt.submissionId] ?? {}), [questionNo]: { s: scoreValue || '0', m: e.target.value, f: feedbackValue } } }))} placeholder="max" className="text-[11px] border border-[#E8E4DC] rounded px-1.5 py-1.5 sm:col-span-2 w-full" />
+                            <input value={feedbackValue} onChange={(e) => setGradeDrafts((prev) => ({ ...prev, [attempt.submissionId]: { ...(prev[attempt.submissionId] ?? {}), [questionNo]: { s: scoreValue || '0', m: maxValue, f: e.target.value } } }))} placeholder="feedback" className="text-[11px] border border-[#E8E4DC] rounded px-1.5 py-1.5 sm:col-span-6 w-full" />
                           </div>
                           );
                         })}
