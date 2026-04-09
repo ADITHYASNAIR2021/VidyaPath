@@ -8,6 +8,10 @@ if (-not (Test-Path $root)) {
 }
 
 function Get-CanonicalSubject([string]$filename) {
+  if ($filename -match 'accountancy|accounts') { return 'Accountancy' }
+  if ($filename -match 'business[_ -]?stud') { return 'Business Studies' }
+  if ($filename -match 'economics|\beco\b') { return 'Economics' }
+  if ($filename -match 'english|lang[_ -]?lit|language[_ -]?and[_ -]?literature') { return 'English Core' }
   if ($filename -match 'biology|\bbio\b' -and $filename -notmatch 'biotechnology') { return 'Biology' }
   if ($filename -match 'chem') { return 'Chemistry' }
   if (($filename -match 'physics') -or ($filename -match '(?:^|[^a-z])phy(?:[^a-z]|$)')) { return 'Physics' }
@@ -65,8 +69,8 @@ foreach ($file in $files) {
   }
 
   if ($classLevel -eq 12 -and $subject -eq 'Science') { continue }
-  if ($classLevel -eq 10 -and $subject -notin @('Science', 'Math')) { continue }
-  if ($classLevel -eq 12 -and $subject -notin @('Physics', 'Chemistry', 'Biology', 'Math')) { continue }
+  if ($classLevel -eq 10 -and $subject -notin @('Science', 'Math', 'English Core')) { continue }
+  if ($classLevel -eq 12 -and $subject -notin @('Physics', 'Chemistry', 'Biology', 'Math', 'Accountancy', 'Business Studies', 'Economics', 'English Core')) { continue }
 
   $variant = if ($subject -eq 'Math' -and $classLevel -eq 10) {
     Get-MathVariant $filename $relativePath.ToLower()

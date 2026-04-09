@@ -3,7 +3,9 @@
 // ALL chapters: Class 10 (Science + Math), Class 11, Class 12
 // ============================================================
 
-export type Subject = 'Physics' | 'Chemistry' | 'Biology' | 'Math';
+import type { SupportedSubject } from '@/lib/academic-taxonomy';
+
+export type Subject = SupportedSubject;
 export type ClassLevel = 10 | 11 | 12;
 
 export interface Chapter {
@@ -1708,12 +1710,329 @@ const class12Math: Chapter[] = [
 ];
 
 // ============================================================
+// CLASS 10 - ENGLISH CORE (First Flight + Footprints)
+// ============================================================
+
+const class10English: Chapter[] = [
+  {
+    id: 'c10-eng-1', classLevel: 10, subject: 'English Core', chapterNumber: 1,
+    title: 'A Letter to God',
+    description: 'Character, theme, and value-based board questions from the opening prose chapter.',
+    marks: 5,
+    topics: ['Theme of faith and irony', 'Character sketch of Lencho', 'Letter writing context', 'Value-based questions', 'Extract-based comprehension'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?jefp1=0-11',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c10-eng-2', classLevel: 10, subject: 'English Core', chapterNumber: 2,
+    title: 'Nelson Mandela: Long Walk to Freedom',
+    description: 'Important for extract questions, main idea questions, and short/long board answers.',
+    marks: 6,
+    topics: ['Autobiographical tone', 'Freedom and responsibility', 'Inauguration details', 'Language devices', 'Character and values'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?jefp1=0-11',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c10-eng-3', classLevel: 10, subject: 'English Core', chapterNumber: 3,
+    title: 'Two Stories about Flying',
+    description: 'Board-focused chapter for plot flow, fear-to-confidence transitions, and extract practice.',
+    marks: 6,
+    topics: ['His First Flight summary', 'Black Aeroplane mystery', 'Theme and message', 'Character feelings', 'Exam-oriented extracts'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?jefp1=0-11',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c10-eng-4', classLevel: 10, subject: 'English Core', chapterNumber: 4,
+    title: 'From the Diary of Anne Frank',
+    description: 'High-yield chapter for diary format understanding and value-based writing responses.',
+    marks: 5,
+    topics: ['Diary as a form', 'Anne’s perspective', 'School and teacher episodes', 'Narrative voice', 'Value-based answer framing'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?jefp1=0-11',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c10-eng-5', classLevel: 10, subject: 'English Core', chapterNumber: 5,
+    title: 'Glimpses of India',
+    description: 'Frequently asked for short notes, regional detail comparison, and map-based context.',
+    marks: 6,
+    topics: ['A Baker from Goa', 'Coorg key details', 'Tea from Assam', 'Travel description style', 'Extract and short-answer practice'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?jefp1=0-11',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c10-eng-6', classLevel: 10, subject: 'English Core', chapterNumber: 6,
+    title: 'The Proposal',
+    description: 'Drama chapter useful for character contrast, comic elements, and extract analysis.',
+    marks: 5,
+    topics: ['Comic conflict', 'Character traits', 'Dialogue analysis', 'Theme and satire', 'Board extract strategy'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?jefp1=0-11',
+    examRelevance: ['Board'],
+  },
+];
+
+// ============================================================
+// CLASS 12 - ENGLISH CORE (Flamingo + Vistas)
+// ============================================================
+
+const class12English: Chapter[] = [
+  {
+    id: 'c12-eng-1', classLevel: 12, subject: 'English Core', chapterNumber: 1,
+    title: 'The Last Lesson',
+    description: 'Core prose chapter for extract answers, themes of language identity, and long-answer framing.',
+    marks: 6,
+    topics: ['Theme of linguistic identity', 'Character of Franz', 'Role of M. Hamel', 'Exam extract handling', 'Value-based responses'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lefl1=0-14',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-eng-2', classLevel: 12, subject: 'English Core', chapterNumber: 2,
+    title: 'Lost Spring',
+    description: 'High-frequency chapter for social-theme writing and text-to-society analytical questions.',
+    marks: 7,
+    topics: ['Theme of poverty and exploitation', 'Saheb and Mukesh contrast', 'Narrative tone', 'Important textual references', 'Board long-answer structure'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lefl1=0-14',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-eng-3', classLevel: 12, subject: 'English Core', chapterNumber: 3,
+    title: 'Deep Water',
+    description: 'Important chapter for personal transformation and fear-overcoming analytical questions.',
+    marks: 6,
+    topics: ['Fear psychology', 'Narrative sequence', 'Training and recovery arc', 'Theme interpretation', 'Extract-based preparation'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lefl1=0-14',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-eng-4', classLevel: 12, subject: 'English Core', chapterNumber: 4,
+    title: 'The Rattrap',
+    description: 'Board-important chapter for symbolism, character change, and moral-value responses.',
+    marks: 6,
+    topics: ['Symbolism of the rattrap', 'Character development', 'Compassion as turning point', 'Theme and message', 'Board answer frameworks'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lefl1=0-14',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-eng-5', classLevel: 12, subject: 'English Core', chapterNumber: 5,
+    title: 'Indigo',
+    description: 'Historical-context chapter often asked in analytical and value-based board questions.',
+    marks: 7,
+    topics: ['Champaran movement context', 'Gandhi’s leadership traits', 'Social justice framing', 'Theme-based writing points', 'Extract and short answer strategy'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lefl1=0-14',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-eng-6', classLevel: 12, subject: 'English Core', chapterNumber: 6,
+    title: 'Going Places',
+    description: 'Frequently asked chapter for theme interpretation, characterization, and inferential answers.',
+    marks: 6,
+    topics: ['Adolescence and aspirations', 'Character of Sophie', 'Fantasy vs reality', 'Narrative viewpoint', 'Board-oriented inferential responses'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lefl1=0-14',
+    examRelevance: ['Board'],
+  },
+];
+
+// ============================================================
+// CLASS 12 - COMMERCE (Accountancy + Business Studies + Economics)
+// ============================================================
+
+const class12Commerce: Chapter[] = [
+  {
+    id: 'c12-acc-1', classLevel: 12, subject: 'Accountancy', chapterNumber: 1,
+    title: 'Accounting for Partnership Firms - Fundamentals',
+    description: 'Core board chapter for goodwill, profit-sharing ratios, and capital adjustments in partnership accounting.',
+    marks: 8,
+    topics: ['Partnership deed clauses', 'Fixed vs fluctuating capital', 'Past adjustments', 'Goodwill valuation basics', 'Profit-sharing ratio'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leac1=0-13',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'New Profit Sharing Ratio', latex: '\\text{Old Share} \\pm \\text{Gain/Loss}' },
+      { name: 'Sacrificing Ratio', latex: '\\text{Old Share} - \\text{New Share}' },
+      { name: 'Gaining Ratio', latex: '\\text{New Share} - \\text{Old Share}' },
+    ],
+  },
+  {
+    id: 'c12-acc-2', classLevel: 12, subject: 'Accountancy', chapterNumber: 2,
+    title: 'Reconstitution of Partnership - Admission and Retirement',
+    description: 'Frequently tested practical chapter with adjustments for reserves, goodwill, revaluation, and partner settlement.',
+    marks: 10,
+    topics: ['Admission of partner', 'Retirement and death of partner', 'Revaluation account', 'Accumulated profits and reserves', 'Capital account adjustments'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leac1=0-13',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'Hidden Goodwill', latex: '\\text{Goodwill} = \\frac{\\text{Total Capital} - \\text{Net Assets}}{1}' },
+      { name: 'Average Profit', latex: '\\frac{\\sum \\text{Profits}}{\\text{Number of Years}}' },
+      { name: 'Super Profit', latex: '\\text{Average Profit} - \\text{Normal Profit}' },
+    ],
+  },
+  {
+    id: 'c12-acc-3', classLevel: 12, subject: 'Accountancy', chapterNumber: 3,
+    title: 'Issue and Redemption of Debentures',
+    description: 'Scoring chapter for accounting treatment of debentures, discount/premium, and redemption methods.',
+    marks: 7,
+    topics: ['Issue of debentures', 'Debenture redemption reserve', 'Methods of redemption', 'Interest on debentures', 'Writing off loss on issue'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leac1=0-13',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'Interest on Debentures', latex: '\\text{Debenture Value} \\times \\frac{\\text{Rate}}{100}' },
+      { name: 'Loss on Issue Amortization', latex: '\\frac{\\text{Total Loss}}{\\text{Years}}' },
+    ],
+  },
+  {
+    id: 'c12-acc-4', classLevel: 12, subject: 'Accountancy', chapterNumber: 4,
+    title: 'Financial Statement Analysis and Accounting Ratios',
+    description: 'High-weightage board chapter for ratio computation and interpretation.',
+    marks: 8,
+    topics: ['Liquidity ratios', 'Solvency ratios', 'Activity ratios', 'Profitability ratios', 'Comparative statements'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leac2=0-10',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'Current Ratio', latex: '\\frac{\\text{Current Assets}}{\\text{Current Liabilities}}' },
+      { name: 'Quick Ratio', latex: '\\frac{\\text{Current Assets} - \\text{Inventory}}{\\text{Current Liabilities}}' },
+      { name: 'Debt-Equity Ratio', latex: '\\frac{\\text{Long-term Debt}}{\\text{Shareholders Funds}}' },
+      { name: 'Net Profit Ratio', latex: '\\frac{\\text{Net Profit}}{\\text{Revenue from Operations}} \\times 100' },
+      { name: 'Return on Investment', latex: '\\frac{\\text{Net Profit}}{\\text{Capital Employed}} \\times 100' },
+    ],
+  },
+  {
+    id: 'c12-acc-5', classLevel: 12, subject: 'Accountancy', chapterNumber: 5,
+    title: 'Cash Flow Statement',
+    description: 'Board-favourite chapter for classifying and computing operating, investing, and financing cash flows.',
+    marks: 7,
+    topics: ['Operating activities', 'Investing activities', 'Financing activities', 'Indirect method adjustments', 'Non-cash and non-operating items'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leac2=0-10',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'Net Cash from Operating Activities', latex: '\\text{Net Profit Before Tax} + \\text{Non-cash Expenses} - \\text{Non-operating Incomes} \\pm \\Delta\\text{Working Capital}' },
+      { name: 'Net Increase/Decrease in Cash', latex: '\\text{CFO} + \\text{CFI} + \\text{CFF}' },
+    ],
+  },
+  {
+    id: 'c12-bst-1', classLevel: 12, subject: 'Business Studies', chapterNumber: 1,
+    title: 'Nature and Significance of Management',
+    description: 'Conceptual foundation chapter asked in short and long analytical board responses.',
+    marks: 6,
+    topics: ['Management as science, art and profession', 'Levels of management', 'Objectives of management', 'Coordination', 'Functions of management'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lebs1=0-11',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-bst-2', classLevel: 12, subject: 'Business Studies', chapterNumber: 2,
+    title: 'Principles of Management',
+    description: 'Frequently tested chapter for Fayol principles and practical business applications.',
+    marks: 6,
+    topics: ['Fayol principles', 'Scientific management techniques', 'Taylor principles', 'Business case applications', 'Management thought'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lebs1=0-11',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-bst-3', classLevel: 12, subject: 'Business Studies', chapterNumber: 3,
+    title: 'Planning and Organising',
+    description: 'Important board chapter for process steps, strategy linkage, and decision outcomes.',
+    marks: 7,
+    topics: ['Planning process', 'Types of plans', 'Organising process', 'Delegation', 'Decentralisation'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lebs1=0-11',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-bst-4', classLevel: 12, subject: 'Business Studies', chapterNumber: 4,
+    title: 'Staffing and Directing',
+    description: 'Case-based chapter on recruitment, selection, motivation, leadership, and communication.',
+    marks: 7,
+    topics: ['Staffing steps', 'Recruitment vs selection', 'Training methods', 'Leadership styles', 'Communication process'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lebs2=0-10',
+    examRelevance: ['Board'],
+  },
+  {
+    id: 'c12-bst-5', classLevel: 12, subject: 'Business Studies', chapterNumber: 5,
+    title: 'Marketing and Consumer Protection',
+    description: 'High-yield business chapter for product-mix, pricing, promotion, and consumer rights.',
+    marks: 8,
+    topics: ['Marketing mix', 'Product life cycle', 'Promotion tools', 'Consumer rights', 'Consumer redressal system'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?lebs2=0-10',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'Break-even Point (Units)', latex: '\\frac{\\text{Fixed Cost}}{\\text{Selling Price per Unit} - \\text{Variable Cost per Unit}}' },
+    ],
+  },
+  {
+    id: 'c12-eco-1', classLevel: 12, subject: 'Economics', chapterNumber: 1,
+    title: 'National Income Accounting',
+    description: 'Most important macroeconomics chapter with GDP/NDP and income aggregate calculations.',
+    marks: 10,
+    topics: ['GDP, GNP, NDP, NNP', 'Nominal vs real GDP', 'Value added method', 'Income method', 'Expenditure method'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leec1=0-12',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'GDP at Market Price', latex: '\\sum \\text{Gross Value Added at Market Price}' },
+      { name: 'NDP at FC', latex: '\\text{GDP at MP} - \\text{Depreciation} - \\text{Net Indirect Taxes}' },
+      { name: 'Real GDP', latex: '\\frac{\\text{Nominal GDP}}{\\text{Price Index}} \\times 100' },
+    ],
+  },
+  {
+    id: 'c12-eco-2', classLevel: 12, subject: 'Economics', chapterNumber: 2,
+    title: 'Money and Banking',
+    description: 'Key board chapter on money supply, credit creation, and monetary policy tools.',
+    marks: 7,
+    topics: ['Functions of money', 'Commercial banking', 'Credit creation', 'Central bank functions', 'Monetary policy'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leec1=0-12',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'Money Multiplier', latex: '\\frac{1}{\\text{Required Reserve Ratio}}' },
+      { name: 'Required Reserves', latex: '\\text{Deposits} \\times \\text{Reserve Ratio}' },
+    ],
+  },
+  {
+    id: 'c12-eco-3', classLevel: 12, subject: 'Economics', chapterNumber: 3,
+    title: 'Income Determination and Multiplier',
+    description: 'Frequently asked numericals on equilibrium income, MPC, APS, and investment multiplier.',
+    marks: 8,
+    topics: ['Aggregate demand and supply', 'Equilibrium output', 'Consumption function', 'MPC and APC', 'Multiplier process'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leec1=0-12',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'Multiplier (k)', latex: '\\frac{1}{1-\\text{MPC}}' },
+      { name: 'APS', latex: '\\frac{S}{Y}' },
+      { name: 'APC', latex: '\\frac{C}{Y}' },
+      { name: 'Equilibrium Condition', latex: 'AD = AS' },
+    ],
+  },
+  {
+    id: 'c12-eco-4', classLevel: 12, subject: 'Economics', chapterNumber: 4,
+    title: 'Government Budget and the Economy',
+    description: 'Scoring chapter with fiscal deficit and budgetary classification numericals.',
+    marks: 7,
+    topics: ['Revenue vs capital receipts', 'Revenue vs capital expenditure', 'Budget deficits', 'Fiscal policy stance', 'Public debt'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leec1=0-12',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'Fiscal Deficit', latex: '\\text{Total Expenditure} - \\text{Total Receipts (excluding borrowings)}' },
+      { name: 'Primary Deficit', latex: '\\text{Fiscal Deficit} - \\text{Interest Payments}' },
+      { name: 'Revenue Deficit', latex: '\\text{Revenue Expenditure} - \\text{Revenue Receipts}' },
+    ],
+  },
+  {
+    id: 'c12-eco-5', classLevel: 12, subject: 'Economics', chapterNumber: 5,
+    title: 'Balance of Payments and Exchange Rate',
+    description: 'High-impact chapter for current account, capital account, and forex rate effects.',
+    marks: 7,
+    topics: ['Current account', 'Capital account', 'BOP deficit/surplus', 'Exchange rate systems', 'Depreciation and appreciation'],
+    ncertPdfUrl: 'https://ncert.nic.in/textbook.php?leec2=0-8',
+    examRelevance: ['Board'],
+    formulas: [
+      { name: 'BOP Identity', latex: '\\text{Current Account} + \\text{Capital Account} + \\Delta\\text{Reserves} = 0' },
+      { name: 'Terms of Trade', latex: '\\frac{\\text{Export Price Index}}{\\text{Import Price Index}} \\times 100' },
+    ],
+  },
+];
+
+// ============================================================
 // COMBINE ALL CHAPTERS
 // ============================================================
 
 export const ALL_CHAPTERS: Chapter[] = [
   ...class10Science,
   ...class10Math,
+  ...class10English,
   ...class11Physics,
   ...class11Chemistry,
   ...class11Biology,
@@ -1722,6 +2041,8 @@ export const ALL_CHAPTERS: Chapter[] = [
   ...class12Chemistry,
   ...class12Biology,
   ...class12Math,
+  ...class12Commerce,
+  ...class12English,
 ];
 
 // ── Helper Functions ────────────────────────────────────────
@@ -1743,7 +2064,14 @@ export function getChaptersByClassAndSubject(classLevel: ClassLevel, subject: Su
 }
 
 const SUBJECT_ORDER: Record<Subject, number> = {
-  Physics: 1, Chemistry: 2, Biology: 3, Math: 4,
+  Physics: 1,
+  Chemistry: 2,
+  Biology: 3,
+  Math: 4,
+  Accountancy: 5,
+  'Business Studies': 6,
+  Economics: 7,
+  'English Core': 8,
 };
 
 export function getSortedChapters(): Chapter[] {
@@ -1769,7 +2097,16 @@ export function getAdjacentChapters(id: string): {
 
 export function getChapterStats() {
   const byClass: Record<number, number> = { 10: 0, 11: 0, 12: 0 };
-  const bySubject: Record<string, number> = { Physics: 0, Chemistry: 0, Biology: 0, Math: 0 };
+  const bySubject: Record<string, number> = {
+    Physics: 0,
+    Chemistry: 0,
+    Biology: 0,
+    Math: 0,
+    Accountancy: 0,
+    'Business Studies': 0,
+    Economics: 0,
+    'English Core': 0,
+  };
   for (const ch of ALL_CHAPTERS) {
     byClass[ch.classLevel]++;
     bySubject[ch.subject]++;

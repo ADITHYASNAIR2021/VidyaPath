@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, BookOpen, FileText, Compass, Bookmark, Target } from 'lucide-react';
+import { Home, BookOpen, FileText, Compass, Target } from 'lucide-react';
 import clsx from 'clsx';
 
 const NAV_ITEMS = [
@@ -11,11 +11,15 @@ const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dash', icon: Target },
   { href: '/papers', label: 'Papers', icon: FileText },
   { href: '/career', label: 'Career', icon: Compass },
-  { href: '/bookmarks', label: 'Saved', icon: Bookmark },
 ];
 
 export default function MobileBottomNav() {
   const pathname = usePathname();
+  const isExamRoute = pathname.startsWith('/exam/assignment/');
+
+  if (isExamRoute) {
+    return null;
+  }
 
   return (
     <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#E8E4DC] z-50 pb-safe">

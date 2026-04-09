@@ -4,9 +4,7 @@ import {
   BookOpen,
   Calculator,
   Compass,
-  ExternalLink,
   FileText,
-  GraduationCap,
   MessageCircle,
   Network,
   Sparkles,
@@ -75,8 +73,8 @@ export default function HomePage() {
           <QuickLink
             href="/chapters?class=10"
             title="Class 10"
-            subtitle="Science + Math board flow"
-            details="Physics, Chemistry, Biology, and Math chapters with PYQ-driven study."
+            subtitle="Science + Math + English flow"
+            details="Physics, Chemistry, Biology, Math, and English Core chapters with PYQ-driven study."
           />
           <QuickLink
             href="/chapters?class=12"
@@ -174,30 +172,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="border-t border-[#E8E4DC] bg-white px-4 py-10">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-5">
-          <div>
-            <div className="flex items-center gap-2 justify-center md:justify-start">
-              <div className="w-7 h-7 rounded-lg bg-saffron-500 text-white flex items-center justify-center">
-                <GraduationCap className="w-4 h-4" />
-              </div>
-              <p className="font-fraunces text-lg font-bold text-navy-700">
-                Vidya<span className="text-saffron-500">Path</span>
-              </p>
-            </div>
-            <p className="text-xs text-[#8A8AAA] mt-1 text-center md:text-left">
-              Made with love by Adithya S Nair.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap justify-center gap-2">
-            <SourcePill href="https://ncert.nic.in" label="NCERT" />
-            <SourcePill href="https://cbseacademic.nic.in" label="CBSE" />
-            <SourcePill href="https://groq.com" label="Groq" />
-            <SourcePill href="https://vercel.com" label="Vercel" />
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }
@@ -258,19 +232,5 @@ function FeatureCard({
       <h3 className="font-semibold text-navy-700 mt-3">{title}</h3>
       <p className="text-sm text-[#4A4A6A] mt-1.5 leading-relaxed">{description}</p>
     </Link>
-  );
-}
-
-function SourcePill({ href, label }: { href: string; label: string }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-[#4A4A6A] hover:bg-gray-100 transition-colors"
-    >
-      {label}
-      <ExternalLink className="w-3 h-3 opacity-60" />
-    </a>
   );
 }

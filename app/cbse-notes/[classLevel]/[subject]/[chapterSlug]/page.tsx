@@ -105,7 +105,7 @@ export default function CbseNotesChapterPage({ params }: { params: NotesParams }
             </p>
           )}
           <Link href="/formulas" className="inline-flex mt-3 text-xs font-semibold text-indigo-700 hover:text-indigo-800">
-            Open full formula database {'->'}
+            Open full formula database
           </Link>
         </section>
 

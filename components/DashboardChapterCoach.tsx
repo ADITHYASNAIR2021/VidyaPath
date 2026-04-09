@@ -161,7 +161,7 @@ export default function DashboardChapterCoach({
         href={`/chapters/${chapterId}`}
         className="mt-3 inline-flex text-xs font-semibold text-indigo-700 hover:text-indigo-800"
       >
-        Open full chapter intelligence {'->'}
+        Open full chapter intelligence
       </Link>
     </div>
   );

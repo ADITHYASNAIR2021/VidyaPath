@@ -12,6 +12,8 @@ import {
   FlaskConical,
   Leaf,
   Calculator,
+  Briefcase,
+  LineChart,
   ClipboardList,
   Target,
   ChevronRight,
@@ -101,6 +103,34 @@ const SUBJECT_STYLES: Record<
     accentBg: 'bg-purple-50 border-purple-100',
     icon: Calculator,
   },
+  Accountancy: {
+    header: 'from-amber-600 to-amber-700',
+    badge: 'bg-amber-100 text-amber-700',
+    topicBg: 'bg-amber-50 border-amber-100 text-amber-700',
+    accentBg: 'bg-amber-50 border-amber-100',
+    icon: Briefcase,
+  },
+  'Business Studies': {
+    header: 'from-indigo-600 to-indigo-700',
+    badge: 'bg-indigo-100 text-indigo-700',
+    topicBg: 'bg-indigo-50 border-indigo-100 text-indigo-700',
+    accentBg: 'bg-indigo-50 border-indigo-100',
+    icon: LineChart,
+  },
+  Economics: {
+    header: 'from-rose-600 to-rose-700',
+    badge: 'bg-rose-100 text-rose-700',
+    topicBg: 'bg-rose-50 border-rose-100 text-rose-700',
+    accentBg: 'bg-rose-50 border-rose-100',
+    icon: LineChart,
+  },
+  'English Core': {
+    header: 'from-cyan-600 to-cyan-700',
+    badge: 'bg-cyan-100 text-cyan-700',
+    topicBg: 'bg-cyan-50 border-cyan-100 text-cyan-700',
+    accentBg: 'bg-cyan-50 border-cyan-100',
+    icon: BookOpen,
+  },
 };
 
 const RELEVANCE_STYLES: Record<string, string> = {
@@ -115,13 +145,20 @@ const RELEVANCE_DESC: Record<string, string> = {
   NEET: 'Important for NEET-UG',
 };
 
-export default function ChapterDetailPage({ params }: { params: { id: string } }) {
+export default function ChapterDetailPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { section?: string };
+}) {
   const chapter = getChapterById(params.id);
   if (!chapter) notFound();
 
   const { prev, next } = getAdjacentChapters(params.id);
   const style = SUBJECT_STYLES[chapter.subject] ?? SUBJECT_STYLES.Physics;
-  const SubjectIcon = style.icon;
+  const SubjectIcon = style.icon ?? Atom;
+  const section = typeof searchParams?.section === 'string' ? searchParams.section.trim() : '';
   const chapterPyq = getPYQData(chapter.id);
 
   const youtubeUrl = `https://www.youtube.com/results?search_query=CBSE+Class+${chapter.classLevel}+${chapter.subject}+${encodeURIComponent(chapter.title)}+NCERT`;
@@ -346,7 +383,7 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
                     className="mt-4 flex items-center gap-2 text-xs font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    Solve {chapter.subject} board papers {'->'}
+                    Solve {chapter.subject} board papers
                   </Link>
                 </div>
               );
@@ -432,7 +469,13 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
               </div>
             </div>
 
-            <TeacherChapterPanel chapterId={chapter.id} defaultQuizUrl={chapter.googleFormUrl} />
+            <TeacherChapterPanel
+              chapterId={chapter.id}
+              classLevel={chapter.classLevel === 10 || chapter.classLevel === 12 ? chapter.classLevel : undefined}
+              subject={chapter.subject}
+              section={section || undefined}
+              defaultQuizUrl={chapter.googleFormUrl}
+            />
 
             <ImageQuestionSolver
               chapterTitle={chapter.title}
@@ -527,3 +570,4 @@ export default function ChapterDetailPage({ params }: { params: { id: string } }
     </div>
   );
 }
+

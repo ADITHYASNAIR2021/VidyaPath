@@ -1,16 +1,21 @@
 # VidyaPath
 
 ## Project Overview
-VidyaPath is a free CBSE study platform for Science and Math learners, focused on high-impact board exam preparation with AI support and PYQ-driven study workflows.
+VidyaPath is a free CBSE study platform for Class 10 and 12 learners, focused on high-impact board exam preparation with AI support and PYQ-driven study workflows.
 
 Primary audience:
-- Class 10 students (Science and Math)
-- Class 12 students (Physics, Chemistry, Biology, Math)
+- Class 10 students (Science, Math, English Core)
+- Class 12 students (Physics, Chemistry, Biology, Math, English Core)
 
 Current scope:
 - Web app with chapter-wise learning, PYQ insights, AI tutor, quizzes, flashcards, papers, and career guidance.
 - No login required; progress and notes are stored locally in the browser.
 - Class 11 content exists in `lib/data.ts`, while current user flows are centered on Class 10 and Class 12.
+
+## Function Usage Guide
+- Detailed function-by-function usage (teacher portal, AI mentor, chapter intelligence, APIs, local state, testing):
+- `docs/FUNCTION_USAGE_GUIDE.md`
+- Operator runbook: `docs/OPERATOR_RUNBOOK.md`
 
 ## Implemented Features
 ### Learning
@@ -131,6 +136,12 @@ What you will see during Python context build:
 - `dropped_non_english`
 - `dropped_instruction`
 
+State migration (optional, one-time backfill to Supabase):
+
+```bash
+npm run migrate:supabase-state
+```
+
 Build and production run:
 
 ```bash
@@ -163,11 +174,18 @@ GROQ_API_KEY=your_groq_api_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
 # Optional (only if Python is installed in a non-standard path):
 # PYTHON_BIN=C:\Path\To\python.exe
+# Optional (recommended on Vercel for persistent server-side state):
+# SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+# SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+# SUPABASE_STATE_TABLE=app_state
+# SUPABASE_STATE_SCHEMA=public
 ```
 
 Notes:
 - Either key can power AI routes; both are recommended for fallback resilience.
 - If both keys are missing/invalid, AI routes return fallback or configuration errors depending on endpoint logic.
+- Teacher/admin writes are Supabase-first with production fail-fast behavior. If storage is misconfigured in production, APIs return actionable `503` errors.
+- Free DB comparison + setup rationale: `docs/FREE_DB_OPTIONS.md`.
 
 ## Data and Content Sources
 - Chapter content, exam metadata, career data:
@@ -248,6 +266,26 @@ New v2 routes (Gemini-first integrated intelligence):
 - Output: `{ chapterId, dayPlan, checkpoints, expectedScoreLift }`.
 - Behavior: Produces a short corrective study plan for weak chapter outcomes.
 
+- `POST /api/teacher/submission` (teacher workflow)
+- Input: `{ packId, studentName, submissionCode, answers: [{ questionNo, answerText }] }`.
+- Output: `{ scoreEstimate, mistakes, weakTopics, nextActions, attemptDetail, integritySummary }`.
+- Behavior: Stores per-attempt student analytics with question-wise correctness and integrity summary support.
+
+- `GET /api/teacher/submission-summary?packId=...` (teacher workflow)
+- Output includes: `attemptsByStudent`, `questionStats`, and `scoreTrend` in addition to summary cards.
+
+- `POST /api/exam/session/start`
+- Input: `{ packId, studentName, submissionCode }`.
+- Output: `{ session }`.
+
+- `POST /api/exam/session/heartbeat`
+- Input: `{ sessionId, events? }`.
+- Output: `{ session, integritySummary }`.
+
+- `POST /api/exam/session/submit`
+- Input: `{ sessionId, answers }`.
+- Output: `{ scoreEstimate, mistakes, weakTopics, nextActions, attemptDetail, integritySummary }`.
+
 ## Scripts
 Utilities in `scripts/` (one-line purpose each):
 
@@ -284,6 +322,7 @@ Utilities in `scripts/` (one-line purpose each):
 - No user accounts or cloud sync; notes/progress are browser-local.
 - AI output quality depends on provider quotas and model availability.
 - Gemini can return rate-limit errors on free-tier usage spikes.
+- Proctored-lite exam mode is a web best-effort integrity layer (fullscreen/visibility/copy-paste controls), not OS-level lockdown.
 - Paper-context retrieval is active via `lib/context` artifacts; full PDF text extraction quality depends on running `scripts/build_context_index.py` in a Python + `pypdf` environment.
 - Some legacy utility scripts still reference older Hugging Face repo naming and may require constant updates for consistency.
 
@@ -408,3 +447,6 @@ Success signal:
 - Coverage check: each major route and capability is represented in this README.
 - Config check: env variables and AI fallback behavior are explicit.
 - Roadmap check: each planned phase includes API shape and exam-impact success criteria.
+
+
+

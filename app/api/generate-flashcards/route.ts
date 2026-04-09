@@ -95,23 +95,30 @@ ${schemaNote}`;
     });
 
     const normalized = normalizeFlashcards(data);
-    if (normalized.length === 0) {
-      return NextResponse.json(
-        {
-          success: true,
-          data: buildFallbackCards({
-            subject,
-            chapterTitle,
-            chapterTopics: chapter?.topics ?? [],
-            pyqTopics: pyq?.importantTopics,
-            seedText: variation.diversityKey,
-          }),
-        },
-        { status: 200 }
-      );
+    const fallback = buildFallbackCards({
+      subject,
+      chapterTitle,
+      chapterTopics: chapter?.topics ?? [],
+      pyqTopics: pyq?.importantTopics,
+      seedText: variation.diversityKey,
+    });
+    const merged: FlashcardItem[] = [];
+    const seen = new Set<string>();
+    for (const card of normalized) {
+      const key = `${card.front}|${card.back}`.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(card);
+      if (merged.length >= 5) break;
     }
-
-    return NextResponse.json({ success: true, data: normalized.slice(0, 8) });
+    for (const card of fallback) {
+      if (merged.length >= 5) break;
+      const key = `${card.front}|${card.back}`.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(card);
+    }
+    return NextResponse.json({ success: true, data: merged.slice(0, 5) });
   } catch (error) {
     console.error('[Flashcard API Error]:', error);
     return NextResponse.json(

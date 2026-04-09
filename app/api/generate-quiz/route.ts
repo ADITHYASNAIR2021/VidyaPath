@@ -63,7 +63,7 @@ export async function POST(req: Request) {
       ? `PYQ signal: avg marks ${pyq.avgMarks}, years ${[...pyq.yearsAsked].sort((a, b) => b - a).slice(0, 8).join(', ')}, top topics ${pyq.importantTopics.join(', ')}.`
       : 'No PYQ signal available.';
 
-    const questionCount = Math.min(10, Math.max(3, Number(body.questionCount) || 5));
+    const questionCount = Math.min(20, Math.max(3, Number(body.questionCount) || 5));
     const variation = buildVariationProfile({
       task: 'mcq',
       contextHash: contextPack.contextHash,
@@ -108,25 +108,33 @@ ${schema}`;
     });
 
     const normalized = normalizeMCQs(data);
-    if (normalized.length === 0) {
-      return NextResponse.json(
-        {
-          success: true,
-          data: buildFallbackQuiz({
-            subject,
-            chapterTitle,
-            chapterTopics: chapter?.topics ?? [],
-            pyqTopics: pyq?.importantTopics,
-            questionCount,
-            difficulty,
-            seedText: variation.diversityKey,
-          }),
-        },
-        { status: 200 }
-      );
+    const fallback = buildFallbackQuiz({
+      subject,
+      chapterTitle,
+      chapterTopics: chapter?.topics ?? [],
+      pyqTopics: pyq?.importantTopics,
+      questionCount,
+      difficulty,
+      seedText: variation.diversityKey,
+    });
+    const merged: MCQItem[] = [];
+    const seen = new Set<string>();
+    for (const question of normalized) {
+      const key = question.question.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(question);
+      if (merged.length >= questionCount) break;
+    }
+    for (const question of fallback) {
+      if (merged.length >= questionCount) break;
+      const key = question.question.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(question);
     }
 
-    return NextResponse.json({ success: true, data: normalized.slice(0, questionCount) });
+    return NextResponse.json({ success: true, data: merged.slice(0, questionCount) });
   } catch (error) {
     console.error('[Quiz API Error]:', error);
     const questionCount = 5;

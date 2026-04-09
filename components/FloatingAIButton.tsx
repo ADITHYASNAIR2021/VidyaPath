@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Zap, X, Send, Loader2, RefreshCw, ShieldAlert, MessageCircle } from 'lucide-react';
 import clsx from 'clsx';
+import { usePathname } from 'next/navigation';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -14,6 +15,7 @@ const QUICK = [
   'What is Ohm\'s Law?',
   'Explain Newton\'s laws',
   'Important Class 12 reactions?',
+  'How to answer English extracts for boards?',
   'How to score 90+ in boards?',
 ];
 
@@ -25,6 +27,8 @@ export default function FloatingAIButton() {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pathname = usePathname();
+  const isExamRoute = pathname.startsWith('/exam/assignment/');
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -78,6 +82,10 @@ export default function FloatingAIButton() {
     }
   }
 
+  if (isExamRoute) {
+    return null;
+  }
+
   return (
     <>
       {/* Floating button */}
@@ -111,7 +119,7 @@ export default function FloatingAIButton() {
                 </div>
                 <div>
                   <div className="text-white font-semibold text-sm">VidyaAI Tutor</div>
-                  <div className="text-white/70 text-xs">CBSE Class 10 &amp; 12</div>
+                  <div className="text-white/70 text-xs">Class 10 &amp; 12 Board Prep</div>
                 </div>
               </div>
               {messages.length > 0 && (
@@ -134,7 +142,7 @@ export default function FloatingAIButton() {
                       <MessageCircle className="w-3 h-3 text-saffron-600" />
                     </div>
                     <div className="bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-sm px-3 py-2.5 text-xs text-[#4A4A6A] leading-relaxed">
-                      Hi! Ask me anything about <strong>CBSE Class 10 & 12</strong> Science & Math!
+                      Hi! Ask me anything about <strong>CBSE Class 10 &amp; 12</strong> core subjects and board prep.
                     </div>
                   </div>
                   <div className="space-y-1">

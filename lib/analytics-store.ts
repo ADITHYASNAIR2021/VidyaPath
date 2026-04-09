@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { ALL_CHAPTERS } from '@/lib/data';
+import { readStateFromSupabase, writeStateToSupabase } from '@/lib/persistence/supabase-state';
 
 type CounterMap = Record<string, number>;
 
@@ -13,6 +14,7 @@ interface AnalyticsState {
 
 const RUNTIME_DIR = path.join(process.cwd(), 'lib', 'runtime');
 const ANALYTICS_PATH = path.join(RUNTIME_DIR, 'analytics.json');
+const ANALYTICS_STATE_KEY = 'analytics_store_v1';
 
 let memoryState: AnalyticsState = {
   updatedAt: new Date().toISOString(),
@@ -26,6 +28,18 @@ function sanitizeKey(input: string): string {
 }
 
 async function readState(): Promise<AnalyticsState> {
+  const remoteState = await readStateFromSupabase<AnalyticsState>(ANALYTICS_STATE_KEY);
+  if (remoteState) {
+    const normalized: AnalyticsState = {
+      updatedAt: remoteState.updatedAt ?? new Date().toISOString(),
+      chapterViews: remoteState.chapterViews ?? {},
+      aiQuestionsByChapter: remoteState.aiQuestionsByChapter ?? {},
+      searchNoResults: remoteState.searchNoResults ?? {},
+    };
+    memoryState = normalized;
+    return normalized;
+  }
+
   try {
     const raw = await fs.readFile(ANALYTICS_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as AnalyticsState;
@@ -42,6 +56,9 @@ async function readState(): Promise<AnalyticsState> {
 
 async function writeState(state: AnalyticsState): Promise<void> {
   memoryState = state;
+  const remoteOk = await writeStateToSupabase(ANALYTICS_STATE_KEY, state);
+  if (remoteOk) return;
+
   try {
     await fs.mkdir(RUNTIME_DIR, { recursive: true });
     await fs.writeFile(ANALYTICS_PATH, JSON.stringify(state, null, 2), 'utf-8');

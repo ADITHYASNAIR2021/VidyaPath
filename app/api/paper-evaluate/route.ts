@@ -27,18 +27,17 @@ function parseRequest(body: unknown): PaperEvaluateRequest | null {
   if (!body || typeof body !== 'object') return null;
   const record = body as Record<string, unknown>;
   const paperId = typeof record.paperId === 'string' ? record.paperId.trim() : '';
-  const answers = Array.isArray(record.answers)
-    ? record.answers
-        .map((item) => {
-          if (!item || typeof item !== 'object') return null;
-          const entry = item as Record<string, unknown>;
-          const questionNo = typeof entry.questionNo === 'string' ? entry.questionNo.trim() : '';
-          const answerText = typeof entry.answerText === 'string' ? entry.answerText.trim() : '';
-          if (!questionNo || !answerText) return null;
-          return { questionNo, answerText };
-        })
-        .filter((item): item is AnswerInput => item !== null)
-    : [];
+  const answers: AnswerInput[] = [];
+  if (Array.isArray(record.answers)) {
+    record.answers.forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      const entry = item as Record<string, unknown>;
+      const questionNo = typeof entry.questionNo === 'string' ? entry.questionNo.trim() : '';
+      const answerText = typeof entry.answerText === 'string' ? entry.answerText.trim() : '';
+      if (!questionNo || !answerText) return;
+      answers.push({ questionNo, answerText });
+    });
+  }
 
   if (!paperId || answers.length === 0) return null;
   const classLevel = Number(record.classLevel);

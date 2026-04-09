@@ -37,9 +37,61 @@ function parseRequest(body: unknown): AdaptiveTestRequest | null {
     subject,
     chapterIds,
     difficultyMix: typeof record.difficultyMix === 'string' ? record.difficultyMix.trim() : '40% easy, 40% medium, 20% hard',
-    questionCount: Number.isFinite(Number(record.questionCount)) ? Number(record.questionCount) : 10,
+    questionCount: Number.isFinite(Number(record.questionCount))
+      ? Math.max(3, Math.min(30, Math.round(Number(record.questionCount))))
+      : 10,
     mode: typeof record.mode === 'string' ? record.mode.trim() : 'board-practice',
   };
+}
+
+function buildAdaptiveGenericQuestion(subject: string, index: number): MCQItem {
+  const variants: MCQItem[] = [
+    {
+      question: `In ${subject}, which revision strategy usually improves board scores fastest?`,
+      options: [
+        'Topic-wise timed practice on weak areas',
+        'Only reading solved answers without writing',
+        'Ignoring PYQs until last week',
+        'Studying random topics without a plan',
+      ],
+      answer: 0,
+      explanation: 'Timed weak-area practice gives the quickest improvement in exam performance.',
+    },
+    {
+      question: `What is the most reliable way to reduce avoidable mistakes in ${subject}?`,
+      options: [
+        'Maintain an error log and re-attempt similar questions',
+        'Skip post-test review to save time',
+        'Memorize options without understanding',
+        'Attempt only easy questions',
+      ],
+      answer: 0,
+      explanation: 'Error logs and targeted re-attempts reduce repeated mistakes.',
+    },
+    {
+      question: `For mixed-difficulty ${subject} practice, the best approach is:`,
+      options: [
+        'Start medium, then hard, then recap easy traps',
+        'Only hard questions from day one',
+        'Only easy questions throughout',
+        'No revision after test attempts',
+      ],
+      answer: 0,
+      explanation: 'A balanced progression improves accuracy and confidence sustainably.',
+    },
+  ];
+  return variants[index % variants.length];
+}
+
+function ensureAdaptiveQuestionCount(questions: MCQItem[], req: AdaptiveTestRequest): MCQItem[] {
+  const target = Math.max(3, Math.min(30, req.questionCount ?? 10));
+  const output = normalizeMCQs(questions).slice(0, target);
+  let cursor = 0;
+  while (output.length < target) {
+    output.push(buildAdaptiveGenericQuestion(req.subject, cursor));
+    cursor += 1;
+  }
+  return normalizeMCQs(output).slice(0, target);
 }
 
 function buildFallbackQuestions(req: AdaptiveTestRequest): AdaptiveTestResponse {
@@ -55,7 +107,7 @@ function buildFallbackQuestions(req: AdaptiveTestRequest): AdaptiveTestResponse 
     )
     .slice(0, Math.max(3, Math.min(20, req.questionCount ?? 10)));
 
-  const questions = pool.length > 0
+  const baseQuestions = pool.length > 0
     ? normalizeMCQs(pool)
     : [
         {
@@ -71,6 +123,7 @@ function buildFallbackQuestions(req: AdaptiveTestRequest): AdaptiveTestResponse 
         },
       ];
 
+  const questions = ensureAdaptiveQuestionCount(baseQuestions, req);
   const answerKey = questions.map((question) => question.answer);
   const topicCoverage = chapters.map((chapter) => chapter.title).slice(0, 8);
   const estimatedPct = Math.min(92, 55 + topicCoverage.length * 4);
@@ -172,7 +225,8 @@ ${buildVariationInstruction(variation)}`;
       const normalized = normalizeMCQs(data.questions)
         .filter((item) => (allowText ? isAlignedToChapter(item.question, allowText) : true))
         .slice(0, Math.max(3, parsed.questionCount ?? 10));
-      const finalQuestions = normalized.length > 0 ? normalized : fallback.questions;
+      const merged = normalized.length > 0 ? normalized : fallback.questions;
+      const finalQuestions = ensureAdaptiveQuestionCount(merged, parsed);
       const answerKey = finalQuestions.map((question) => question.answer);
       const response: AdaptiveTestResponse = {
         questions: finalQuestions,

@@ -36,8 +36,8 @@ const SYSTEM_PROMPT = `You are VidyaAI, a CBSE tutor for VidyaPath.
 
 SCOPE (STRICT)
 You only answer:
-- Class 10: Science and Mathematics (NCERT)
-- Class 12: Physics, Chemistry, Biology, Mathematics (NCERT)
+- Class 10: Science, Mathematics, and English Core (NCERT)
+- Class 12: Physics, Chemistry, Biology, Mathematics, and English Core (NCERT)
 - CBSE board prep, marking schemes, PYQ trends, study plans
 - JEE/NEET foundational relevance for these same topics
 
@@ -64,19 +64,18 @@ STYLE
 
 function normalizeMessages(input: unknown): ChatMessage[] {
   if (!Array.isArray(input)) return [];
-  return input
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null;
-      const record = entry as Record<string, unknown>;
-      const role = record.role;
-      const content = record.content;
-      if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string') return null;
-      const trimmed = content.trim();
-      if (!trimmed) return null;
-      return { role, content: trimmed } as ChatMessage;
-    })
-    .filter((entry): entry is ChatMessage => entry !== null)
-    .slice(-20);
+  const messages: ChatMessage[] = [];
+  input.forEach((entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    const record = entry as Record<string, unknown>;
+    const role = record.role;
+    const content = record.content;
+    if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string') return;
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    messages.push({ role, content: trimmed } as ChatMessage);
+  });
+  return messages.slice(-20);
 }
 
 function normalizeChapterContext(input: unknown): ChapterContext | undefined {

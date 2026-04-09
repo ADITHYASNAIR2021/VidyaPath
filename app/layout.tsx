@@ -5,6 +5,7 @@ import Navbar from '@/components/Navbar';
 import MobileBottomNav from '@/components/MobileBottomNav';
 import FloatingAIButton from '@/components/FloatingAIButton';
 import PrivacyAnalytics from '@/components/PrivacyAnalytics';
+import SiteFooter from '@/components/SiteFooter';
 
 const fraunces = Fraunces({
   subsets: ['latin'],
@@ -29,11 +30,11 @@ const BASE_URL = 'https://vidyapath.vercel.app';
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: 'VidyaPath — Free CBSE Science & Math Study Platform',
+    default: 'VidyaPath - Free CBSE Study Platform',
     template: '%s | VidyaPath',
   },
   description:
-    'Free CBSE study platform for Class 10 and 12. 153 NCERT chapters, AI tutor powered by LLaMA, previous year papers, JEE/NEET career guide. No login. No payment. No ads.',
+    'Free CBSE study platform for Class 10 and 12 with chapter intelligence, AI tutor, previous year papers, and board-focused practice for Science, Math, and English Core.',
   keywords: [
     'CBSE', 'Class 10', 'Class 12', 'NCERT', 'Science', 'Math', 'Physics',
     'Chemistry', 'Biology', 'JEE', 'NEET', 'Free study material', 'AI tutor',
@@ -46,21 +47,21 @@ export const metadata: Metadata = {
     locale: 'en_IN',
     url: BASE_URL,
     siteName: 'VidyaPath',
-    title: 'VidyaPath — Free CBSE Science & Math Study Platform',
-    description: '153 NCERT chapters + AI tutor + previous year papers. 100% free for every Indian student.',
+    title: 'VidyaPath - Free CBSE Study Platform',
+    description: 'Chapter intelligence + AI tutor + previous year papers for Class 10 and 12 board prep.',
     images: [
       {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'VidyaPath — Free CBSE Study Platform',
+        alt: 'VidyaPath - Free CBSE Study Platform',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'VidyaPath — Free CBSE Study Platform',
-    description: '153 NCERT chapters + AI tutor + previous year papers. 100% free.',
+    title: 'VidyaPath - Free CBSE Study Platform',
+    description: 'Chapter intelligence + AI tutor + previous year papers. 100% free.',
     images: ['/og-image.png'],
   },
   manifest: '/manifest.json',
@@ -83,7 +84,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     '@context': 'https://schema.org',
     '@type': 'EducationalOrganization',
     name: 'VidyaPath',
-    description: 'Free CBSE Science and Math study platform for Class 10 and 12 students in India.',
+    description: 'Free CBSE study platform for Class 10 and 12 students in India across Science, Math, and English Core.',
     url: BASE_URL,
     inLanguage: 'en-IN',
     educationalCredentialAwarded: 'CBSE Board Preparation',
@@ -108,9 +109,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <PrivacyAnalytics />
         <Navbar />
         <main>{children}</main>
+        <SiteFooter />
         <MobileBottomNav />
         <FloatingAIButton />
       </body>
     </html>
   );
 }
+
+

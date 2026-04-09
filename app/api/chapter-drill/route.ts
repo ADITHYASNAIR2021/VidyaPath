@@ -105,6 +105,54 @@ function isQuestionAligned(question: string, chapterTitle: string, chapterTopics
   return questionTokens.some((token) => allow.has(token));
 }
 
+function buildGenericQuestion(topic: string, chapterTitle: string): MCQItem {
+  return {
+    question: `In ${chapterTitle}, which statement about "${topic}" is most exam-relevant?`,
+    options: [
+      'Apply concept + formula with correct units/sign convention.',
+      'Memorize one definition only and skip applications.',
+      'Ignore this topic because it never appears in boards.',
+      'Attempt without showing intermediate steps.',
+    ],
+    answer: 0,
+    explanation: `Board scoring improves when ${topic} is solved with concept, formula, and final-unit checks.`,
+  };
+}
+
+function ensureExactDrillCount(
+  items: MCQItem[],
+  fallbackItems: MCQItem[],
+  chapterTitle: string,
+  chapterTopics: string[],
+  questionCount: number
+): MCQItem[] {
+  const normalized = normalizeMCQs(items);
+  const output = normalized.slice(0, questionCount);
+  const used = new Set(output.map((item) => item.question.trim().toLowerCase()));
+
+  for (const item of fallbackItems) {
+    if (output.length >= questionCount) break;
+    const key = item.question.trim().toLowerCase();
+    if (used.has(key)) continue;
+    output.push(item);
+    used.add(key);
+  }
+
+  let cursor = 0;
+  while (output.length < questionCount) {
+    const topic = chapterTopics[cursor % Math.max(1, chapterTopics.length)] ?? chapterTitle;
+    const generated = buildGenericQuestion(topic, chapterTitle);
+    const key = generated.question.trim().toLowerCase();
+    if (!used.has(key)) {
+      output.push(generated);
+      used.add(key);
+    }
+    cursor += 1;
+  }
+
+  return normalizeMCQs(output).slice(0, questionCount);
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -193,7 +241,13 @@ ${buildVariationInstruction(variation)}`;
         toppedUp.push(fallbackQuestion);
         usedQuestionText.add(key);
       }
-      const questions = toppedUp.slice(0, parsed.questionCount);
+      const questions = ensureExactDrillCount(
+        toppedUp,
+        fallback.questions,
+        chapter.title,
+        chapter.topics,
+        parsed.questionCount
+      );
       if (questions.length === 0) return NextResponse.json(fallback);
 
       const response: ChapterDrillResponse = {

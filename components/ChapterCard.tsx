@@ -2,7 +2,19 @@
 
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { ExternalLink, Play, BookOpen, Atom, FlaskConical, Leaf, Calculator, Bookmark, CheckCircle2 } from 'lucide-react';
+import {
+  ExternalLink,
+  Play,
+  BookOpen,
+  Atom,
+  FlaskConical,
+  Leaf,
+  Calculator,
+  Bookmark,
+  CheckCircle2,
+  Briefcase,
+  LineChart,
+} from 'lucide-react';
 import clsx from 'clsx';
 import type { Chapter } from '@/lib/data';
 import { useBookmarkStore, useProgressStore } from '@/lib/store';
@@ -35,6 +47,30 @@ const SUBJECT_STYLES: Record<
     headerBg: 'bg-purple-50',
     icon: Calculator,
   },
+  Accountancy: {
+    bg: 'border-amber-100',
+    badge: 'bg-amber-100 text-amber-700',
+    headerBg: 'bg-amber-50',
+    icon: Briefcase,
+  },
+  'Business Studies': {
+    bg: 'border-indigo-100',
+    badge: 'bg-indigo-100 text-indigo-700',
+    headerBg: 'bg-indigo-50',
+    icon: LineChart,
+  },
+  Economics: {
+    bg: 'border-rose-100',
+    badge: 'bg-rose-100 text-rose-700',
+    headerBg: 'bg-rose-50',
+    icon: LineChart,
+  },
+  'English Core': {
+    bg: 'border-cyan-100',
+    badge: 'bg-cyan-100 text-cyan-700',
+    headerBg: 'bg-cyan-50',
+    icon: BookOpen,
+  },
 };
 
 const CLASS_STYLES: Record<number, string> = {
@@ -56,7 +92,7 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
   const studied = isStudied(chapter.id);
 
   const style = SUBJECT_STYLES[chapter.subject] ?? SUBJECT_STYLES.Physics;
-  const SubjectIcon = style.icon;
+  const SubjectIcon = style.icon ?? Atom;
   const MAX_TOPICS = 3;
   const visibleTopics = chapter.topics.slice(0, MAX_TOPICS);
   const extraTopics = chapter.topics.length - MAX_TOPICS;
@@ -185,3 +221,4 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
     </motion.div>
   );
 }
+

@@ -8,7 +8,17 @@ import { BlockMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import { getAllFormulaEntries } from '@/lib/formulas';
 
-const SUBJECTS = ['All', 'Physics', 'Chemistry', 'Biology', 'Math'] as const;
+const SUBJECTS = [
+  'All',
+  'Physics',
+  'Chemistry',
+  'Biology',
+  'Math',
+  'Accountancy',
+  'Business Studies',
+  'Economics',
+  'English Core',
+] as const;
 const CLASSES = ['All', '10', '12'] as const;
 
 const formulaEntries = getAllFormulaEntries().filter((item) => item.classLevel !== 11);
@@ -105,7 +115,7 @@ export default function FormulasPage() {
                     : 'bg-white text-emerald-700 border-emerald-200'
                 }`}
               >
-                Class {classLevel}
+                {classLevel === 'All' ? 'All classes' : `Class ${classLevel}`}
               </button>
             ))}
             <button
@@ -153,12 +163,30 @@ export default function FormulasPage() {
                 </div>
               </div>
 
+              {item.sourceName && (
+                <p className="mt-2 text-[11px] text-[#6A6A84]">
+                  Source:{' '}
+                  {item.sourceUrl ? (
+                    <a
+                      href={item.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-indigo-700 hover:text-indigo-800"
+                    >
+                      {item.sourceName}
+                    </a>
+                  ) : (
+                    item.sourceName
+                  )}
+                </p>
+              )}
+
               <Link
                 href={`/chapters/${item.chapterId}`}
                 className="mt-3 inline-flex text-xs font-semibold text-indigo-700 hover:text-indigo-800"
               >
-                    Open {item.chapterTitle} {'->'}
-                  </Link>
+                Open {item.chapterTitle}
+              </Link>
             </div>
           ))}
         </div>

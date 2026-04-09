@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Calculator, ChevronDown, ChevronUp } from 'lucide-react';
 import 'katex/dist/katex.min.css';
-import { InlineMath, BlockMath } from 'react-katex';
+import { BlockMath } from 'react-katex';
 
 export default function FormulaCard({ formulas }: { formulas: { name: string; latex: string }[] }) {
   const [open, setOpen] = useState(false);
@@ -25,6 +26,11 @@ export default function FormulaCard({ formulas }: { formulas: { name: string; la
         </h2>
         {open ? <ChevronUp className="w-5 h-5 text-[#8A8AAA]" /> : <ChevronDown className="w-5 h-5 text-[#8A8AAA]" />}
       </button>
+      <div className="px-5 pb-3 -mt-2">
+        <Link href="/equations" className="text-xs font-semibold text-indigo-700 hover:text-indigo-800">
+          Open full equations library
+        </Link>
+      </div>
 
       <AnimatePresence>
         {open && (

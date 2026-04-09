@@ -3,7 +3,18 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { Search, Atom, FlaskConical, Leaf, Calculator, SlidersHorizontal, CheckCircle2 } from 'lucide-react';
+import {
+  Search,
+  Atom,
+  FlaskConical,
+  Leaf,
+  Calculator,
+  SlidersHorizontal,
+  CheckCircle2,
+  Briefcase,
+  LineChart,
+  BookOpen,
+} from 'lucide-react';
 import clsx from 'clsx';
 import Fuse from 'fuse.js';
 import { ALL_CHAPTERS } from '@/lib/data';
@@ -18,7 +29,13 @@ const SUBJECTS: { label: string; value: Subject | 'All'; icon: React.ElementType
   { label: 'Chemistry', value: 'Chemistry', icon: FlaskConical },
   { label: 'Biology', value: 'Biology', icon: Leaf },
   { label: 'Math', value: 'Math', icon: Calculator },
+  { label: 'Accountancy', value: 'Accountancy', icon: Briefcase },
+  { label: 'Business Studies', value: 'Business Studies', icon: LineChart },
+  { label: 'Economics', value: 'Economics', icon: LineChart },
+  { label: 'English Core', value: 'English Core', icon: BookOpen },
 ];
+
+const CLASS10_ALLOWED_SUBJECTS = new Set<Subject>(['Physics', 'Chemistry', 'Biology', 'Math', 'English Core']);
 
 const CLASSES: { label: string; value: ClassLevel | 0 }[] = [
   { label: 'All Classes', value: 0 },
@@ -32,6 +49,10 @@ const SUBJECT_PILL_STYLES: Record<string, string> = {
   Chemistry: 'bg-emerald-600 text-white border-emerald-600',
   Biology: 'bg-green-600 text-white border-green-600',
   Math: 'bg-purple-600 text-white border-purple-600',
+  Accountancy: 'bg-amber-600 text-white border-amber-600',
+  'Business Studies': 'bg-indigo-600 text-white border-indigo-600',
+  Economics: 'bg-rose-600 text-white border-rose-600',
+  'English Core': 'bg-cyan-600 text-white border-cyan-600',
 };
 
 const SUBJECT_PILL_INACTIVE: Record<string, string> = {
@@ -40,6 +61,10 @@ const SUBJECT_PILL_INACTIVE: Record<string, string> = {
   Chemistry: 'bg-white text-emerald-700 border-emerald-200 hover:border-emerald-400',
   Biology: 'bg-white text-green-700 border-green-200 hover:border-green-400',
   Math: 'bg-white text-purple-700 border-purple-200 hover:border-purple-400',
+  Accountancy: 'bg-white text-amber-700 border-amber-200 hover:border-amber-400',
+  'Business Studies': 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400',
+  Economics: 'bg-white text-rose-700 border-rose-200 hover:border-rose-400',
+  'English Core': 'bg-white text-cyan-700 border-cyan-200 hover:border-cyan-400',
 };
 
 function ChaptersContent() {
@@ -54,6 +79,25 @@ function ChaptersContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const trackedNoResultQueries = useRef(new Set<string>());
   const { studiedChapterIds } = useProgressStore();
+  const availableSubjects = useMemo(() => {
+    const classScoped = ALL_CHAPTERS.filter((chapter) => (selectedClass === 0 ? chapter.classLevel !== 11 : chapter.classLevel === selectedClass));
+    const subjectSet = new Set<Subject>(classScoped.map((chapter) => chapter.subject));
+    if (selectedClass === 10) {
+      for (const subject of Array.from(subjectSet)) {
+        if (!CLASS10_ALLOWED_SUBJECTS.has(subject)) {
+          subjectSet.delete(subject);
+        }
+      }
+    }
+    return SUBJECTS.filter((item) => item.value === 'All' || subjectSet.has(item.value as Subject));
+  }, [selectedClass]);
+
+  useEffect(() => {
+    if (selectedSubject === 'All') return;
+    if (!availableSubjects.some((item) => item.value === selectedSubject)) {
+      setSelectedSubject('All');
+    }
+  }, [availableSubjects, selectedSubject]);
 
   const chapterSearchDocs = useMemo(() => {
     return ALL_CHAPTERS.map((chapter) => {
@@ -147,7 +191,7 @@ function ChaptersContent() {
         <div className="max-w-5xl mx-auto">
           <h1 className="font-fraunces text-3xl sm:text-4xl font-bold mb-2">Chapter Library</h1>
           <p className="text-navy-200 text-base">
-            All Class 10 &amp; 12 Science and Math chapters. NCERT PDFs + YouTube links included.
+            Class 10 and Class 12 chapter workspace with PYQ insights, NCERT links, and guided practice.
           </p>
           <div className="mt-4 flex items-center gap-4 flex-wrap">
             <div className="text-sm text-navy-300">
@@ -206,7 +250,9 @@ function ChaptersContent() {
 
           {/* Subject Pills */}
           <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
-            {SUBJECTS.map(({ label, value, icon: Icon }) => (
+            {availableSubjects.map(({ label, value, icon: Icon }) => {
+              const SafeIcon = Icon ?? SlidersHorizontal;
+              return (
               <button
                 key={value}
                 onClick={() => setSelectedSubject(value)}
@@ -217,10 +263,11 @@ function ChaptersContent() {
                     : SUBJECT_PILL_INACTIVE[value]
                 )}
               >
-                <Icon className="w-3.5 h-3.5" />
+                <SafeIcon className="w-3.5 h-3.5" />
                 {label}
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -286,3 +333,4 @@ export default function ChaptersPage() {
     </Suspense>
   );
 }
+

@@ -1,0 +1,23 @@
+{
+  "updatedAt": "2026-04-09T04:59:43.339Z",
+  "importantTopics": {
+    "c12-phy-1": [
+      "imp topics",
+      "1",
+      "2",
+      "3",
+      "4"
+    ]
+  },
+  "quizLinks": {
+    "c12-phy-1": "http://api.localhost/swagger#/benchmark-pipeline/BenchmarkPipelineController_processAndCompare"
+  },
+  "announcements": [
+    {
+      "id": "ann-mnr0ceoo-59rh",
+      "title": "Imp topics",
+      "body": "These are the imp topics",
+      "createdAt": "2026-04-09T04:59:29.496Z"
+    }
+  ]
+}

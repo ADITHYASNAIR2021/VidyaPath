@@ -54,10 +54,23 @@ export function hf(relativePath: string): string {
   return `${HF_BASE}/${encoded}`;
 }
 
-type ResolvedSubject = 'Physics' | 'Chemistry' | 'Biology' | 'Math' | 'Science';
+type ResolvedSubject =
+  | 'Physics'
+  | 'Chemistry'
+  | 'Biology'
+  | 'Math'
+  | 'Science'
+  | 'Accountancy'
+  | 'Business Studies'
+  | 'Economics'
+  | 'English Core';
 
 function normalizePaperSubject(subject: string): ResolvedSubject | null {
   const normalized = subject.trim().toLowerCase();
+  if (normalized.includes('account')) return 'Accountancy';
+  if (normalized.includes('business')) return 'Business Studies';
+  if (normalized.includes('economics') || normalized === 'eco') return 'Economics';
+  if (normalized.includes('english')) return 'English Core';
   if (normalized.includes('physics')) return 'Physics';
   if (normalized.includes('chem')) return 'Chemistry';
   if (normalized.includes('bio')) return 'Biology';
@@ -361,6 +374,226 @@ const compartmentPapers: PaperEntry[] = [
 ];
 
 // ============================================================
+// ENGLISH ROLLOUT PAPERS (Class 10 + Class 12)
+// ============================================================
+
+const englishBoardYears = [2025, 2024, 2023, 2022, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012, 2011, 2010, 2009];
+const englishSampleYears = [2025, 2024, 2023, 2022, 2021, 2020, 2019];
+const englishCompartmentYears = [2025, 2024, 2023, 2022];
+const commerceBoardYears = [2025, 2024, 2023, 2022, 2019, 2018, 2017, 2016, 2015, 2014, 2013];
+const commerceSampleYears = [2025, 2024, 2023, 2022, 2021, 2020, 2019];
+const commerceCompartmentYears = [2025, 2024, 2023, 2022];
+
+const englishBoardPapers: PaperEntry[] = [
+  ...englishBoardYears.map((year) => ({
+    id: `b10-eng-${year}`,
+    classLevel: 10 as const,
+    subject: 'English Core',
+    year,
+    title: `Class 10 English Board Paper ${year}`,
+    duration: '3 Hours',
+    totalMarks: 80,
+    url: CBSE_QP_10,
+    paperType: 'board' as const,
+    set: 'All India' as const,
+    isOfficial: true,
+  })),
+  ...englishBoardYears.map((year) => ({
+    id: `b12-eng-${year}`,
+    classLevel: 12 as const,
+    subject: 'English Core',
+    year,
+    title: `Class 12 English Core Board Paper ${year}`,
+    duration: '3 Hours',
+    totalMarks: 80,
+    url: CBSE_QP_12,
+    paperType: 'board' as const,
+    set: 'All India' as const,
+    isOfficial: true,
+  })),
+];
+
+const englishSamplePapers: PaperEntry[] = [
+  ...englishSampleYears.map((year) => ({
+    id: `sq10-eng-${year}`,
+    classLevel: 10 as const,
+    subject: 'English Core',
+    year,
+    title: `Class 10 English Sample Paper ${year}-${String(year + 1).slice(2)}`,
+    duration: '3 Hours',
+    totalMarks: 80,
+    url: CBSE_SQP_10(`${year}-${String(year + 1).slice(2)}`),
+    paperType: 'sample' as const,
+    isOfficial: true,
+  })),
+  ...englishSampleYears.map((year) => ({
+    id: `sq12-eng-${year}`,
+    classLevel: 12 as const,
+    subject: 'English Core',
+    year,
+    title: `Class 12 English Core Sample Paper ${year}-${String(year + 1).slice(2)}`,
+    duration: '3 Hours',
+    totalMarks: 80,
+    url: CBSE_SQP_12(`${year}-${String(year + 1).slice(2)}`),
+    paperType: 'sample' as const,
+    isOfficial: true,
+  })),
+];
+
+const englishCompartmentPapers: PaperEntry[] = [
+  ...englishCompartmentYears.map((year) => ({
+    id: `comp10-eng-${year}`,
+    classLevel: 10 as const,
+    subject: 'English Core',
+    year,
+    title: `Class 10 English Compartment Paper ${year}`,
+    duration: '3 Hours',
+    totalMarks: 80,
+    url: CBSE_QP_10,
+    paperType: 'compartment' as const,
+    isOfficial: true,
+  })),
+  ...englishCompartmentYears.map((year) => ({
+    id: `comp12-eng-${year}`,
+    classLevel: 12 as const,
+    subject: 'English Core',
+    year,
+    title: `Class 12 English Core Compartment Paper ${year}`,
+    duration: '3 Hours',
+    totalMarks: 80,
+    url: CBSE_QP_12,
+    paperType: 'compartment' as const,
+    isOfficial: true,
+  })),
+];
+
+const commerceBoardPapers: PaperEntry[] = [
+  ...commerceBoardYears.flatMap((year) => ([
+    {
+      id: `b12-acc-${year}`,
+      classLevel: 12 as const,
+      subject: 'Accountancy',
+      year,
+      title: `Class 12 Accountancy Board Paper ${year}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_QP_12,
+      paperType: 'board' as const,
+      set: 'All India' as const,
+      isOfficial: true,
+    },
+    {
+      id: `b12-bst-${year}`,
+      classLevel: 12 as const,
+      subject: 'Business Studies',
+      year,
+      title: `Class 12 Business Studies Board Paper ${year}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_QP_12,
+      paperType: 'board' as const,
+      set: 'All India' as const,
+      isOfficial: true,
+    },
+    {
+      id: `b12-eco-${year}`,
+      classLevel: 12 as const,
+      subject: 'Economics',
+      year,
+      title: `Class 12 Economics Board Paper ${year}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_QP_12,
+      paperType: 'board' as const,
+      set: 'All India' as const,
+      isOfficial: true,
+    },
+  ])),
+];
+
+const commerceSamplePapers: PaperEntry[] = [
+  ...commerceSampleYears.flatMap((year) => ([
+    {
+      id: `sq12-acc-${year}`,
+      classLevel: 12 as const,
+      subject: 'Accountancy',
+      year,
+      title: `Class 12 Accountancy Sample Paper ${year}-${String(year + 1).slice(2)}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_SQP_12(`${year}-${String(year + 1).slice(2)}`),
+      paperType: 'sample' as const,
+      isOfficial: true,
+    },
+    {
+      id: `sq12-bst-${year}`,
+      classLevel: 12 as const,
+      subject: 'Business Studies',
+      year,
+      title: `Class 12 Business Studies Sample Paper ${year}-${String(year + 1).slice(2)}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_SQP_12(`${year}-${String(year + 1).slice(2)}`),
+      paperType: 'sample' as const,
+      isOfficial: true,
+    },
+    {
+      id: `sq12-eco-${year}`,
+      classLevel: 12 as const,
+      subject: 'Economics',
+      year,
+      title: `Class 12 Economics Sample Paper ${year}-${String(year + 1).slice(2)}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_SQP_12(`${year}-${String(year + 1).slice(2)}`),
+      paperType: 'sample' as const,
+      isOfficial: true,
+    },
+  ])),
+];
+
+const commerceCompartmentPapers: PaperEntry[] = [
+  ...commerceCompartmentYears.flatMap((year) => ([
+    {
+      id: `comp12-acc-${year}`,
+      classLevel: 12 as const,
+      subject: 'Accountancy',
+      year,
+      title: `Class 12 Accountancy Compartment Paper ${year}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_QP_12,
+      paperType: 'compartment' as const,
+      isOfficial: true,
+    },
+    {
+      id: `comp12-bst-${year}`,
+      classLevel: 12 as const,
+      subject: 'Business Studies',
+      year,
+      title: `Class 12 Business Studies Compartment Paper ${year}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_QP_12,
+      paperType: 'compartment' as const,
+      isOfficial: true,
+    },
+    {
+      id: `comp12-eco-${year}`,
+      classLevel: 12 as const,
+      subject: 'Economics',
+      year,
+      title: `Class 12 Economics Compartment Paper ${year}`,
+      duration: '3 Hours',
+      totalMarks: 80,
+      url: CBSE_QP_12,
+      paperType: 'compartment' as const,
+      isOfficial: true,
+    },
+  ])),
+];
+
+// ============================================================
 // MARKING SCHEMES & RESOURCES
 // ============================================================
 
@@ -377,8 +610,14 @@ const resources: PaperEntry[] = [
 export const ALL_PAPERS: PaperEntry[] = [
   ...boardPapers12,
   ...boardPapers10,
+  ...englishBoardPapers,
+  ...commerceBoardPapers,
   ...samplePapers,
+  ...englishSamplePapers,
+  ...commerceSamplePapers,
   ...compartmentPapers,
+  ...englishCompartmentPapers,
+  ...commerceCompartmentPapers,
   ...resources,
 ];
 

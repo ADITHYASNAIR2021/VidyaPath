@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Search, Command, Book, ExternalLink } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Fuse from 'fuse.js';
 import { ALL_CHAPTERS } from '@/lib/data';
 import clsx from 'clsx';
@@ -17,6 +17,14 @@ const searchData = [
     subtitle: 'Search all formulas with SI units and chapter mapping',
     topics: 'formula katex equations',
     url: '/formulas',
+  },
+  {
+    type: 'page',
+    id: 'equations',
+    title: 'Equations Library',
+    subtitle: 'Subject-wise and chapter-wise equation map',
+    topics: 'equations chapter wise subject wise formula handbook',
+    url: '/equations',
   },
   {
     type: 'page',
@@ -53,9 +61,12 @@ export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const router = useRouter();
+  const pathname = usePathname();
+  const isExamRoute = pathname.startsWith('/exam/assignment/');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (isExamRoute) return;
     const down = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
@@ -66,7 +77,7 @@ export default function CommandPalette() {
 
     document.addEventListener('keydown', down);
     return () => document.removeEventListener('keydown', down);
-  }, []);
+  }, [isExamRoute]);
 
   useEffect(() => {
     if (open) {
@@ -77,6 +88,10 @@ export default function CommandPalette() {
   }, [open]);
 
   const results = query ? fuse.search(query).map(r => r.item).slice(0, 5) : searchData.slice(0, 4);
+
+  if (isExamRoute) {
+    return null;
+  }
 
   return (
     <>

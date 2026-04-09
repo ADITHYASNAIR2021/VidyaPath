@@ -14,6 +14,7 @@ import {
   Target,
   Calculator,
   Home,
+  Terminal,
 } from 'lucide-react';
 import clsx from 'clsx';
 import CommandPalette from '@/components/CommandPalette';
@@ -23,6 +24,8 @@ const NAV_LINKS = [
   { href: '/chapters', label: 'Chapters', icon: BookOpen },
   { href: '/papers', label: 'Papers', icon: FileText },
   { href: '/formulas', label: 'Formulas', icon: Calculator },
+  { href: '/equations', label: 'Equations', icon: Calculator },
+  { href: '/api-lab', label: 'API Lab', icon: Terminal },
   { href: '/dashboard', label: 'Dashboard', icon: Target },
   { href: '/career', label: 'Career', icon: Compass },
   { href: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
@@ -31,11 +34,29 @@ const NAV_LINKS = [
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
+  const isExamRoute = pathname.startsWith('/exam/assignment/');
+
+  if (isExamRoute) {
+    return (
+      <nav className="sticky top-0 z-50 border-b border-[#E8E4DC] bg-white/95 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="h-14 flex items-center justify-between">
+            <Link href="/" className="font-fraunces text-lg font-bold text-navy-700">
+              Vidya<span className="text-saffron-500">Path</span>
+            </Link>
+            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+              Proctored Exam Mode
+            </span>
+          </div>
+        </div>
+      </nav>
+    );
+  }
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[#E8E4DC] bg-white/95 backdrop-blur-md">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <div className="h-16 flex items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="h-16 flex items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2 group" onClick={() => setMobileOpen(false)}>
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-saffron-500 to-amber-500 text-white flex items-center justify-center shadow-sm">
               <GraduationCap className="w-5 h-5" />
@@ -48,7 +69,7 @@ export default function Navbar() {
             </div>
           </Link>
 
-          <div className="hidden lg:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] bg-white p-1">
+          <div className="hidden xl:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] bg-white p-1">
             {NAV_LINKS.map(({ href, label, icon: Icon }) => {
               const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href);
               return (
@@ -71,9 +92,24 @@ export default function Navbar() {
 
           <div className="hidden md:flex items-center gap-2">
             <CommandPalette />
-            <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Free forever
-            </span>
+            <Link
+              href="/student/login"
+              className="text-xs font-semibold px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+            >
+              Student Login
+            </Link>
+            <Link
+              href="/teacher/login"
+              className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
+            >
+              Teacher Login
+            </Link>
+            <Link
+              href="/admin/login"
+              className="text-xs font-semibold px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+            >
+              Admin Login
+            </Link>
           </div>
 
           <div className="md:hidden flex items-center gap-2">
@@ -109,10 +145,28 @@ export default function Navbar() {
                 </Link>
               );
             })}
-            <div className="pt-2 pb-1">
-              <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-medium">
-                100% free and no login required
-              </span>
+            <div className="pt-2 grid grid-cols-1 gap-2">
+              <Link
+                href="/student/login"
+                onClick={() => setMobileOpen(false)}
+                className="text-sm font-semibold text-center px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700"
+              >
+                Student Login
+              </Link>
+              <Link
+                href="/teacher/login"
+                onClick={() => setMobileOpen(false)}
+                className="text-sm font-semibold text-center px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700"
+              >
+                Teacher Login
+              </Link>
+              <Link
+                href="/admin/login"
+                onClick={() => setMobileOpen(false)}
+                className="text-sm font-semibold text-center px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700"
+              >
+                Admin Login
+              </Link>
             </div>
           </div>
         </div>

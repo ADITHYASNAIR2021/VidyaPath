@@ -47,6 +47,14 @@ const pyqData: PYQEntry[] = [
   { chapterId: 'c10-math-13', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Surface area of combination solids','Volume of combination solids','Frustum'], avgMarks: 8 },
   { chapterId: 'c10-math-14', yearsAsked: [2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Classical probability','Probability of complementary events','Playing cards problems'], avgMarks: 5 },
 
+  // CLASS 10 ENGLISH CORE
+  { chapterId: 'c10-eng-1', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Theme of faith and irony','Character sketch of Lencho','Value-based response'], avgMarks: 5 },
+  { chapterId: 'c10-eng-2', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Freedom and responsibility','Character of Mandela','Extract interpretation'], avgMarks: 6 },
+  { chapterId: 'c10-eng-3', yearsAsked: [2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['His First Flight summary','Black Aeroplane mystery','Theme-based answer'], avgMarks: 6 },
+  { chapterId: 'c10-eng-4', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024], importantTopics: ['Diary format understanding','Character of Anne Frank','Value-based writing'], avgMarks: 5 },
+  { chapterId: 'c10-eng-5', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Regional details recall','Character and setting','Short note writing'], avgMarks: 6 },
+  { chapterId: 'c10-eng-6', yearsAsked: [2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Comic elements in drama','Character contrast','Dialogue-based extract'], avgMarks: 5 },
+
   // ════════════════════ CLASS 12 PHYSICS ════════════════════
   { chapterId: 'c12-phy-1', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Coulomb\'s law','Electric field & field lines','Gauss\'s law applications'], avgMarks: 6 },
   { chapterId: 'c12-phy-2', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Potential due to point charge','Equipotential surfaces','Relation between E and V'], avgMarks: 6 },
@@ -87,6 +95,31 @@ const pyqData: PYQEntry[] = [
   { chapterId: 'c12-math-8', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Area between two curves','Area under a curve','Definite integral as area'], avgMarks: 6 },
   { chapterId: 'c12-math-9', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Variable separable','Homogeneous differential equations','Linear first-order DE'], avgMarks: 7 },
   { chapterId: 'c12-math-13', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Bayes\' theorem','Random variable & distribution','Binomial distribution','Probability of events'], avgMarks: 8 },
+
+  // CLASS 12 COMMERCE
+  { chapterId: 'c12-acc-1', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Sacrificing ratio','Gaining ratio','Goodwill adjustments','Past adjustment entries'], avgMarks: 8 },
+  { chapterId: 'c12-acc-2', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Admission of partner entries','Retirement settlement','Revaluation account','Hidden goodwill'], avgMarks: 9 },
+  { chapterId: 'c12-acc-3', yearsAsked: [2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Issue of debentures','Redemption methods','Interest on debentures','Loss on issue write-off'], avgMarks: 7 },
+  { chapterId: 'c12-acc-4', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Current ratio','Quick ratio','Debt-equity ratio','Return on investment'], avgMarks: 8 },
+  { chapterId: 'c12-acc-5', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Cash flow from operating activities','Investing cash flow','Financing cash flow','Working capital adjustments'], avgMarks: 8 },
+  { chapterId: 'c12-bst-1', yearsAsked: [2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Nature of management','Objectives of management','Levels of management','Coordination'], avgMarks: 6 },
+  { chapterId: 'c12-bst-2', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Fayol principles','Taylor techniques','Management principles application','Business case analysis'], avgMarks: 6 },
+  { chapterId: 'c12-bst-3', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Planning process','Types of plans','Delegation','Decentralisation'], avgMarks: 7 },
+  { chapterId: 'c12-bst-4', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Staffing steps','Recruitment vs selection','Motivation and leadership','Communication barriers'], avgMarks: 7 },
+  { chapterId: 'c12-bst-5', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Marketing mix','Consumer rights','Consumer redressal','Promotion tools'], avgMarks: 8 },
+  { chapterId: 'c12-eco-1', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['GDP and NDP formulas','Nominal vs real GDP','Value added method','Income method'], avgMarks: 9 },
+  { chapterId: 'c12-eco-2', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Money multiplier','Reserve ratio','Functions of central bank','Credit creation'], avgMarks: 7 },
+  { chapterId: 'c12-eco-3', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Income equilibrium','Multiplier','MPC and APC','Saving function'], avgMarks: 8 },
+  { chapterId: 'c12-eco-4', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Fiscal deficit','Primary deficit','Revenue deficit','Budgetary policy'], avgMarks: 8 },
+  { chapterId: 'c12-eco-5', yearsAsked: [2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Current account vs capital account','BOP identity','Exchange rate effects','Terms of trade'], avgMarks: 7 },
+
+  // CLASS 12 ENGLISH CORE
+  { chapterId: 'c12-eng-1', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Language identity theme','Character of Franz and M Hamel','Extract-based analysis'], avgMarks: 6 },
+  { chapterId: 'c12-eng-2', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Poverty and exploitation','Saheb and Mukesh comparison','Long-answer framing'], avgMarks: 7 },
+  { chapterId: 'c12-eng-3', yearsAsked: [2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Fear psychology','Transformation arc','Value-based response'], avgMarks: 6 },
+  { chapterId: 'c12-eng-4', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Rattrap symbolism','Character development','Theme interpretation'], avgMarks: 6 },
+  { chapterId: 'c12-eng-5', yearsAsked: [2013,2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Champaran context','Gandhian leadership','Analytical responses'], avgMarks: 7 },
+  { chapterId: 'c12-eng-6', yearsAsked: [2014,2015,2016,2017,2018,2019,2022,2023,2024,2025], importantTopics: ['Fantasy vs reality','Character of Sophie','Inferential questions'], avgMarks: 6 },
 ];
 
 // ── Build a fast lookup map ──────────────────────────────────

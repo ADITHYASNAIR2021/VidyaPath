@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import {
   Target, Trophy, BrainCircuit, Activity, BookOpen, ChevronRight,
   TrendingUp, Zap, CheckCircle2, Clock, Star, Award, BarChart2,
-  Atom, FlaskConical, Leaf, Calculator, FileText,
+  Atom, FlaskConical, Leaf, Calculator, FileText, Briefcase, LineChart,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { ALL_CHAPTERS } from '@/lib/data';
@@ -44,13 +44,17 @@ const SUBJECT_META = {
   Chemistry: { icon: FlaskConical, color: '#059669', ring: '#10b981', bg: 'bg-emerald-50 border-emerald-100', label: 'Chemistry' },
   Biology:   { icon: Leaf,        color: '#16a34a', ring: '#22c55e', bg: 'bg-green-50 border-green-100',  label: 'Biology' },
   Math:      { icon: Calculator,  color: '#7c3aed', ring: '#a855f7', bg: 'bg-purple-50 border-purple-100', label: 'Math' },
+  Accountancy: { icon: Briefcase, color: '#d97706', ring: '#f59e0b', bg: 'bg-amber-50 border-amber-100', label: 'Accountancy' },
+  'Business Studies': { icon: LineChart, color: '#4f46e5', ring: '#6366f1', bg: 'bg-indigo-50 border-indigo-100', label: 'Business Studies' },
+  Economics: { icon: LineChart, color: '#e11d48', ring: '#fb7185', bg: 'bg-rose-50 border-rose-100', label: 'Economics' },
+  'English Core': { icon: BookOpen, color: '#0e7490', ring: '#06b6d4', bg: 'bg-cyan-50 border-cyan-100', label: 'English Core' },
 } as const;
 
 function SubjectCard({
   subject, studied, total,
 }: { subject: keyof typeof SUBJECT_META; studied: number; total: number }) {
   const meta = SUBJECT_META[subject];
-  const Icon = meta.icon;
+  const Icon = meta.icon ?? BookOpen;
   const pct = total > 0 ? Math.round((studied / total) * 100) : 0;
   return (
     <div className={clsx('rounded-2xl border p-4 flex items-center gap-4', meta.bg)}>
@@ -126,12 +130,10 @@ export default function DashboardPage() {
 
   // Compute progress by subject and class
   const subjectProgress = useMemo(() => {
-    const result: Record<string, { studied: number; total: number }> = {
-      Physics: { studied: 0, total: 0 },
-      Chemistry: { studied: 0, total: 0 },
-      Biology: { studied: 0, total: 0 },
-      Math: { studied: 0, total: 0 },
-    };
+    const result: Record<string, { studied: number; total: number }> = Object.keys(SUBJECT_META).reduce(
+      (acc, key) => ({ ...acc, [key]: { studied: 0, total: 0 } }),
+      {} as Record<string, { studied: number; total: number }>
+    );
     const classProgress: Record<number, { studied: number; total: number }> = {
       10: { studied: 0, total: 0 },
       12: { studied: 0, total: 0 },
@@ -485,3 +487,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

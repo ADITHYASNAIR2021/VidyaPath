@@ -11,7 +11,10 @@
     "build:context:node": "node scripts/build_context_index.mjs",
     "build:context:python": "python scripts/build_context_index.py --max-files 0",
     "build:context:python:fast": "python scripts/build_context_index.py --max-files 220",
-    "verify:context": "node scripts/verify_context_index.mjs"
+    "verify:context": "node scripts/verify_context_index.mjs",
+    "migrate:supabase-state": "node scripts/migrate_state_to_supabase.mjs",
+    "migrate:teacher-normalized": "node scripts/migrate_teacher_blob_to_normalized.mjs",
+    "check:supabase-teacher": "node scripts/check_supabase_teacher_setup.mjs"
   },
   "dependencies": {
     "@serwist/next": "^9.5.7",
