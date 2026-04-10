@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import type { TeacherAssignmentPack } from '@/lib/teacher-types';
 
@@ -81,6 +81,7 @@ export default function ProctoredExamPage() {
   const [violationCount, setViolationCount] = useState(0);
   const [riskLevel, setRiskLevel] = useState<'low' | 'medium' | 'high'>('low');
   const violationQueueRef = useRef<ViolationEvent[]>([]);
+  const handleSubmitRef = useRef<() => Promise<void>>(async () => undefined);
 
   useEffect(() => {
     async function loadStudentSession() {
@@ -192,7 +193,7 @@ export default function ProctoredExamPage() {
           setViolationCount(data.integritySummary.totalViolations);
           setRiskLevel(data.integritySummary.riskLevel);
           if (data.integritySummary.totalViolations >= 8) {
-            void handleSubmit();
+            void handleSubmitRef.current();
           }
         }
       } catch {
@@ -247,7 +248,7 @@ export default function ProctoredExamPage() {
     }
   }
 
-  async function handleSubmit() {
+  const handleSubmit = useCallback(async () => {
     if (!pack || !sessionId || submitting || submitted) return;
     setSubmitting(true);
     setError('');
@@ -288,7 +289,11 @@ export default function ProctoredExamPage() {
     } finally {
       setSubmitting(false);
     }
-  }
+  }, [pack, sessionId, submitting, submitted, mcqAnswers, shortAnswers, longAnswers]);
+
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit;
+  }, [handleSubmit]);
 
   if (loading) {
     return <div className="min-h-screen bg-[#FDFAF6] px-4 py-10 text-sm text-[#5F5A73]">Loading exam pack...</div>;
@@ -330,7 +335,11 @@ export default function ProctoredExamPage() {
             >
               Start Exam
             </button>
-            {error && <p className="text-xs text-rose-700">{error}</p>}
+            {error && (
+              <p className="text-xs text-rose-700" role="alert" aria-live="assertive">
+                {error}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -403,7 +412,7 @@ export default function ProctoredExamPage() {
             {submitting ? 'Submitting...' : 'Submit Exam'}
           </button>
         ) : (
-          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" role="status" aria-live="polite">
             <p className="font-semibold">{result?.message || 'Submitted successfully.'}</p>
             <p className="mt-1 text-emerald-800">Status: {result?.status}</p>
             {result?.integritySummary && (
@@ -414,7 +423,11 @@ export default function ProctoredExamPage() {
           </div>
         )}
 
-        {error && <p className="mt-2 text-xs text-rose-700">{error}</p>}
+        {error && (
+          <p className="mt-2 text-xs text-rose-700" role="alert" aria-live="assertive">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   );

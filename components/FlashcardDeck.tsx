@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { fsrs, Card, Rating, createEmptyCard } from 'ts-fsrs';
 import { BrainCircuit, RotateCcw, Frown, Meh, Smile, Zap, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,13 +17,14 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
   const [showBack, setShowBack] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const f = fsrs({});
 
   // Function to load all cards into state
-  const loadCardsFromStorage = (currentFlashcards: Flashcard[]) => {
+  const loadCardsFromStorage = useCallback((currentFlashcards: Flashcard[]) => {
     const loadedCards: (Card & { index: number })[] = [];
-    currentFlashcards.forEach((cf, index) => {
+    currentFlashcards.forEach((_, index) => {
       const stored = localStorage.getItem(`fsrs-[${chapterId}]-${index}`);
       if (stored) {
         try {
@@ -40,11 +41,11 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
     });
     setCards(loadedCards);
     setIsLoaded(true);
-  };
+  }, [chapterId]);
 
   useEffect(() => {
     if (flashcards) loadCardsFromStorage(flashcards);
-  }, [chapterId, flashcards]);
+  }, [flashcards, loadCardsFromStorage]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -59,6 +60,7 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
 
   const handleGenerateCards = async () => {
     setIsGenerating(true);
+    setStatusMessage(null);
     try {
       const res = await fetch('/api/generate-flashcards', {
         method: 'POST',
@@ -66,17 +68,22 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
         body: JSON.stringify({ chapterId, subject, chapterTitle })
       });
       const data = await res.json();
-      if (data.success && data.data && data.data.length > 0) {
+      const payload = (data && typeof data === 'object' && 'data' in data && data.data && typeof data.data === 'object')
+        ? (data.data as Record<string, unknown>)
+        : (data as Record<string, unknown>);
+      if (payload.success === true && Array.isArray(payload.data) && payload.data.length > 0) {
+        const generated = payload.data as Flashcard[];
         setFlashcards(prev => {
-          const combined = [...prev, ...data.data];
+          const combined = [...prev, ...generated];
           loadCardsFromStorage(combined);
           return combined;
         });
+        setStatusMessage('New flashcards were generated.');
       } else {
-        alert("Failed to generate flashcards.");
+        setStatusMessage(String(payload.message || payload.error || 'Failed to generate flashcards.'));
       }
-    } catch (e) {
-      alert("Error contacting AI endpoint.");
+    } catch {
+      setStatusMessage('Error contacting AI endpoint.');
     } finally {
       setIsGenerating(false);
     }
@@ -89,15 +96,17 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
   if (currentIdx === null) {
     return (
       <div className="bg-[#FDFAF6] rounded-2xl border border-emerald-200 shadow-sm p-8 text-center mb-5 flex flex-col items-center">
+        {statusMessage && <p className="sr-only" role="status" aria-live="polite">{statusMessage}</p>}
         <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mb-4">
           <CheckCircle2 className="w-8 h-8 text-emerald-600" />
         </div>
-        <h2 className="font-fraunces text-xl font-bold text-navy-700 mb-2">You're all caught up!</h2>
+        <h2 className="font-fraunces text-xl font-bold text-navy-700 mb-2">You&apos;re all caught up!</h2>
         <p className="text-[#8A8AAA] text-sm max-w-sm mb-6">
-          You've reviewed all flashcards for this chapter. Spaced repetition ensures you only study when you're about to forget.
+          You&apos;ve reviewed all flashcards for this chapter. Spaced repetition ensures you only study when you&apos;re about to forget.
         </p>
         <button 
           onClick={handleGenerateCards}
+          type="button"
           disabled={isGenerating}
           className="inline-flex items-center gap-2 bg-saffron-50 border border-saffron-200 text-saffron-700 hover:bg-saffron-100 px-4 py-2 rounded-xl font-semibold transition-colors disabled:opacity-50"
         >
@@ -138,6 +147,7 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
 
   return (
     <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm mb-5 overflow-hidden">
+      {statusMessage && <p className="mx-4 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">{statusMessage}</p>}
       <div className="bg-gradient-to-r from-violet-500 to-violet-600 px-5 py-4 flex items-center justify-between">
         <h2 className="font-fraunces text-white font-bold flex items-center gap-2">
           <BrainCircuit className="w-5 h-5" /> Active Recall
@@ -145,6 +155,7 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
         <div className="flex items-center gap-3">
           <button 
             onClick={handleGenerateCards}
+            type="button"
             disabled={isGenerating}
             className="bg-white/10 hover:bg-white/20 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors border border-white/10 disabled:opacity-50 flex items-center gap-1.5"
           >
@@ -175,19 +186,19 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
               </p>
               
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl mx-auto">
-                <button onClick={() => handleRate(Rating.Again)} className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 transition-colors">
+                <button type="button" onClick={() => handleRate(Rating.Again)} className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 transition-colors">
                   <RotateCcw className="w-5 h-5" />
                   <span className="text-xs font-bold uppercase tracking-wider">Again</span>
                 </button>
-                <button onClick={() => handleRate(Rating.Hard)} className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors">
+                <button type="button" onClick={() => handleRate(Rating.Hard)} className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors">
                   <Frown className="w-5 h-5" />
                   <span className="text-xs font-bold uppercase tracking-wider">Hard</span>
                 </button>
-                <button onClick={() => handleRate(Rating.Good)} className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors">
+                <button type="button" onClick={() => handleRate(Rating.Good)} className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition-colors">
                   <Meh className="w-5 h-5" />
                   <span className="text-xs font-bold uppercase tracking-wider">Good</span>
                 </button>
-                <button onClick={() => handleRate(Rating.Easy)} className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors">
+                <button type="button" onClick={() => handleRate(Rating.Easy)} className="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors">
                   <Zap className="w-5 h-5" />
                   <span className="text-xs font-bold uppercase tracking-wider">Easy</span>
                 </button>
@@ -196,6 +207,7 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
           ) : (
             <button
               onClick={() => setShowBack(true)}
+              type="button"
               className="bg-navy-700 hover:bg-navy-800 text-white font-semibold px-6 py-2.5 rounded-xl transition-colors shadow-sm"
             >
               Show Answer

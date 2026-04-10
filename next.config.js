@@ -1,14 +1,14 @@
 /** @type {import('next').NextConfig} */
 function validateBuildEnv() {
-  const skip = process.env.SKIP_ENV_VALIDATION === '1';
-  if (skip) return;
-  if (process.env.NODE_ENV !== 'production') return;
-  const required = [
-    'NEXT_PUBLIC_SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    'SESSION_SIGNING_SECRET',
-  ];
-  const missing = required.filter((name) => !(process.env[name] || '').trim());
+  const strictValidation = process.env.STRICT_ENV_VALIDATION === '1';
+  if (!strictValidation) return;
+  const hasValue = (name) => !!(process.env[name] || '').trim();
+  const missing = [];
+  if (!hasValue('NEXT_PUBLIC_SUPABASE_URL')) missing.push('NEXT_PUBLIC_SUPABASE_URL');
+  if (!(hasValue('NEXT_PUBLIC_SUPABASE_ANON_KEY') || hasValue('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'))) {
+    missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY|NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY');
+  }
+  if (!hasValue('SESSION_SIGNING_SECRET')) missing.push('SESSION_SIGNING_SECRET');
   if (missing.length > 0) {
     throw new Error(`Missing required production env vars: ${missing.join(', ')}`);
   }

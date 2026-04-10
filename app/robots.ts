@@ -9,6 +9,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ['/teacher'],
       },
     ],
-    sitemap: 'https://vidyapath.vercel.app/sitemap.xml',
+    sitemap: 'https://sreyas-vidyapath.vercel.com/sitemap.xml',
   };
 }

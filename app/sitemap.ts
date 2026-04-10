@@ -3,7 +3,7 @@ import { ALL_CHAPTERS } from '@/lib/data';
 import { chapterNotesSlug, slugify } from '@/lib/seo-notes';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = 'https://vidyapath.vercel.app';
+  const baseUrl = 'https://sreyas-vidyapath.vercel.com';
 
   const chapterUrls = ALL_CHAPTERS.map((chapter) => ({
     url: `${baseUrl}/chapters/${chapter.id}`,

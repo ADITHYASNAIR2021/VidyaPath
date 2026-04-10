@@ -11,6 +11,8 @@ export default function StudiedButton({ chapterId, className }: { chapterId: str
   return (
     <button
       onClick={() => toggleStudied(chapterId)}
+      type="button"
+      aria-pressed={studied}
       className={clsx(
         'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 shadow-sm border',
         studied
@@ -20,7 +22,7 @@ export default function StudiedButton({ chapterId, className }: { chapterId: str
       )}
     >
       <CheckCircle2 className="w-4 h-4" fill={studied ? 'currentColor' : 'none'} />
-      {studied ? 'Studied ✓' : 'Mark as Studied'}
+      {studied ? 'Studied' : 'Mark as Studied'}
     </button>
   );
 }

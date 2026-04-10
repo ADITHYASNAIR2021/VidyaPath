@@ -1,7 +1,8 @@
-import { NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { buildTeacherAssignmentPackDraft, buildTeacherPackUrls, sanitizePackTitle, toAnswerKey } from '@/lib/teacher-assignment';
 import { getStudentSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import {
   addAnnouncement,
   getPrivateTeacherConfig,
@@ -12,6 +13,7 @@ import {
   upsertAssignmentPack,
 } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
+import { recordAuditEvent } from '@/lib/security/audit';
  
 export const dynamic = 'force-dynamic';
 
@@ -27,11 +29,12 @@ function safeClassLevel(value: unknown): 10 | 12 {
 }
 
 export async function GET(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const session = await getTeacherSessionFromRequestCookies();
     if (session) {
       const config = await getPrivateTeacherConfig(session.teacher.id);
-      return NextResponse.json(config);
+      return dataJson({ requestId, data: config });
     }
     const studentSession = await getStudentSessionFromRequestCookies();
     const url = new URL(req.url);
@@ -48,25 +51,42 @@ export async function GET(req: Request) {
         : undefined;
     const section = sectionFromQuery || sectionFromStudent;
     const config = await getPublicTeacherConfig({ chapterId, classLevel, subject, section });
-    return NextResponse.json(config);
+    return dataJson({ requestId, data: config });
   } catch (error) {
     console.error('[teacher:get] error', error);
-    return NextResponse.json({ error: 'Failed to load teacher config.' }, { status: 500 });
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-config-read-failed',
+      message: 'Failed to load teacher config.',
+      status: 500,
+    });
   }
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const session = await getTeacherSessionFromRequestCookies();
     if (!session) {
-      return NextResponse.json({ error: 'Unauthorized teacher access.' }, { status: 401 });
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Unauthorized teacher access.',
+        status: 401,
+      });
     }
     await assertTeacherStorageWritable();
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 128 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
     }
+    const body = bodyResult.value;
     const action = String((body as Record<string, unknown>).action ?? '') as TeacherAction;
     const chapterId = String((body as Record<string, unknown>).chapterId ?? '').trim();
     const section = typeof (body as Record<string, unknown>).section === 'string'
@@ -78,16 +98,56 @@ export async function POST(req: Request) {
         ? ((body as Record<string, unknown>).topics as unknown[])
             .filter((item): item is string => typeof item === 'string')
         : [];
-      if (!chapterId) return NextResponse.json({ error: 'chapterId is required.' }, { status: 400 });
+      if (!chapterId) {
+        return errorJson({
+          requestId,
+          errorCode: 'missing-chapter-id',
+          message: 'chapterId is required.',
+          status: 400,
+        });
+      }
       const config = await setImportantTopics({ teacherId: session.teacher.id, chapterId, topics, section });
-      return NextResponse.json({ ok: true, config });
+      const committedAt = new Date().toISOString();
+      await recordAuditEvent({
+        requestId,
+        endpoint: '/api/teacher',
+        action: 'teacher-set-important-topics',
+        statusCode: 200,
+        actorRole: 'teacher',
+        metadata: { teacherId: session.teacher.id, chapterId, committedAt },
+      });
+      return dataJson({
+        requestId,
+        data: { ok: true, config },
+        meta: { committedAt },
+      });
     }
 
     if (action === 'set-quiz-link') {
       const url = String((body as Record<string, unknown>).url ?? '').trim();
-      if (!chapterId) return NextResponse.json({ error: 'chapterId is required.' }, { status: 400 });
+      if (!chapterId) {
+        return errorJson({
+          requestId,
+          errorCode: 'missing-chapter-id',
+          message: 'chapterId is required.',
+          status: 400,
+        });
+      }
       const config = await setQuizLink({ teacherId: session.teacher.id, chapterId, url, section });
-      return NextResponse.json({ ok: true, config });
+      const committedAt = new Date().toISOString();
+      await recordAuditEvent({
+        requestId,
+        endpoint: '/api/teacher',
+        action: 'teacher-set-quiz-link',
+        statusCode: 200,
+        actorRole: 'teacher',
+        metadata: { teacherId: session.teacher.id, chapterId, committedAt },
+      });
+      return dataJson({
+        requestId,
+        data: { ok: true, config },
+        meta: { committedAt },
+      });
     }
 
     if (action === 'add-announcement') {
@@ -100,13 +160,39 @@ export async function POST(req: Request) {
         chapterId: chapterId || undefined,
         section,
       });
-      return NextResponse.json({ ok: true, config });
+      const committedAt = new Date().toISOString();
+      await recordAuditEvent({
+        requestId,
+        endpoint: '/api/teacher',
+        action: 'teacher-add-announcement',
+        statusCode: 200,
+        actorRole: 'teacher',
+        metadata: { teacherId: session.teacher.id, chapterId: chapterId || undefined, committedAt },
+      });
+      return dataJson({
+        requestId,
+        data: { ok: true, config },
+        meta: { committedAt },
+      });
     }
 
     if (action === 'remove-announcement') {
       const id = String((body as Record<string, unknown>).id ?? '').trim();
       const config = await removeAnnouncement({ teacherId: session.teacher.id, id });
-      return NextResponse.json({ ok: true, config });
+      const committedAt = new Date().toISOString();
+      await recordAuditEvent({
+        requestId,
+        endpoint: '/api/teacher',
+        action: 'teacher-remove-announcement',
+        statusCode: 200,
+        actorRole: 'teacher',
+        metadata: { teacherId: session.teacher.id, announcementId: id, committedAt },
+      });
+      return dataJson({
+        requestId,
+        data: { ok: true, config },
+        meta: { committedAt },
+      });
     }
 
     if (action === 'create-assignment-pack') {
@@ -123,7 +209,14 @@ export async function POST(req: Request) {
       const dueDate = typeof (body as Record<string, unknown>).dueDate === 'string'
         ? String((body as Record<string, unknown>).dueDate).trim()
         : undefined;
-      if (!chapterId) return NextResponse.json({ error: 'chapterId is required.' }, { status: 400 });
+      if (!chapterId) {
+        return errorJson({
+          requestId,
+          errorCode: 'missing-chapter-id',
+          message: 'chapterId is required.',
+          status: 400,
+        });
+      }
 
       const draft = await buildTeacherAssignmentPackDraft({
         chapterId,
@@ -147,14 +240,37 @@ export async function POST(req: Request) {
         printUrl: urls.printUrl,
         section,
       });
-      return NextResponse.json({ ok: true, pack });
+      const committedAt = new Date().toISOString();
+      await recordAuditEvent({
+        requestId,
+        endpoint: '/api/teacher',
+        action: 'teacher-create-assignment-pack',
+        statusCode: 200,
+        actorRole: 'teacher',
+        metadata: { teacherId: session.teacher.id, packId: pack.packId, chapterId, committedAt },
+      });
+      return dataJson({
+        requestId,
+        data: { ok: true, pack },
+        meta: { committedAt },
+      });
     }
 
-    return NextResponse.json({ error: 'Unknown action.' }, { status: 400 });
+    return errorJson({
+      requestId,
+      errorCode: 'unknown-teacher-action',
+      message: 'Unknown action.',
+      status: 400,
+    });
   } catch (error) {
     console.error('[teacher:post] error', error);
     const message = error instanceof Error ? error.message : 'Failed to update teacher config.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-config-update-failed',
+      message,
+      status,
+    });
   }
 }

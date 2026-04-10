@@ -1,17 +1,35 @@
-import { NextResponse } from 'next/server';
 import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { deleteTeacherQuestionBankItem, updateTeacherQuestionBankItem } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
+import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+  const requestId = getRequestId(req);
   try {
     const session = await getTeacherSessionFromRequestCookies();
-    if (!session) return NextResponse.json({ error: 'Unauthorized teacher access.' }, { status: 401 });
+    if (!session) {
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Unauthorized teacher access.',
+        status: 401,
+      });
+    }
     await assertTeacherStorageWritable();
-
-    const body = await req.json().catch(() => null);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value;
     const item = await updateTeacherQuestionBankItem({
       teacherId: session.teacher.id,
       itemId: params.id,
@@ -22,27 +40,85 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       maxMarks: Number.isFinite(Number(body?.maxMarks)) ? Number(body.maxMarks) : undefined,
       imageUrl: typeof body?.imageUrl === 'string' ? body.imageUrl : undefined,
     });
-    if (!item) return NextResponse.json({ error: 'Question bank item not found.' }, { status: 404 });
-    return NextResponse.json({ item });
+    if (!item) {
+      return errorJson({
+        requestId,
+        errorCode: 'question-item-not-found',
+        message: 'Question bank item not found.',
+        status: 404,
+      });
+    }
+    const committedAt = new Date().toISOString();
+    await recordAuditEvent({
+      requestId,
+      endpoint: '/api/teacher/question-bank/item/[id]',
+      action: 'teacher-update-question-bank-item',
+      statusCode: 200,
+      actorRole: 'teacher',
+      metadata: { teacherId: session.teacher.id, itemId: params.id, committedAt },
+    });
+    return dataJson({
+      requestId,
+      data: { item },
+      meta: { committedAt },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update question bank item.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return errorJson({
+      requestId,
+      errorCode: 'question-item-update-failed',
+      message,
+      status,
+    });
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+  const requestId = getRequestId(req);
   try {
     const session = await getTeacherSessionFromRequestCookies();
-    if (!session) return NextResponse.json({ error: 'Unauthorized teacher access.' }, { status: 401 });
+    if (!session) {
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Unauthorized teacher access.',
+        status: 401,
+      });
+    }
     await assertTeacherStorageWritable();
 
     const ok = await deleteTeacherQuestionBankItem(session.teacher.id, params.id);
-    if (!ok) return NextResponse.json({ error: 'Question bank item not found.' }, { status: 404 });
-    return NextResponse.json({ ok: true });
+    if (!ok) {
+      return errorJson({
+        requestId,
+        errorCode: 'question-item-not-found',
+        message: 'Question bank item not found.',
+        status: 404,
+      });
+    }
+    const committedAt = new Date().toISOString();
+    await recordAuditEvent({
+      requestId,
+      endpoint: '/api/teacher/question-bank/item/[id]',
+      action: 'teacher-delete-question-bank-item',
+      statusCode: 200,
+      actorRole: 'teacher',
+      metadata: { teacherId: session.teacher.id, itemId: params.id, committedAt },
+    });
+    return dataJson({
+      requestId,
+      data: { ok: true },
+      meta: { committedAt },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to delete question bank item.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return errorJson({
+      requestId,
+      errorCode: 'question-item-delete-failed',
+      message,
+      status,
+    });
   }
 }

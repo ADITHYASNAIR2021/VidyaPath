@@ -45,6 +45,12 @@ interface GenerateJsonOptions<T> extends GenerateTextOptions {
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const RESPONSE_CACHE = new Map<string, CachedResponse>();
 
+function isResponseCacheEnabled(): boolean {
+  if (process.env.AI_RESPONSE_CACHE === '1') return true;
+  if (process.env.AI_RESPONSE_CACHE === '0') return false;
+  return process.env.NODE_ENV !== 'production';
+}
+
 function isUsableGroqApiKey(key: string | undefined): key is string {
   if (!key) return false;
   const normalized = key.trim();
@@ -294,14 +300,17 @@ function tryParseJsonCandidates(rawText: string): { parsed: unknown | null; erro
 
 async function runGeneration(options: GenerateTextOptions): Promise<GenerationResult> {
   const cacheKey = buildCacheKey(options);
-  const fromCache = RESPONSE_CACHE.get(cacheKey);
-  if (fromCache && fromCache.expiresAt > now()) {
-    return {
-      text: fromCache.text,
-      provider: fromCache.provider,
-      model: fromCache.model,
-      cacheHit: true,
-    };
+  const cacheEnabled = isResponseCacheEnabled();
+  if (cacheEnabled) {
+    const fromCache = RESPONSE_CACHE.get(cacheKey);
+    if (fromCache && fromCache.expiresAt > now()) {
+      return {
+        text: fromCache.text,
+        provider: fromCache.provider,
+        model: fromCache.model,
+        cacheHit: true,
+      };
+    }
   }
 
   const temperature = options.temperature ?? 0.2;
@@ -337,12 +346,14 @@ ${citationBlock}`;
           temperature,
           maxOutputTokens
         );
-        RESPONSE_CACHE.set(cacheKey, {
-          text,
-          provider: 'gemini',
-          model,
-          expiresAt: now() + CACHE_TTL_MS,
-        });
+        if (cacheEnabled) {
+          RESPONSE_CACHE.set(cacheKey, {
+            text,
+            provider: 'gemini',
+            model,
+            expiresAt: now() + CACHE_TTL_MS,
+          });
+        }
         return { text, provider: 'gemini', model, cacheHit: false };
       } catch (error) {
         errors.push(String(error));
@@ -363,12 +374,14 @@ ${citationBlock}`;
           temperature,
           maxOutputTokens
         );
-        RESPONSE_CACHE.set(cacheKey, {
-          text,
-          provider: 'groq',
-          model,
-          expiresAt: now() + CACHE_TTL_MS,
-        });
+        if (cacheEnabled) {
+          RESPONSE_CACHE.set(cacheKey, {
+            text,
+            provider: 'groq',
+            model,
+            expiresAt: now() + CACHE_TTL_MS,
+          });
+        }
         return { text, provider: 'groq', model, cacheHit: false };
       } catch (error) {
         errors.push(String(error));

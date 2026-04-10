@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getContextPack } from '@/lib/ai/context-retriever';
@@ -12,6 +11,8 @@ import {
 } from '@/lib/ai/validators';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 
 interface ChapterRemediateRequest {
   chapterId: string;
@@ -98,22 +99,39 @@ function alignFocus(focus: string, chapterTitle: string, chapterTopics: string[]
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const body = await req.json().catch(() => null);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 48 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value;
     const parsed = parseRequest(body);
     if (!parsed) {
-      return NextResponse.json(
-        { error: 'Invalid request. Required: { chapterId, weakTags?, availableDays?, dailyMinutes? }' },
-        { status: 400 }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-chapter-remediate-input',
+        message: 'Invalid request. Required: { chapterId, weakTags?, availableDays?, dailyMinutes? }',
+        status: 400,
+      });
     }
 
     const chapter = getChapterById(parsed.chapterId);
     if (!chapter) {
-      return NextResponse.json({ error: 'Chapter not found.' }, { status: 404 });
+      return errorJson({
+        requestId,
+        errorCode: 'chapter-not-found',
+        message: 'Chapter not found.',
+        status: 404,
+      });
     }
 
     const pyq = getPYQData(parsed.chapterId);
@@ -129,7 +147,12 @@ export async function POST(req: Request) {
 
     const fallback = buildFallbackPlan(parsed);
     if (!fallback) {
-      return NextResponse.json({ error: 'Unable to create remediation plan.' }, { status: 500 });
+      return errorJson({
+        requestId,
+        errorCode: 'chapter-remediate-fallback-failed',
+        message: 'Unable to create remediation plan.',
+        status: 500,
+      });
     }
 
     const prompt = `Create a day-wise remediation plan.
@@ -175,7 +198,7 @@ Return ONLY JSON:
         }))
         .slice(0, parsed.availableDays);
 
-      if (dayPlan.length === 0) return NextResponse.json(fallback);
+      if (dayPlan.length === 0) return dataJson({ requestId, data: fallback });
 
       const payload = {
         chapterId: chapter.id,
@@ -192,13 +215,19 @@ Return ONLY JSON:
         completionText: JSON.stringify(payload),
         estimated: true,
       });
-      return NextResponse.json(payload);
+      return dataJson({ requestId, data: payload });
     } catch (aiError) {
       console.error('[chapter-remediate] AI fallback triggered', aiError);
-      return NextResponse.json(fallback);
+      return dataJson({ requestId, data: fallback });
     }
   } catch (error) {
     console.error('[chapter-remediate] error', error);
-    return NextResponse.json({ error: 'Failed to create remediation plan.' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to create remediation plan.';
+    return errorJson({
+      requestId,
+      errorCode: 'chapter-remediate-failed',
+      message,
+      status: 500,
+    });
   }
 }

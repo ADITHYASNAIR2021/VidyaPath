@@ -231,15 +231,22 @@ export default function AIChatBox({
         if (response.status === 429) {
           setError('VidyaAI is busy right now. Wait 30 seconds and try again!');
         } else {
-          setError(data.error || 'Something went wrong. Please try again.');
+          setError(data.message || data.error || 'Something went wrong. Please try again.');
         }
         return;
       }
 
       const data = await response.json();
+      const payload = (data && typeof data === 'object' && data.data && typeof data.data === 'object')
+        ? data.data as Record<string, unknown>
+        : data as Record<string, unknown>;
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: data.message, isOffTopic: data.isOffTopic === true },
+        {
+          role: 'assistant',
+          content: String(payload.message || ''),
+          isOffTopic: payload.isOffTopic === true,
+        },
       ]);
     } catch {
       setError('Check your internet connection and try again.');
@@ -271,8 +278,10 @@ export default function AIChatBox({
         {messages.length > 0 && (
           <button
             onClick={() => { setMessages([]); setError(null); }}
+            type="button"
             className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
             title="Clear chat"
+            aria-label="Clear chat"
           >
             <RefreshCw className="w-4 h-4 text-white/80" />
           </button>
@@ -280,7 +289,13 @@ export default function AIChatBox({
       </div>
 
       {/* Messages */}
-      <div className="overflow-y-auto p-4 space-y-3 chat-scroll" style={{ maxHeight: '460px', minHeight: '200px' }}>
+      <div
+        className="overflow-y-auto p-4 space-y-3 chat-scroll"
+        style={{ maxHeight: '460px', minHeight: '200px' }}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+      >
         {messages.length === 0 ? (
           <div className="space-y-3">
             <div className="flex items-start gap-2.5">
@@ -300,6 +315,7 @@ export default function AIChatBox({
                   <button
                     key={q}
                     onClick={() => sendMessage(q)}
+                    type="button"
                     className="block w-full text-left text-xs bg-saffron-50 hover:bg-saffron-100 text-saffron-700 border border-saffron-200 px-3 py-2 rounded-xl transition-colors"
                   >
                     {q}
@@ -371,7 +387,7 @@ export default function AIChatBox({
         )}
 
         {error && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">{error}</div>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700" role="alert">{error}</div>
         )}
 
         <div ref={messagesEndRef} />
@@ -390,11 +406,14 @@ export default function AIChatBox({
             className="flex-1 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-saffron-400 focus:border-transparent placeholder:text-[#8A8AAA] max-h-32 overflow-y-auto"
             style={{ minHeight: '42px' }}
             disabled={loading}
+            aria-label="Ask VidyaAI a question"
           />
           <button
             onClick={() => sendMessage(input)}
+            type="button"
             disabled={!input.trim() || loading}
             className="flex-shrink-0 w-10 h-10 bg-saffron-500 hover:bg-saffron-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl flex items-center justify-center transition-all"
+            aria-label="Send message"
           >
             <Send className="w-4 h-4" />
           </button>

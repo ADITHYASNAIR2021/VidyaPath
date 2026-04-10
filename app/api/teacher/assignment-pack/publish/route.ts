@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server';
 import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
-import { errorJson, getClientIp, getRequestId, withRequestIdHeader } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId, withRequestIdHeader } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { logServerEvent } from '@/lib/observability';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
@@ -64,7 +63,7 @@ export async function POST(req: Request) {
       ttlSeconds: 24 * 60 * 60,
     });
     if (idempotency.kind === 'replay') {
-      return withRequestIdHeader(NextResponse.json(idempotency.response, { status: idempotency.statusCode }), requestId);
+      return withRequestIdHeader(Response.json(idempotency.response, { status: idempotency.statusCode }), requestId);
     }
     if (idempotency.kind === 'conflict') {
       return errorJson({
@@ -118,7 +117,11 @@ export async function POST(req: Request) {
       statusCode: 200,
       details: { teacherId: teacherSession.teacher.id, packId },
     });
-    return withRequestIdHeader(NextResponse.json(responseBody), requestId);
+    return dataJson({
+      requestId,
+      data: { pack },
+      meta: { committedAt },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to publish assignment pack.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;

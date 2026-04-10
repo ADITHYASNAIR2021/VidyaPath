@@ -14,6 +14,7 @@ function isValidAdminKey(key: string): boolean {
 }
 
 function isBootstrapKeyFlowEnabled(): boolean {
+  if (process.env.SINGLE_ENV_MODE === '1') return true;
   if (process.env.NODE_ENV !== 'production') return true;
   return process.env.ADMIN_BOOTSTRAP_ENABLED === 'true';
 }

@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { getPYQData } from '@/lib/pyq';
 import { getChapterById } from '@/lib/data';
 import { getContextPack } from '@/lib/ai/context-retriever';
@@ -8,6 +7,8 @@ import { buildDynamicFlashcardFallback } from '@/lib/ai/dynamic-fallback';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 
 function buildFallbackCards(input: {
   subject: string;
@@ -26,14 +27,21 @@ function buildFallbackCards(input: {
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
     }
+    const body = bodyResult.value;
 
     const incomingSubject = typeof body.subject === 'string' && body.subject.trim() ? body.subject.trim() : 'CBSE subject';
     const incomingChapterTitle =
@@ -132,11 +140,15 @@ ${schemaNote}`;
       completionText: JSON.stringify(merged.slice(0, 5)),
       estimated: true,
     });
-    return NextResponse.json({ success: true, data: merged.slice(0, 5) });
+    return dataJson({
+      requestId,
+      data: { success: true, data: merged.slice(0, 5) },
+    });
   } catch (error) {
     console.error('[Flashcard API Error]:', error);
-    return NextResponse.json(
-      {
+    return dataJson({
+      requestId,
+      data: {
         success: true,
         data: buildFallbackCards({
           subject: 'CBSE subject',
@@ -145,7 +157,6 @@ ${schemaNote}`;
           seedText: `fallback:${Date.now()}`,
         }),
       },
-      { status: 200 }
-    );
+    });
   }
 }

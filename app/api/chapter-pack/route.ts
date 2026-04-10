@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { getChapterById } from '@/lib/data';
 import { getFrequencyLabel, getPYQData } from '@/lib/pyq';
 import { getContextPack } from '@/lib/ai/context-retriever';
@@ -12,7 +11,7 @@ import {
 } from '@/lib/ai/validators';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
-import { getClientIp, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
@@ -99,31 +98,43 @@ export async function POST(req: Request) {
       blockSeconds: 120,
     });
     if (!limit.allowed) {
-      return NextResponse.json(
-        { error: 'Too many chapter pack requests. Please retry shortly.', errorCode: 'rate-limit-exceeded', requestId },
-        { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds), 'X-Request-Id': requestId } }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many chapter pack requests. Please retry shortly.',
+        status: 429,
+        hint: `Retry after ${limit.retryAfterSeconds}s`,
+      });
     }
 
     const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 16 * 1024);
     if (!bodyResult.ok) {
-      return NextResponse.json(
-        { error: bodyResult.message, errorCode: bodyResult.reason, requestId },
-        { status: bodyResult.reason === 'payload-too-large' ? 413 : 400, headers: { 'X-Request-Id': requestId } }
-      );
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
     }
     const body = bodyResult.value;
     const parsed = parseRequest(body);
     if (!parsed) {
-      return NextResponse.json(
-        { error: 'Invalid request. Required: { chapterId }', requestId },
-        { status: 400, headers: { 'X-Request-Id': requestId } }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-request-body',
+        message: 'Invalid request. Required: { chapterId }',
+        status: 400,
+      });
     }
 
     const chapter = getChapterById(parsed.chapterId);
     if (!chapter) {
-      return NextResponse.json({ error: 'Chapter not found.', requestId }, { status: 404, headers: { 'X-Request-Id': requestId } });
+      return errorJson({
+        requestId,
+        errorCode: 'chapter-not-found',
+        message: 'Chapter not found.',
+        status: 404,
+      });
     }
 
     const pyq = getPYQData(parsed.chapterId);
@@ -139,7 +150,12 @@ export async function POST(req: Request) {
 
     const fallback = buildFallbackPack(parsed.chapterId, contextPack);
     if (!fallback) {
-      return NextResponse.json({ error: 'Unable to build chapter pack.', requestId }, { status: 500, headers: { 'X-Request-Id': requestId } });
+      return errorJson({
+        requestId,
+        errorCode: 'chapter-pack-fallback-failed',
+        message: 'Unable to build chapter pack.',
+        status: 500,
+      });
     }
 
     const pyqSummary = pyq
@@ -223,13 +239,19 @@ Return ONLY JSON:
         estimated: true,
       });
 
-      return NextResponse.json({ ...payload, requestId }, { headers: { 'X-Request-Id': requestId } });
+      return dataJson({ requestId, data: payload });
     } catch (aiError) {
       console.error('[chapter-pack] AI fallback triggered', aiError);
-      return NextResponse.json({ ...fallback, requestId }, { headers: { 'X-Request-Id': requestId } });
+      return dataJson({ requestId, data: fallback });
     }
   } catch (error) {
     console.error('[chapter-pack] error', error);
-    return NextResponse.json({ error: 'Failed to create chapter pack.', requestId }, { status: 500, headers: { 'X-Request-Id': requestId } });
+    const message = error instanceof Error ? error.message : 'Failed to create chapter pack.';
+    return errorJson({
+      requestId,
+      errorCode: 'chapter-pack-create-failed',
+      message,
+      status: 500,
+    });
   }
 }

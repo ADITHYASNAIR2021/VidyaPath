@@ -5,6 +5,7 @@ export interface ApiErrorBody {
   ok: false;
   errorCode: string;
   message: string;
+  error?: string;
   requestId: string;
   hint?: string;
 }
@@ -14,6 +15,18 @@ export interface ApiSuccessBody<T> {
   requestId: string;
   data: T;
   meta?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+function extractLegacyAliases(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const aliases: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(source)) {
+    if (key === 'ok' || key === 'requestId' || key === 'data' || key === 'meta') continue;
+    aliases[key] = entry;
+  }
+  return aliases;
 }
 
 export function getRequestId(req: Request): string {
@@ -30,7 +43,7 @@ export function getClientIp(req: Request): string {
   return 'unknown';
 }
 
-export function withRequestIdHeader(response: NextResponse, requestId: string): NextResponse {
+export function withRequestIdHeader<T extends Response>(response: T, requestId: string): T {
   response.headers.set('x-request-id', requestId);
   return response;
 }
@@ -47,6 +60,7 @@ export function errorJson(input: {
     ok: false,
     errorCode: input.errorCode,
     message: input.message,
+    error: input.message,
     requestId: input.requestId,
     hint: input.hint,
   };
@@ -65,6 +79,7 @@ export function dataJson<T>(input: {
     requestId: input.requestId,
     data: input.data,
     meta: input.meta,
+    ...extractLegacyAliases(input.data),
   };
   return withRequestIdHeader(NextResponse.json(body, { status }), input.requestId);
 }

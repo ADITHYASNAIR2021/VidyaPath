@@ -435,6 +435,7 @@ function toTeacherProfile(row: TeacherProfileRow, scopes: TeacherScope[]): Teach
     id: row.id,
     phone: row.phone,
     name: row.name,
+    staffCode: row.staff_code ?? undefined,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -546,10 +547,23 @@ export async function authenticateTeacher(phone: string, pin: string, schoolId?:
     select: '*',
     filters,
     limit: 1,
-  }).catch(() => []);
+  }).catch((err: unknown) => {
+    console.error('[auth:teacher] Supabase query failed in authenticateTeacher:', err instanceof Error ? err.message : String(err));
+    return [] as TeacherProfileRow[];
+  });
   const row = rows[0];
-  if (!row || row.status !== 'active') return null;
-  if (!verifyPin(pin, row.pin_hash)) return null;
+  if (!row) {
+    console.warn('[auth:teacher] No teacher found for phone:', cleanPhone);
+    return null;
+  }
+  if (row.status !== 'active') {
+    console.warn('[auth:teacher] Teacher is not active. Status:', row.status, 'id:', row.id);
+    return null;
+  }
+  if (!verifyPin(pin, row.pin_hash)) {
+    console.warn('[auth:teacher] PIN mismatch for teacher id:', row.id, '— stored hash prefix:', row.pin_hash?.slice(0, 12));
+    return null;
+  }
   return getTeacherSessionById(row.id, schoolId);
 }
 
@@ -562,6 +576,8 @@ export async function authenticateTeacherByIdentifier(
   const cleanIdentifier = sanitizeText(identifier, 80);
   if (!cleanIdentifier || !pin) return { session: null };
   const normalizedPhone = normalizePhone(cleanIdentifier);
+  // Also try matching after stripping a leading country code (e.g. +91 or 0091 prefix)
+  const strippedPhone = normalizedPhone.replace(/^\+91|^0091/, '');
   const normalizedStaff = normalizeRosterToken(cleanIdentifier, 50);
   const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
     { column: 'status', value: 'active' },
@@ -571,15 +587,40 @@ export async function authenticateTeacherByIdentifier(
     select: '*',
     filters,
     limit: 5000,
-  }).catch(() => []);
+  }).catch((err: unknown) => {
+    console.error('[auth:teacher] Supabase query failed in authenticateTeacherByIdentifier:', err instanceof Error ? err.message : String(err));
+    return [] as TeacherProfileRow[];
+  });
+  if (rows.length === 0) {
+    console.warn('[auth:teacher] authenticateTeacherByIdentifier: Supabase returned 0 active teachers — possible connectivity or permissions issue.');
+  }
   const candidates = rows.filter((row) => {
-    const phoneMatch = normalizePhone(row.phone || '') === normalizedPhone;
+    const storedPhone = normalizePhone(row.phone || '');
+    // Accept match with or without country code on either side
+    const phoneMatch =
+      storedPhone === normalizedPhone ||
+      storedPhone === strippedPhone ||
+      storedPhone.replace(/^\+91|^0091/, '') === normalizedPhone ||
+      storedPhone.replace(/^\+91|^0091/, '') === strippedPhone;
     const staffMatch = normalizeRosterToken(row.staff_code || '', 50) === normalizedStaff;
     return phoneMatch || (!!normalizedStaff && staffMatch);
   });
-  if (candidates.length === 0) return { session: null };
-  const pinMatched = candidates.filter((row) => verifyPin(pin, row.pin_hash));
-  if (pinMatched.length === 0) return { session: null };
+  if (candidates.length === 0) {
+    console.warn('[auth:teacher] No candidate found for identifier:', cleanIdentifier, '— checked', rows.length, 'active teachers');
+    return { session: null };
+  }
+  const pinMatched = candidates.filter((row) => {
+    try {
+      return verifyPin(pin, row.pin_hash);
+    } catch (err: unknown) {
+      console.error('[auth:teacher] verifyPin threw for teacher id:', row.id, '— stored hash prefix:', row.pin_hash?.slice(0, 16), 'error:', err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  });
+  if (pinMatched.length === 0) {
+    console.warn('[auth:teacher] PIN mismatch for', candidates.length, 'candidate(s). Stored hash prefix(es):', candidates.map((r) => r.pin_hash?.slice(0, 12)).join(', '));
+    return { session: null };
+  }
   if (pinMatched.length > 1) return { session: null, ambiguous: true };
   const matched = pinMatched[0];
   return {
@@ -641,7 +682,13 @@ export async function getStudentByRollCode(rollCode: string, schoolId?: string):
     select: '*',
     filters,
     limit: 1,
-  }).catch(() => []);
+  }).catch((err: unknown) => {
+    console.error('[auth:student] Supabase query failed in getStudentByRollCode:', err instanceof Error ? err.message : String(err));
+    return [] as StudentProfileRow[];
+  });
+  if (rows.length === 0) {
+    console.warn('[auth:student] No student found for roll_code:', normalized, schoolId ? `(schoolId: ${schoolId})` : '(no school filter)');
+  }
   return rows[0] ?? null;
 }
 
@@ -667,7 +714,10 @@ export async function findStudentsByRollNo(input: {
     select: '*',
     filters,
     limit: 2000,
-  }).catch(() => []);
+  }).catch((err: unknown) => {
+    console.error('[auth:student] Supabase query failed in findStudentsByRollNo:', err instanceof Error ? err.message : String(err));
+    return [] as StudentProfileRow[];
+  });
   return rows.filter((row) => row.status === 'active');
 }
 
@@ -823,9 +873,25 @@ export async function updateStudent(
 
 export async function authenticateStudent(rollCode: string, pin?: string, schoolId?: string): Promise<StudentSession | null> {
   const row = await getStudentByRollCode(rollCode, schoolId);
-  if (!row || row.status !== 'active') return null;
+  if (!row) return null;
+  if (row.status !== 'active') {
+    console.warn('[auth:student] Student is not active. Status:', row.status, 'id:', row.id);
+    return null;
+  }
   if (row.pin_hash) {
-    if (!pin || !verifyPin(pin, row.pin_hash)) return null;
+    if (!pin) {
+      console.warn('[auth:student] pin_hash is set but no PIN provided for student id:', row.id);
+      return null;
+    }
+    try {
+      if (!verifyPin(pin, row.pin_hash)) {
+        console.warn('[auth:student] PIN mismatch for student id:', row.id, '— stored hash prefix:', row.pin_hash.slice(0, 12));
+        return null;
+      }
+    } catch (err: unknown) {
+      console.error('[auth:student] verifyPin threw for student id:', row.id, '— stored hash prefix:', row.pin_hash?.slice(0, 16), '— error:', err instanceof Error ? err.message : String(err));
+      return null;
+    }
   }
   if (row.class_level !== 10 && row.class_level !== 12) return null;
   return {

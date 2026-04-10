@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
 import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { gradeSubmission, releaseSubmissionResults } from '@/lib/teacher-admin-db';
 import { importFromSheets } from '@/lib/sheets-bridge';
 
@@ -46,13 +47,28 @@ function normalizeRows(value: unknown): ImportGradeRow[] {
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const teacher = await getTeacherSessionFromRequestCookies();
     if (!teacher) {
-      return NextResponse.json({ error: 'Teacher session required for grade import.' }, { status: 401 });
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Teacher session required for grade import.',
+        status: 401,
+      });
     }
 
-    const body = await req.json().catch(() => null);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value;
     let rows = normalizeRows((body as { rows?: unknown } | null)?.rows);
 
     if (rows.length === 0) {
@@ -86,14 +102,22 @@ export async function POST(req: Request) {
       releasedCount += result.releasedCount;
     }
 
-    return NextResponse.json({
-      ok: true,
-      gradedCount,
-      releasedCount,
-      processedRows: rows.length,
+    return dataJson({
+      requestId,
+      data: {
+        ok: true,
+        gradedCount,
+        releasedCount,
+        processedRows: rows.length,
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Sheets import failed.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return errorJson({
+      requestId,
+      errorCode: 'sheets-import-failed',
+      message,
+      status: 500,
+    });
   }
 }

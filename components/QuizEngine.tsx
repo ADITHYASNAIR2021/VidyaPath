@@ -43,6 +43,7 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
   const [finished, setFinished] = useState(false);
   const [bestScore, setBestScore] = useState<number | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   // Load previous best score
   useEffect(() => {
@@ -54,6 +55,7 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
 
   const handleGenerateValues = async () => {
     setIsGenerating(true);
+    setStatusMessage(null);
     try {
       const res = await fetch('/api/generate-quiz', {
         method: 'POST',
@@ -62,25 +64,29 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
       });
 
       const data = await res.json();
+      const payload = (data && typeof data === 'object' && 'data' in data && data.data && typeof data.data === 'object')
+        ? (data.data as Record<string, unknown>)
+        : (data as Record<string, unknown>);
 
       if (!res.ok) {
-        alert(data?.error || 'AI quiz generation failed.');
+        setStatusMessage(String((data as Record<string, unknown>)?.message || (data as Record<string, unknown>)?.error || 'AI quiz generation failed.'));
         return;
       }
 
-      if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-        const newQuizzes = data.data.map((q: unknown) => toQuiz(q)).filter((q: Quiz | null): q is Quiz => q !== null);
+      if (payload.success === true && Array.isArray(payload.data) && payload.data.length > 0) {
+        const newQuizzes = payload.data.map((q: unknown) => toQuiz(q)).filter((q: Quiz | null): q is Quiz => q !== null);
         if (newQuizzes.length === 0) {
-          alert('AI returned invalid quiz data. Please try again.');
+          setStatusMessage('AI returned invalid quiz data. Please try again.');
           return;
         }
         setQuizzes(newQuizzes);
         resetQuiz();
+        setStatusMessage('A fresh quiz was generated.');
       } else {
-        alert("Failed to generate: " + (data.error || "Unknown error"));
+        setStatusMessage(`Failed to generate: ${String(payload.message || payload.error || 'Unknown error')}`);
       }
-    } catch (e) {
-      alert("Error contacting AI endpoint.");
+    } catch {
+      setStatusMessage('Error contacting AI endpoint.');
     } finally {
       setIsGenerating(false);
     }
@@ -122,6 +128,7 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
     const finalPercentage = Math.round((score / quizzes.length) * 100);
     return (
       <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-8 text-center mb-5 relative overflow-hidden">
+        {statusMessage && <p className="sr-only" role="status" aria-live="polite">{statusMessage}</p>}
         <div className="absolute top-0 left-0 w-full h-2 bg-gray-100">
           <div className="h-full bg-saffron-500" style={{ width: '100%' }} />
         </div>
@@ -145,12 +152,14 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
         <div className="flex items-center justify-center gap-3">
           <button 
             onClick={resetQuiz}
+            type="button"
             className="inline-flex items-center gap-2 bg-navy-700 hover:bg-navy-800 text-white px-6 py-2.5 rounded-xl font-semibold transition-colors"
           >
             <RotateCcw className="w-4 h-4" /> Retake Quiz
           </button>
           <button 
             onClick={handleGenerateValues}
+            type="button"
             disabled={isGenerating}
             className="inline-flex items-center gap-2 bg-saffron-50 border border-saffron-200 text-saffron-700 hover:bg-saffron-100 px-4 py-2.5 rounded-xl font-semibold transition-colors disabled:opacity-50"
           >
@@ -165,11 +174,17 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
 
   return (
     <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-6 mb-5 relative overflow-hidden">
+      {statusMessage && <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">{statusMessage}</p>}
       {/* Progress Bar */}
       <div className="absolute top-0 left-0 w-full h-1 bg-gray-100">
         <div 
           className="h-full bg-saffron-500 transition-all duration-300" 
-          style={{ width: `${(currentQ / quizzes.length) * 100}%` }} 
+          style={{ width: `${(currentQ / quizzes.length) * 100}%` }}
+          role="progressbar"
+          aria-label="Quiz progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round((currentQ / quizzes.length) * 100)}
         />
       </div>
 
@@ -181,6 +196,7 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
           </div>
           <button 
             onClick={handleGenerateValues}
+            type="button"
             disabled={isGenerating}
             className="flex items-center gap-2 text-xs font-semibold text-navy-600 bg-navy-50 hover:bg-navy-100 px-3 py-1.5 rounded-lg border border-navy-100 transition-colors disabled:opacity-50"
           >
@@ -214,6 +230,7 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
             <button
               key={idx}
               onClick={() => handleSelect(idx)}
+              type="button"
               disabled={showAnswer}
               className={clsx(
                 'w-full text-left p-4 rounded-xl border transition-all duration-200 flex items-start gap-3 relative',
@@ -255,6 +272,7 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
             <div className="mt-4 flex justify-end">
               <button 
                 onClick={handleNext}
+                type="button"
                 className="flex items-center gap-2 bg-saffron-500 hover:bg-saffron-600 text-white px-5 py-2.5 rounded-xl font-semibold transition-colors"
               >
                 {currentQ < quizzes.length - 1 ? 'Next Question' : 'View Results'} <ArrowRight className="w-4 h-4" />

@@ -1,17 +1,18 @@
 import { getDeveloperSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { runCareerSourceVerification } from '@/lib/career-verification';
+import { hasValidCronAuthorization, isVercelCronRequest } from '@/lib/security/cron-auth';
 
 export const dynamic = 'force-dynamic';
 
-function isVercelCronRequest(req: Request): boolean {
-  const marker = req.headers.get('x-vercel-cron');
-  return typeof marker === 'string' && marker.trim().length > 0;
-}
-
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
-  if (!isVercelCronRequest(req)) {
+  const isCron = isVercelCronRequest(req);
+  if (isCron && !hasValidCronAuthorization(req)) {
+    return unauthorizedJson('Invalid cron authorization.', requestId);
+  }
+
+  if (!isCron) {
     const developerSession = await getDeveloperSessionFromRequestCookies();
     if (!developerSession) {
       return unauthorizedJson('Developer session required.', requestId);

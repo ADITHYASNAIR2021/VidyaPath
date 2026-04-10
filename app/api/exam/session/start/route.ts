@@ -1,46 +1,109 @@
-import { NextResponse } from 'next/server';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { getAssignmentPack, startExamSession } from '@/lib/teacher-admin-db';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
+  const endpoint = '/api/exam/session/start';
   try {
     await assertTeacherStorageWritable();
-    const body = await req.json().catch(() => null);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 16 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value;
     const packId = typeof body?.packId === 'string' ? body.packId.trim() : '';
     const studentSession = await getStudentSessionFromRequestCookies();
     if (!studentSession) {
-      return NextResponse.json({ error: 'Student login required.' }, { status: 401 });
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Student login required.',
+        status: 401,
+      });
     }
     const studentName = studentSession.studentName;
     const submissionCode = studentSession.rollCode;
     if (!packId || !studentName || !submissionCode) {
-      return NextResponse.json(
-        { error: 'Required: { packId }' },
-        { status: 400 }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-exam-start-input',
+        message: 'Required: { packId }',
+        status: 400,
+      });
     }
     const pack = await getAssignmentPack(packId);
     if (!pack || pack.status !== 'published') {
-      return NextResponse.json({ error: 'Assignment pack not found.' }, { status: 404 });
+      return errorJson({
+        requestId,
+        errorCode: 'assignment-pack-not-found',
+        message: 'Assignment pack not found.',
+        status: 404,
+      });
     }
     if (pack.classLevel !== studentSession.classLevel) {
-      return NextResponse.json({ error: 'This assignment is not available for your class.' }, { status: 403 });
+      return errorJson({
+        requestId,
+        errorCode: 'class-mismatch',
+        message: 'This assignment is not available for your class.',
+        status: 403,
+      });
     }
     if (pack.section && studentSession.section && pack.section !== studentSession.section) {
-      return NextResponse.json({ error: 'This assignment is section restricted.' }, { status: 403 });
+      return errorJson({
+        requestId,
+        errorCode: 'section-restricted',
+        message: 'This assignment is section restricted.',
+        status: 403,
+      });
     }
     if (pack.section && !studentSession.section) {
-      return NextResponse.json({ error: 'Student section is missing for this restricted assignment.' }, { status: 403 });
+      return errorJson({
+        requestId,
+        errorCode: 'missing-student-section',
+        message: 'Student section is missing for this restricted assignment.',
+        status: 403,
+      });
     }
 
     const session = await startExamSession({ packId, studentName, submissionCode });
-    return NextResponse.json({ session });
+    const committedAt = new Date().toISOString();
+    await recordAuditEvent({
+      requestId,
+      endpoint,
+      action: 'exam-session-started',
+      statusCode: 200,
+      actorRole: 'student',
+      metadata: {
+        studentId: studentSession.studentId,
+        packId,
+        sessionId: session.sessionId,
+        committedAt,
+      },
+    });
+    return dataJson({
+      requestId,
+      data: { session },
+      meta: { committedAt },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to start exam session.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return errorJson({
+      requestId,
+      errorCode: 'exam-session-start-failed',
+      message,
+      status,
+    });
   }
 }

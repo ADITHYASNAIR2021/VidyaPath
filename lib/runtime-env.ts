@@ -18,25 +18,33 @@ function inspectVar(name: string): RuntimeEnvIssue | null {
 }
 
 export function validateRuntimeEnv(): ValidationResult {
-  const alwaysRequired = [
-    'NEXT_PUBLIC_SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    'SESSION_SIGNING_SECRET',
-  ];
-
   const productionOnly = [
     'SUPABASE_SERVICE_ROLE_KEY',
   ];
 
-  const required = new Set(alwaysRequired);
+  const issues: RuntimeEnvIssue[] = [];
+
+  const required = new Set([
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'SESSION_SIGNING_SECRET',
+  ]);
   if (process.env.NODE_ENV === 'production') {
     for (const key of productionOnly) required.add(key);
   }
 
-  const issues: RuntimeEnvIssue[] = [];
   for (const name of required) {
     const issue = inspectVar(name);
     if (issue) issues.push(issue);
+  }
+
+  const hasAnonKey =
+    !inspectVar('NEXT_PUBLIC_SUPABASE_ANON_KEY') ||
+    !inspectVar('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY');
+  if (!hasAnonKey) {
+    issues.push({
+      name: 'NEXT_PUBLIC_SUPABASE_ANON_KEY|NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY',
+      reason: 'missing',
+    });
   }
 
   return {

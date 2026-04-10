@@ -8,7 +8,7 @@ import { buildDynamicQuizFallback } from '@/lib/ai/dynamic-fallback';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
-import { getClientIp, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
@@ -45,30 +45,32 @@ export async function POST(req: Request) {
       blockSeconds: 120,
     });
     if (!limit.allowed) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Too many quiz generation requests. Please wait and retry.',
-          errorCode: 'rate-limit-exceeded',
-          requestId,
-        },
-        {
-          status: 429,
-          headers: { 'Retry-After': String(limit.retryAfterSeconds), 'X-Request-Id': requestId },
-        }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many quiz generation requests. Please wait and retry.',
+        status: 429,
+        hint: `Retry after ${limit.retryAfterSeconds}s`,
+      });
     }
 
     const parsedBody = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 40 * 1024);
     if (!parsedBody.ok) {
-      return NextResponse.json(
-        { success: false, error: parsedBody.message, errorCode: parsedBody.reason, requestId },
-        { status: parsedBody.reason === 'payload-too-large' ? 413 : 400, headers: { 'X-Request-Id': requestId } }
-      );
+      return errorJson({
+        requestId,
+        errorCode: parsedBody.reason,
+        message: parsedBody.message,
+        status: parsedBody.reason === 'payload-too-large' ? 413 : 400,
+      });
     }
     const body = parsedBody.value;
     if (!body || typeof body !== 'object') {
-      return NextResponse.json({ success: false, error: 'Invalid request body.', requestId }, { status: 400, headers: { 'X-Request-Id': requestId } });
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-request-body',
+        message: 'Invalid request body.',
+        status: 400,
+      });
     }
 
     const incomingSubject = typeof body.subject === 'string' && body.subject.trim() ? body.subject.trim() : 'CBSE subject';
@@ -181,14 +183,20 @@ ${schema}`;
       estimated: true,
     });
 
-    return NextResponse.json({ success: true, data: merged.slice(0, questionCount), requestId }, { headers: { 'X-Request-Id': requestId } });
+    return dataJson({
+      requestId,
+      data: {
+        success: true,
+        data: merged.slice(0, questionCount),
+      },
+    });
   } catch (error) {
     console.error('[Quiz API Error]:', error);
     const questionCount = 5;
-    return NextResponse.json(
-      {
+    return dataJson({
+      requestId,
+      data: {
         success: true,
-        requestId,
         data: buildFallbackQuiz({
           subject: 'CBSE subject',
           chapterTitle: 'this chapter',
@@ -197,7 +205,6 @@ ${schema}`;
           seedText: `fallback:${Date.now()}`,
         }),
       },
-      { status: 200 }
-    );
+    });
   }
 }

@@ -56,6 +56,12 @@ export default function HomePage() {
                 Practice board papers
                 <FileText className="w-4 h-4" />
               </Link>
+              <Link
+                href="/affiliate-your-school"
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-6 py-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+              >
+                Affiliate your school
+              </Link>
             </div>
 
             <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3">

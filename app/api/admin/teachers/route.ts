@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 interface CreateTeacherRequest {
   phone: string;
   name: string;
-  pin: string;
+  pin?: string;
   staffCode?: string;
   password?: string;
   scopes?: Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }>;
@@ -24,11 +24,11 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
   const body = value as Record<string, unknown>;
   const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
   const name = typeof body.name === 'string' ? body.name.trim() : '';
-  const pin = typeof body.pin === 'string' ? body.pin.trim() : '';
+  const pin = typeof body.pin === 'string' ? body.pin.trim() : undefined;
   const staffCode = typeof body.staffCode === 'string' ? body.staffCode.trim() : undefined;
   const password = typeof body.password === 'string' ? body.password.trim() : undefined;
-  if (!phone || !name || !pin) return null;
-  if (!isValidPin(pin)) return null;
+  if (!phone || !name) return null;
+  if (pin && !isValidPin(pin)) return null;
   const scopes: Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }> = [];
   if (Array.isArray(body.scopes)) {
     body.scopes.forEach((item) => {
@@ -42,6 +42,13 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
     });
   }
   return { phone, name, pin, staffCode, password, scopes };
+}
+
+function generatePin(seed: string): string {
+  const digits = seed.replace(/\D/g, '');
+  const fromSeed = digits.slice(-4);
+  if (fromSeed.length === 4) return fromSeed;
+  return `${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
 export async function GET(req: Request) {
@@ -72,7 +79,7 @@ export async function POST(req: Request) {
     return errorJson({
       requestId,
       errorCode: 'invalid-create-teacher-payload',
-      message: 'Invalid request. Required: { phone, name, pin, scopes? }',
+      message: 'Invalid request. Required: { phone, name, scopes? } and optional { pin, password }.',
       status: 400,
     });
   }
@@ -89,7 +96,14 @@ export async function POST(req: Request) {
         status: 400,
       });
     }
-    const teacher = await createTeacher({ ...parsed, schoolId });
+    const issuedPin = parsed.pin || generatePin(parsed.phone);
+    const issuedPassword = (parsed.password && parsed.password.trim()) || issuedPin;
+    const teacher = await createTeacher({
+      ...parsed,
+      schoolId,
+      pin: issuedPin,
+      password: issuedPassword,
+    });
     const committedAt = new Date().toISOString();
     await recordAuditEvent({
       requestId,
@@ -103,7 +117,15 @@ export async function POST(req: Request) {
     });
     return dataJson({
       requestId,
-      data: { teacher },
+      data: {
+        teacher,
+        issuedCredentials: {
+          loginIdentifier: teacher.phone,
+          alternateIdentifier: teacher.staffCode || undefined,
+          pin: issuedPin,
+          password: issuedPassword,
+        },
+      },
       meta: { committedAt },
     });
   } catch (error) {

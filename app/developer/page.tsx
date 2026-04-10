@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 
 interface SchoolItem {
   id: string;
@@ -102,6 +103,21 @@ interface ObservabilitySummaryPayload {
   }>;
 }
 
+interface ObservabilityDispatchPayload {
+  delivered: boolean;
+  skippedReason?: 'no-alerts' | 'webhook-not-configured';
+  destination?: string;
+  responseStatus?: number;
+  triggeredAlerts: Array<{
+    code: string;
+    severity: 'low' | 'medium' | 'high' | 'critical';
+    status: 'ok' | 'warn' | 'critical';
+    message: string;
+    metric: number;
+    threshold: number;
+  }>;
+}
+
 export default function DeveloperPage() {
   const [schools, setSchools] = useState<SchoolItem[]>([]);
   const [schoolDirectory, setSchoolDirectory] = useState<SchoolDirectoryItem[]>([]);
@@ -110,6 +126,8 @@ export default function DeveloperPage() {
   const [careerIssues, setCareerIssues] = useState<CareerSourceIssue[]>([]);
   const [careerCheck, setCareerCheck] = useState<CareerCheckPayload | null>(null);
   const [observability, setObservability] = useState<ObservabilitySummaryPayload | null>(null);
+  const [observabilityDispatch, setObservabilityDispatch] = useState<ObservabilityDispatchPayload | null>(null);
+  const [dispatchingObservability, setDispatchingObservability] = useState(false);
   const [checkingCareer, setCheckingCareer] = useState(false);
   const [error, setError] = useState('');
   const searchParams = useSearchParams();
@@ -190,6 +208,29 @@ export default function DeveloperPage() {
     }
   }
 
+  async function dispatchObservabilityAlertsNow() {
+    setDispatchingObservability(true);
+    try {
+      const response = await fetch('/api/developer/observability/dispatch?hours=24', {
+        method: 'POST',
+      });
+      const payload = await response.json().catch(() => null);
+      const dataPayload = payload?.data ?? payload;
+      if (!response.ok || !dataPayload?.dispatch) {
+        setError(payload?.message || payload?.error || 'Failed to dispatch observability alerts.');
+        return;
+      }
+      if (dataPayload.summary) {
+        setObservability(dataPayload.summary as ObservabilitySummaryPayload);
+      }
+      setObservabilityDispatch(dataPayload.dispatch as ObservabilityDispatchPayload);
+    } catch {
+      setError('Failed to dispatch observability alerts.');
+    } finally {
+      setDispatchingObservability(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#FDFAF6] px-4 py-8 md:px-8 lg:px-12">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -198,8 +239,22 @@ export default function DeveloperPage() {
           <p className="mt-2 text-sm text-[#5F5A73]">
             Platform-wide oversight for schools, auth roles, audits, and token usage.
           </p>
+          <div className="mt-3">
+            <Link
+              href="/developer/onboarding"
+              className="inline-flex items-center rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+            >
+              Open onboarding queue
+            </Link>
+          </div>
           {error && (
-            <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
+            <p
+              className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
+              role="alert"
+              aria-live="assertive"
+            >
+              {error}
+            </p>
           )}
           <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-[#E8E4DC] bg-[#F9F7F1] p-4">
@@ -309,7 +364,17 @@ export default function DeveloperPage() {
 
         {(tab === 'overview' || tab === 'audit') && (
           <section className="rounded-2xl border border-[#E8E4DC] bg-white p-6 shadow-sm">
-            <h2 className="font-fraunces text-2xl font-bold text-navy-700">Observability Alerts (24h)</h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-fraunces text-2xl font-bold text-navy-700">Observability Alerts (24h)</h2>
+              <button
+                onClick={dispatchObservabilityAlertsNow}
+                type="button"
+                disabled={dispatchingObservability}
+                className="rounded-xl bg-navy-700 hover:bg-navy-800 disabled:opacity-60 px-4 py-2 text-sm font-semibold text-white"
+              >
+                {dispatchingObservability ? 'Dispatching...' : 'Dispatch External Alerts'}
+              </button>
+            </div>
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
               <div className="rounded-xl border border-[#E8E4DC] bg-[#F9F7F1] p-4">
                 <p className="text-xs uppercase tracking-wide text-[#7A7490]">Auth Failures</p>
@@ -346,6 +411,18 @@ export default function DeveloperPage() {
                 );
               })}
             </div>
+            {observabilityDispatch && (
+              <div className="mt-4 rounded-xl border border-[#E8E4DC] bg-[#F9F7F1] p-3 text-sm text-[#4A4560]">
+                <p className="font-semibold text-[#1C1C2E]">
+                  {observabilityDispatch.delivered
+                    ? `External dispatch sent (${observabilityDispatch.triggeredAlerts.length} alerts)`
+                    : `External dispatch skipped (${observabilityDispatch.skippedReason || 'unknown'})`}
+                </p>
+                {observabilityDispatch.destination && (
+                  <p className="text-xs mt-1">Destination: {observabilityDispatch.destination}</p>
+                )}
+              </div>
+            )}
           </section>
         )}
 
@@ -370,6 +447,7 @@ export default function DeveloperPage() {
               <h2 className="font-fraunces text-2xl font-bold text-navy-700">Career Source Health</h2>
               <button
                 onClick={runCareerVerification}
+                type="button"
                 disabled={checkingCareer}
                 className="rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 px-4 py-2 text-sm font-semibold text-white"
               >

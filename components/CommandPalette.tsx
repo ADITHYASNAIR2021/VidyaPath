@@ -8,7 +8,6 @@ import { ALL_CHAPTERS } from '@/lib/data';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Prepare search data
 const searchData = [
   {
     type: 'page',
@@ -42,14 +41,14 @@ const searchData = [
     topics: 'notes chapter wise',
     url: '/cbse-notes',
   },
-  ...ALL_CHAPTERS.map(c => ({
+  ...ALL_CHAPTERS.map((chapter) => ({
     type: 'chapter',
-    id: c.id,
-    title: c.title,
-    subtitle: `${c.subject} · Class ${c.classLevel}`,
-    topics: c.topics.join(' '),
-    url: `/chapters/${c.id}`
-  }))
+    id: chapter.id,
+    title: chapter.title,
+    subtitle: `${chapter.subject} - Class ${chapter.classLevel}`,
+    topics: chapter.topics.join(' '),
+    url: `/chapters/${chapter.id}`,
+  })),
 ];
 
 const fuse = new Fuse(searchData, {
@@ -70,7 +69,7 @@ export default function CommandPalette() {
     const down = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen((open) => !open);
+        setOpen((value) => !value);
       }
       if (e.key === 'Escape') setOpen(false);
     };
@@ -87,7 +86,7 @@ export default function CommandPalette() {
     }
   }, [open]);
 
-  const results = query ? fuse.search(query).map(r => r.item).slice(0, 5) : searchData.slice(0, 4);
+  const results = query ? fuse.search(query).map((entry) => entry.item).slice(0, 5) : searchData.slice(0, 4);
 
   if (isExamRoute) {
     return null;
@@ -97,6 +96,8 @@ export default function CommandPalette() {
     <>
       <button
         onClick={() => setOpen(true)}
+        type="button"
+        aria-label="Open command palette"
         className="hidden md:flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 text-[#8A8AAA] rounded-xl border border-[#E8E4DC] transition-colors w-64"
       >
         <Search className="w-4 h-4" />
@@ -106,18 +107,24 @@ export default function CommandPalette() {
         </kbd>
       </button>
 
-      {/* Mobile Trigger overlay on search icon in navbar */}
-      <button 
+      <button
         className="md:hidden p-2 text-[#4A4A6A] hover:bg-gray-50 rounded-xl transition-colors"
         onClick={() => setOpen(true)}
         title="Search chapters"
+        type="button"
+        aria-label="Open search"
       >
         <Search className="w-5 h-5" />
       </button>
 
       <AnimatePresence>
         {open && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] sm:px-4">
+          <div
+            className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] sm:px-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Command palette"
+          >
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -125,7 +132,7 @@ export default function CommandPalette() {
               onClick={() => setOpen(false)}
               className="fixed inset-0 bg-navy-900/40 backdrop-blur-sm"
             />
-            
+
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: -20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -140,8 +147,14 @@ export default function CommandPalette() {
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search chapters, subjects, or topics..."
                   className="w-full bg-transparent border-0 px-4 py-4 text-base text-navy-700 outline-none placeholder:text-[#8A8AAA]"
+                  aria-label="Search chapters, subjects, or topics"
                 />
-                <button title="Close command palette" onClick={() => setOpen(false)} className="text-xs font-semibold text-[#8A8AAA] bg-gray-100 px-2 py-1 rounded-md hover:bg-gray-200">
+                <button
+                  type="button"
+                  title="Close command palette"
+                  onClick={() => setOpen(false)}
+                  className="text-xs font-semibold text-[#8A8AAA] bg-gray-100 px-2 py-1 rounded-md hover:bg-gray-200"
+                >
                   ESC
                 </button>
               </div>
@@ -150,7 +163,7 @@ export default function CommandPalette() {
                 {results.length === 0 ? (
                   <div className="p-8 text-center text-[#8A8AAA]">
                     <Search className="w-8 h-8 text-gray-200 mx-auto mb-3" />
-                    <p>No results found for "{query}"</p>
+                    <p>{`No results found for "${query}"`}</p>
                   </div>
                 ) : (
                   <div className="space-y-1">
@@ -161,13 +174,16 @@ export default function CommandPalette() {
                           setOpen(false);
                           router.push(item.url);
                         }}
+                        type="button"
                         className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors text-left group"
                       >
                         <div className="flex items-center gap-3">
-                          <div className={clsx(
-                            'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
-                            item.type === 'page' ? 'bg-indigo-50 text-indigo-500' : 'bg-saffron-50 text-saffron-500'
-                          )}>
+                          <div
+                            className={clsx(
+                              'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
+                              item.type === 'page' ? 'bg-indigo-50 text-indigo-500' : 'bg-saffron-50 text-saffron-500'
+                            )}
+                          >
                             <Book className="w-5 h-5" />
                           </div>
                           <div>

@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
 import { trackAiQuestion, trackChapterView, trackSearchNoResult } from '@/lib/analytics-store';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 
 interface TrackPayload {
   eventName?: string;
@@ -8,10 +9,25 @@ interface TrackPayload {
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
-    const body = (await req.json().catch(() => null)) as TrackPayload | null;
+    const bodyResult = await parseJsonBodyWithLimit<TrackPayload>(req, 8 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value as TrackPayload | null;
     if (!body || typeof body !== 'object' || typeof body.eventName !== 'string') {
-      return NextResponse.json({ error: 'Invalid analytics payload.' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-analytics-payload',
+        message: 'Invalid analytics payload.',
+        status: 400,
+      });
     }
 
     const eventName = body.eventName.trim();
@@ -23,9 +39,9 @@ export async function POST(req: Request) {
       await trackSearchNoResult(body.query);
     }
 
-    return NextResponse.json({ ok: true });
+    return dataJson({ requestId, data: { ok: true } });
   } catch (error) {
     console.error('[analytics-track] error', error);
-    return NextResponse.json({ ok: true });
+    return dataJson({ requestId, data: { ok: true } });
   }
 }

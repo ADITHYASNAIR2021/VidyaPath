@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getContextPack } from '@/lib/ai/context-retriever';
@@ -15,6 +14,8 @@ import {
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 
 interface ChapterDrillRequest {
   chapterId: string;
@@ -156,22 +157,39 @@ function ensureExactDrillCount(
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const body = await req.json().catch(() => null);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value;
     const parsed = parseRequest(body);
     if (!parsed) {
-      return NextResponse.json(
-        { error: 'Invalid request. Required: { chapterId, questionCount?, difficulty? }' },
-        { status: 400 }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-chapter-drill-input',
+        message: 'Invalid request. Required: { chapterId, questionCount?, difficulty? }',
+        status: 400,
+      });
     }
 
     const chapter = getChapterById(parsed.chapterId);
     if (!chapter) {
-      return NextResponse.json({ error: 'Chapter not found.' }, { status: 404 });
+      return errorJson({
+        requestId,
+        errorCode: 'chapter-not-found',
+        message: 'Chapter not found.',
+        status: 404,
+      });
     }
 
     const pyq = getPYQData(parsed.chapterId);
@@ -187,7 +205,12 @@ export async function POST(req: Request) {
 
     const fallback = buildFallbackDrill(parsed.chapterId, parsed.questionCount, parsed.difficulty);
     if (!fallback) {
-      return NextResponse.json({ error: 'Unable to create chapter drill.' }, { status: 500 });
+      return errorJson({
+        requestId,
+        errorCode: 'chapter-drill-fallback-failed',
+        message: 'Unable to create chapter drill.',
+        status: 500,
+      });
     }
 
     const prompt = `Create a chapter-wise CBSE drill set.
@@ -253,7 +276,7 @@ ${buildVariationInstruction(variation)}`;
         chapter.topics,
         parsed.questionCount
       );
-      if (questions.length === 0) return NextResponse.json(fallback);
+      if (questions.length === 0) return dataJson({ requestId, data: fallback });
 
       const response: ChapterDrillResponse = {
         chapterId: chapter.id,
@@ -279,14 +302,20 @@ ${buildVariationInstruction(variation)}`;
         completionText: JSON.stringify(response),
         estimated: true,
       });
-      return NextResponse.json(response);
+      return dataJson({ requestId, data: response });
     } catch (aiError) {
       const reason = aiError instanceof Error ? aiError.message : String(aiError);
       console.warn(`[chapter-drill] AI fallback triggered: ${reason}`);
-      return NextResponse.json(fallback);
+      return dataJson({ requestId, data: fallback });
     }
   } catch (error) {
     console.error('[chapter-drill] error', error);
-    return NextResponse.json({ error: 'Failed to create chapter drill.' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to create chapter drill.';
+    return errorJson({
+      requestId,
+      errorCode: 'chapter-drill-failed',
+      message,
+      status: 500,
+    });
   }
 }

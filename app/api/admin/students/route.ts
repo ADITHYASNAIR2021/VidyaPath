@@ -7,6 +7,13 @@ import { createStudent, listStudents } from '@/lib/teacher-admin-db';
 
 export const dynamic = 'force-dynamic';
 
+function generatePin(seed: string): string {
+  const digits = seed.replace(/\D/g, '');
+  const fromSeed = digits.slice(-4);
+  if (fromSeed.length === 4) return fromSeed;
+  return `${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
@@ -81,6 +88,8 @@ export async function POST(req: Request) {
       });
     }
 
+    const issuedPin = pin && /^\d{4,8}$/.test(pin) ? pin : generatePin(rollNo || rollCode || name);
+    const issuedPassword = password || issuedPin;
     const student = await createStudent({
       schoolId,
       name,
@@ -89,8 +98,8 @@ export async function POST(req: Request) {
       batch,
       classLevel: classLevel as 10 | 12,
       section,
-      pin,
-      password,
+      pin: issuedPin,
+      password: issuedPassword,
     });
     const committedAt = new Date().toISOString();
     await recordAuditEvent({
@@ -105,7 +114,15 @@ export async function POST(req: Request) {
     });
     return dataJson({
       requestId,
-      data: { student },
+      data: {
+        student,
+        issuedCredentials: {
+          loginIdentifier: student.rollNo || student.rollCode,
+          alternateIdentifier: student.rollCode,
+          pin: issuedPin,
+          password: issuedPassword,
+        },
+      },
       meta: { committedAt },
     });
   } catch (error) {

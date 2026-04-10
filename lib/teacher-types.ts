@@ -18,6 +18,7 @@ export interface TeacherProfile {
   id: string;
   phone: string;
   name: string;
+  staffCode?: string;
   status: TeacherStatus;
   createdAt: string;
   updatedAt: string;

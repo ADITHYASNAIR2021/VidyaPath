@@ -296,7 +296,7 @@ export default function PracticeAssignmentPage() {
         )}
 
         {result && !isPrintMode && (
-          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm" role="status" aria-live="polite">
             <p className="font-semibold text-emerald-800">{result.message || 'Submitted successfully.'}</p>
             <p className="text-emerald-700 mt-1">Status: {result.status}</p>
           </div>
@@ -317,7 +317,11 @@ export default function PracticeAssignmentPage() {
           </div>
         )}
 
-        {error && <div className="mt-4 text-sm text-rose-700">{error}</div>}
+        {error && (
+          <div className="mt-4 text-sm text-rose-700" role="alert" aria-live="assertive">
+            {error}
+          </div>
+        )}
       </div>
     </div>
   );

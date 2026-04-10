@@ -19,6 +19,11 @@ Current scope:
 - Deep engineering map (UI -> API -> service -> storage):
 - `docs/FUNCTION_TO_FUNCTION_MAPPING.md`
 - Operator runbook: `docs/OPERATOR_RUNBOOK.md`
+- Release UAT matrix: `docs/release/UAT_MATRIX.md`
+- Rollback rehearsal: `docs/release/ROLLBACK_REHEARSAL.md`
+- Cutover runbook: `docs/release/CUTOVER_RUNBOOK.md`
+- Observability + SLO alerts: `docs/operations/OBSERVABILITY_SLO_ALERTS.md`
+- Vercel env setup: `docs/operations/VERCEL_ENV_SETUP.md`
 
 ## Implemented Features
 ### Learning
@@ -299,6 +304,8 @@ Utilities in `scripts/` (one-line purpose each):
 - `extract_ncert.py`: Extract text from NCERT PDFs into JSON chapter context artifacts.
 - `generate_hf_paper_index.ps1`: Build key-to-path mapping for dynamic Hugging Face paper URL resolution.
 - `generate_hf_urls.py`: Generate TypeScript-style HF URL mappings from local/HF file inventories.
+- `auth_matrix_smoke.mjs`: Fast unauthenticated access smoke checks across role-protected routes.
+- `auth_role_isolation_suite.mjs`: Comprehensive auth + role isolation suite (supports login creds and cookie-based role tests).
 - `parallel_modern_cbse.py`: Parallel fetch and extraction sync for modern CBSE question-paper archives.
 - `scrape_byjus_papers.py`: Scrape and save Byjus historical paper PDFs into dataset folder structure.
 - `scrape_cbse_papers.py`: Scrape legacy and modern CBSE paper links and download/extract assets.

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Image from 'next/image';
 import { Camera, Loader2, Sparkles, UploadCloud } from 'lucide-react';
 import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
@@ -100,10 +101,13 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Could not solve the image right now.');
+        setError(data?.message || data?.error || 'Could not solve the image right now.');
         return;
       }
-      setResult(data as SolverResponse);
+      const payload = (data && typeof data === 'object' && data.data && typeof data.data === 'object')
+        ? data.data
+        : data;
+      setResult(payload as SolverResponse);
     } catch {
       setError('Network issue while solving image.');
     } finally {
@@ -125,14 +129,17 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
         <label className="flex items-center justify-center gap-2 border border-dashed border-[#D9D3C7] bg-[#FDFAF6] rounded-xl px-4 py-4 text-sm text-[#5A5570] cursor-pointer hover:border-saffron-300 transition-colors">
           <UploadCloud className="w-4 h-4 text-saffron-500" />
           Upload question image
-          <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+          <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} aria-label="Upload question image" />
         </label>
 
         {previewUrl && (
-          <img
+          <Image
             src={previewUrl}
             alt="Question preview"
+            width={1024}
+            height={576}
             className="w-full rounded-xl border border-[#E8E4DC] max-h-72 object-contain bg-white"
+            unoptimized
           />
         )}
 
@@ -146,6 +153,7 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
 
         <button
           onClick={solveImage}
+          type="button"
           disabled={!imageBase64 || loading}
           className="inline-flex items-center gap-2 bg-saffron-500 hover:bg-saffron-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
         >
@@ -155,7 +163,7 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
       </div>
 
       {error && (
-        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
           {error}
         </div>
       )}

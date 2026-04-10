@@ -26,7 +26,7 @@
 - [x] Developer-only endpoint protection for data-quality APIs.
 - [x] Auth/AI endpoint rate limiting using Supabase-backed throttling.
 - [x] CSRF checks for cookie-auth mutation requests in middleware.
-- [~] Auth matrix automated tests (smoke coverage in CI added; full role-transition and escalation suite pending).
+- [~] Auth matrix automated tests (comprehensive auth-role isolation suite added via `scripts/auth_role_isolation_suite.mjs`; environment-backed execution in staging/prod-like targets pending).
 
 ## Week 5-6 Database and Multi-Tenant Safety
 - [x] Added operational tables: `audit_events`, `request_throttle`, `career_exam_catalog`, `career_track_catalog`, `chapter_career_map`, `data_quality_issues`, `api_idempotency`.
@@ -58,8 +58,8 @@
 - [x] Weekly automated source verification job + stale-link auto-flagging in admin/developer console (manual trigger endpoint + persisted issue flags + Vercel cron route).
 
 ## Week 9-10 Accessibility and UX Reliability
-- [ ] Keyboard-first and screen-reader remediation pass for student/teacher/admin/career pages.
-- [~] ARIA and focus-management audit with fixes (global skip-link + main-focus landmark added; full page audit pending).
+- [~] Keyboard-first and screen-reader remediation pass for student/teacher/admin/career pages (major interactive components and error/live regions upgraded; final exhaustive pass pending).
+- [~] ARIA and focus-management audit with fixes (skip-link, main landmark focus, chat/live regions, button semantics improved; full page audit pending).
 - [~] Contrast and reduced-motion pass (global reduced-motion + focus-visible baseline added; page-level contrast audit pending).
 - [ ] Mobile + low-bandwidth optimization for chapter/dashboard/assignment critical paths.
 - [ ] LocalStorage-to-server sync strategy for core student signals.
@@ -67,19 +67,18 @@
 ## Week 10-11 Observability and Vercel Readiness
 - [x] Added structured server-event logging utility and integrated in key auth paths.
 - [x] Added request IDs for major API responses and audit trails.
-- [~] End-to-end dashboards/alerts for auth failures, brute-force, 5xx spikes, and token surges (developer observability summary API + console cards shipped; external dashboard wiring pending).
+- [x] End-to-end alert routing for auth failures, brute-force, 5xx spikes, and token surges (developer observability summary + external webhook dispatch + secure cron route).
 - [~] SLO instrumentation and reporting gates in CI/CD (runtime readiness gate shipped; latency percentile instrumentation/reporting pending).
 - [x] Strict environment validation + deployment-blocking health checks at startup (`next.config.js` env validation + `/api/health/ready` + CI runtime readiness gate).
 
 ## Week 11-12 Release and Cutover
-- [ ] Full UAT matrix across student/teacher/admin/developer workflows.
-- [ ] Migration dry-run and rollback rehearsal.
-- [ ] Vercel staged rollout (preview -> canary -> full).
-- [ ] Incident runbook and on-call handoff.
+- [~] Full UAT matrix across student/teacher/admin/developer workflows (matrix documented in `docs/release/UAT_MATRIX.md`; execution sign-off pending).
+- [~] Migration dry-run and rollback rehearsal (rehearsal checklist documented in `docs/release/ROLLBACK_REHEARSAL.md`; drill execution pending).
+- [~] Vercel staged rollout (preview -> canary -> full) documented in `docs/release/CUTOVER_RUNBOOK.md`; live rollout pending.
+- [x] Incident/cutover runbook handoff docs added (`docs/release/CUTOVER_RUNBOOK.md`, `docs/operations/OBSERVABILITY_SLO_ALERTS.md`).
 
 ## Near-Term Next Implementation Sprint
-1. Build automated auth matrix tests for role isolation and school boundary checks.
-2. Complete full API-wide migration to centralized guard/error envelope (remaining routes).
-3. Add SLO dashboards and alert rules (5xx spikes, brute-force anomalies, token surges).
-4. Run UAT + rollback rehearsal and finalize cutover runbooks.
-5. Complete page-level accessibility audit (ARIA labels, keyboard traps, contrast hotspots).
+1. Execute `check:auth-suite` in preview/canary with real role credentials and capture pass report.
+2. Complete final page-level accessibility audit (keyboard traps, SR reading order, contrast hotspots).
+3. Add latency percentile capture/reporting (p95/p99) to satisfy SLO measurement gates.
+4. Run UAT + rollback drill from new runbooks and attach sign-off artifacts.

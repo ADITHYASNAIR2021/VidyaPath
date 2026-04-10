@@ -1,16 +1,28 @@
-import { NextResponse } from 'next/server';
-import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
+import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const session = await getStudentSessionFromRequestCookies();
-  if (!session) {
-    return NextResponse.json({ error: 'Student session not found.' }, { status: 401 });
+export async function GET(req: Request) {
+  const requestId = getRequestId(req);
+  try {
+    const session = await getStudentSessionFromRequestCookies();
+    if (!session) return unauthorizedJson('Student session not found.', requestId);
+    return dataJson({
+      requestId,
+      data: {
+        ...session,
+        sessionExpiry: session.expiresAt,
+        availableRoles: ['student'],
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to read student session.';
+    return errorJson({
+      requestId,
+      errorCode: 'student-session-read-failed',
+      message,
+      status: 500,
+    });
   }
-  return NextResponse.json({
-    ...session,
-    sessionExpiry: session.expiresAt,
-    availableRoles: ['student'],
-  });
 }

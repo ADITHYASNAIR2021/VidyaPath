@@ -59,14 +59,21 @@ export default function FloatingAIButton() {
         const data = await res.json().catch(() => ({}));
         setError(res.status === 429
           ? 'VidyaAI is busy. Wait 30 seconds and try again!'
-          : data.error || 'Something went wrong.');
+          : data.message || data.error || 'Something went wrong.');
         return;
       }
 
       const data = await res.json();
+      const payload = (data && typeof data === 'object' && data.data && typeof data.data === 'object')
+        ? data.data as Record<string, unknown>
+        : data as Record<string, unknown>;
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: data.message, isOffTopic: data.isOffTopic === true },
+        {
+          role: 'assistant',
+          content: String(payload.message || ''),
+          isOffTopic: payload.isOffTopic === true,
+        },
       ]);
     } catch {
       setError('Check your internet connection and try again.');
@@ -91,6 +98,7 @@ export default function FloatingAIButton() {
       {/* Floating button */}
       <button
         onClick={() => setOpen((o) => !o)}
+        type="button"
         className={clsx(
           'fixed bottom-20 right-4 md:bottom-6 md:right-6 z-[150]',
           'w-14 h-14 rounded-2xl shadow-lg flex items-center justify-center transition-all duration-200',
@@ -98,7 +106,8 @@ export default function FloatingAIButton() {
             ? 'bg-navy-700 rotate-0 scale-95'
             : 'bg-saffron-500 hover:bg-saffron-600 hover:scale-105 active:scale-95'
         )}
-        aria-label="Open VidyaAI chat"
+        aria-label={open ? 'Close VidyaAI chat' : 'Open VidyaAI chat'}
+        aria-expanded={open}
       >
         {open ? (
           <X className="w-6 h-6 text-white" />
@@ -125,8 +134,10 @@ export default function FloatingAIButton() {
               {messages.length > 0 && (
                 <button
                   onClick={() => { setMessages([]); setError(null); }}
+                  type="button"
                   className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
                   title="Clear chat"
+                  aria-label="Clear chat"
                 >
                   <RefreshCw className="w-3.5 h-3.5 text-white/80" />
                 </button>
@@ -134,7 +145,7 @@ export default function FloatingAIButton() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2.5 min-h-0">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2.5 min-h-0" role="log" aria-live="polite" aria-relevant="additions text">
               {messages.length === 0 ? (
                 <div className="space-y-2.5">
                   <div className="flex items-start gap-2">
@@ -150,6 +161,7 @@ export default function FloatingAIButton() {
                       <button
                         key={q}
                         onClick={() => sendMessage(q)}
+                        type="button"
                         className="block w-full text-left text-xs bg-saffron-50 hover:bg-saffron-100 text-saffron-700 border border-saffron-200 px-3 py-1.5 rounded-xl transition-colors"
                       >
                         {q}
@@ -169,7 +181,7 @@ export default function FloatingAIButton() {
                         : msg.isOffTopic ? 'bg-amber-100 text-amber-600'
                         : 'bg-saffron-100 text-saffron-600'
                     )}>
-                      {msg.role === 'user' ? 'You' : msg.isOffTopic ? '🛡' : 'AI'}
+                      {msg.role === 'user' ? 'You' : msg.isOffTopic ? '!' : 'AI'}
                     </div>
 
                     {msg.isOffTopic ? (
@@ -205,7 +217,7 @@ export default function FloatingAIButton() {
               )}
 
               {error && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700">{error}</div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700" role="alert">{error}</div>
               )}
 
               <div ref={messagesEndRef} />
@@ -224,11 +236,14 @@ export default function FloatingAIButton() {
                   className="flex-1 text-xs border border-[#E8E4DC] rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-saffron-400 focus:border-transparent placeholder:text-[#8A8AAA] max-h-20 overflow-y-auto"
                   style={{ minHeight: '36px' }}
                   disabled={loading}
+                  aria-label="Ask VidyaAI a question"
                 />
                 <button
                   onClick={() => sendMessage(input)}
+                  type="button"
                   disabled={!input.trim() || loading}
                   className="flex-shrink-0 w-9 h-9 bg-saffron-500 hover:bg-saffron-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl flex items-center justify-center transition-all"
+                  aria-label="Send message"
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>

@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { ALL_PAPERS } from '@/lib/papers';
 import { getPYQData } from '@/lib/pyq';
@@ -12,6 +11,8 @@ import {
 } from '@/lib/ai/validators';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 
 interface AnswerInput {
   questionNo: string;
@@ -84,17 +85,29 @@ function buildHeuristicEvaluation(payload: PaperEvaluateRequest): PaperEvaluateR
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const body = await req.json().catch(() => null);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 128 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value;
     const parsed = parseRequest(body);
     if (!parsed) {
-      return NextResponse.json(
-        { error: 'Invalid request. Required: { paperId, answers: [{questionNo, answerText}] }' },
-        { status: 400 }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-paper-evaluate-input',
+        message: 'Invalid request. Required: { paperId, answers: [{questionNo, answerText}] }',
+        status: 400,
+      });
     }
 
     const paper = ALL_PAPERS.find((entry) => entry.id === parsed.paperId);
@@ -186,13 +199,19 @@ Return ONLY JSON:
         completionText: JSON.stringify(payload),
         estimated: true,
       });
-      return NextResponse.json(payload);
+      return dataJson({ requestId, data: payload });
     } catch (aiError) {
       console.error('[paper-evaluate] AI fallback triggered', aiError);
-      return NextResponse.json(fallback);
+      return dataJson({ requestId, data: fallback });
     }
   } catch (error) {
     console.error('[paper-evaluate] error', error);
-    return NextResponse.json({ error: 'Failed to evaluate paper answers.' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to evaluate paper answers.';
+    return errorJson({
+      requestId,
+      errorCode: 'paper-evaluate-failed',
+      message,
+      status: 500,
+    });
   }
 }

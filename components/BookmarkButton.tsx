@@ -11,6 +11,8 @@ export default function BookmarkButton({ chapterId, className }: { chapterId: st
   return (
     <button
       onClick={() => toggleBookmark(chapterId)}
+      type="button"
+      aria-pressed={bookmarked}
       className={clsx(
         'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 shadow-sm border',
         bookmarked 

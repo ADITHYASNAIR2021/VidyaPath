@@ -1,30 +1,62 @@
-import { NextResponse } from 'next/server';
-
 export const dynamic = 'force-dynamic';
 import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { canTeacherAccessAssignmentPack, getAssignmentPack, getTeacherSubmissionSummary } from '@/lib/teacher-admin-db';
 import { exportToSheets } from '@/lib/sheets-bridge';
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const admin = await getAdminSessionFromRequestCookies();
     const teacher = await getTeacherSessionFromRequestCookies();
     if (!admin && !teacher) {
-      return NextResponse.json({ error: 'Unauthorized access.' }, { status: 401 });
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Unauthorized access.',
+        status: 401,
+      });
     }
 
-    const body = await req.json().catch(() => null);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 24 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value;
     const packId = typeof body?.packId === 'string' ? body.packId.trim() : '';
     if (!packId) {
-      return NextResponse.json({ error: 'packId is required.' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'missing-pack-id',
+        message: 'packId is required.',
+        status: 400,
+      });
     }
 
     if (teacher && !(await canTeacherAccessAssignmentPack(teacher.teacher.id, packId))) {
-      return NextResponse.json({ error: 'Forbidden pack access.' }, { status: 403 });
+      return errorJson({
+        requestId,
+        errorCode: 'forbidden-pack-access',
+        message: 'Forbidden pack access.',
+        status: 403,
+      });
     }
 
     const pack = await getAssignmentPack(packId);
-    if (!pack) return NextResponse.json({ error: 'Assignment pack not found.' }, { status: 404 });
+    if (!pack) {
+      return errorJson({
+        requestId,
+        errorCode: 'assignment-pack-not-found',
+        message: 'Assignment pack not found.',
+        status: 404,
+      });
+    }
 
     const summary = teacher
       ? await getTeacherSubmissionSummary(teacher.teacher.id, packId)
@@ -37,9 +69,14 @@ export async function POST(req: Request) {
     };
     const result = await exportToSheets(payload);
 
-    return NextResponse.json({ ok: true, result });
+    return dataJson({ requestId, data: { ok: true, result } });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Sheets export failed.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return errorJson({
+      requestId,
+      errorCode: 'sheets-export-failed',
+      message,
+      status: 500,
+    });
   }
 }

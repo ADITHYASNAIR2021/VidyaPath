@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 
 interface ImageSolveRequest {
   imageBase64?: string;
@@ -19,13 +20,28 @@ function cleanBase64(value: string): string {
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const body = (await req.json().catch(() => null)) as ImageSolveRequest | null;
+    const bodyResult = await parseJsonBodyWithLimit<ImageSolveRequest>(req, 8 * 1024 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value as ImageSolveRequest | null;
     if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Invalid request payload.' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-request-payload',
+        message: 'Invalid request payload.',
+        status: 400,
+      });
     }
 
     const rawBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64 : '';
@@ -38,12 +54,22 @@ export async function POST(req: Request) {
     const subject = typeof body.subject === 'string' ? body.subject.trim() : '';
 
     if (!imageBase64) {
-      return NextResponse.json({ error: 'imageBase64 is required.' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'missing-image',
+        message: 'imageBase64 is required.',
+        status: 400,
+      });
     }
 
     const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
     if (!geminiApiKey) {
-      return NextResponse.json({ error: 'Gemini API key is not configured.' }, { status: 503 });
+      return errorJson({
+        requestId,
+        errorCode: 'ai-provider-not-configured',
+        message: 'Gemini API key is not configured.',
+        status: 503,
+      });
     }
 
     const instruction = [
@@ -92,10 +118,12 @@ export async function POST(req: Request) {
 
     if (!response.ok) {
       const err = await response.text().catch(() => '');
-      return NextResponse.json(
-        { error: `Gemini image solve failed: ${response.status} ${err.slice(0, 150)}` },
-        { status: 502 }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'image-solve-upstream-failed',
+        message: `Gemini image solve failed: ${response.status} ${err.slice(0, 150)}`,
+        status: 502,
+      });
     }
 
     const geminiJson = (await response.json()) as {
@@ -104,7 +132,12 @@ export async function POST(req: Request) {
 
     const text = geminiJson.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('').trim() ?? '';
     if (!text) {
-      return NextResponse.json({ error: 'No solution generated from image.' }, { status: 502 });
+      return errorJson({
+        requestId,
+        errorCode: 'image-solve-empty-output',
+        message: 'No solution generated from image.',
+        status: 502,
+      });
     }
 
     const parsed = (() => {
@@ -144,9 +177,15 @@ export async function POST(req: Request) {
       estimated: true,
     });
 
-    return NextResponse.json(resultPayload);
+    return dataJson({ requestId, data: resultPayload });
   } catch (error) {
     console.error('[image-solve] error', error);
-    return NextResponse.json({ error: 'Failed to solve the image question.' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to solve the image question.';
+    return errorJson({
+      requestId,
+      errorCode: 'image-solve-failed',
+      message,
+      status: 500,
+    });
   }
 }

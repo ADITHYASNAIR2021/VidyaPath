@@ -23,6 +23,28 @@ create table if not exists public.schools (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.school_affiliate_requests (
+  id uuid primary key default gen_random_uuid(),
+  school_name text not null,
+  school_code_hint text,
+  board text,
+  state text,
+  city text,
+  affiliate_no text,
+  website_url text,
+  contact_name text not null,
+  contact_phone text not null,
+  contact_email text,
+  notes text,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  review_notes text,
+  reviewed_by_auth_user_id uuid,
+  reviewed_at timestamptz,
+  linked_school_id uuid references public.schools(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.school_admin_profiles (
   id uuid primary key default gen_random_uuid(),
   school_id uuid not null references public.schools(id) on delete cascade,
@@ -73,6 +95,8 @@ create table if not exists public.app_state (
 );
 
 create index if not exists app_state_updated_at_idx on public.app_state (updated_at desc);
+create index if not exists school_affiliate_requests_status_idx on public.school_affiliate_requests (status, created_at desc);
+create index if not exists school_affiliate_requests_school_idx on public.school_affiliate_requests (linked_school_id);
 
 -- ---------------------------------------------------------------------------
 -- 2) Teacher + admin normalized schema

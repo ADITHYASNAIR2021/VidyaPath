@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Shield, UserPlus, KeyRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type { StudentProfile, TeacherProfile, TeacherScope } from '@/lib/teacher-types';
 
 interface AdminOverviewResponse {
@@ -378,9 +379,17 @@ export default function AdminPage() {
                 Manage teachers, students, scopes, and school operations.
               </p>
             </div>
-            <button onClick={logout} className="text-xs font-semibold bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30">
-              Logout
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/roster-import"
+                className="text-xs font-semibold bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30"
+              >
+                Bulk Import
+              </Link>
+              <button onClick={logout} className="text-xs font-semibold bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30">
+                Logout
+              </button>
+            </div>
           </div>
         </div>
 
@@ -657,7 +666,15 @@ export default function AdminPage() {
           <InfoCard title="Scopes by section" items={(overview?.scopesBySection ?? []).map((item) => `${item.section} (${item.count})`)} />
         </div>
 
-        {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+        {error && (
+          <div
+            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+            role="alert"
+            aria-live="assertive"
+          >
+            {error}
+          </div>
+        )}
       </div>
     </div>
   );

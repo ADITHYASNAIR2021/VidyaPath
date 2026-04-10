@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
 import { getContextPack, type ContextTask } from '@/lib/ai/context-retriever';
 import { getChapterById } from '@/lib/data';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 
 const ALLOWED_TASKS: ContextTask[] = [
   'chat',
@@ -18,14 +19,21 @@ const ALLOWED_TASKS: ContextTask[] = [
 ];
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
     }
+    const body = bodyResult.value;
 
     const classLevel = Number((body as Record<string, unknown>).classLevel);
     const subject = typeof (body as Record<string, unknown>).subject === 'string'
@@ -43,10 +51,12 @@ export async function POST(req: Request) {
     const task = ALLOWED_TASKS.includes(taskRaw as ContextTask) ? (taskRaw as ContextTask) : 'chat';
 
     if (!Number.isFinite(classLevel) || (classLevel !== 10 && classLevel !== 12) || !subject) {
-      return NextResponse.json(
-        { error: 'Invalid payload. classLevel (10|12) and subject are required.' },
-        { status: 400 }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-context-pack-input',
+        message: 'Invalid payload. classLevel (10|12) and subject are required.',
+        status: 400,
+      });
     }
 
     const chapterTopics = Array.isArray((body as Record<string, unknown>).chapterTopics)
@@ -90,9 +100,15 @@ export async function POST(req: Request) {
       completionText: JSON.stringify({ snippets: payload.snippets.length, usedOnDemandFallback: payload.usedOnDemandFallback }),
       estimated: true,
     });
-    return NextResponse.json(payload);
+    return dataJson({ requestId, data: payload });
   } catch (error) {
     console.error('[context-pack] error', error);
-    return NextResponse.json({ error: 'Failed to build context pack.' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to build context pack.';
+    return errorJson({
+      requestId,
+      errorCode: 'context-pack-build-failed',
+      message,
+      status: 500,
+    });
   }
 }
