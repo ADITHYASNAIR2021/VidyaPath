@@ -12,8 +12,11 @@
     "build:context:python": "python scripts/build_context_index.py --max-files 0",
     "build:context:python:fast": "python scripts/build_context_index.py --max-files 220",
     "verify:context": "node scripts/verify_context_index.mjs",
+    "check:auth-matrix": "node scripts/auth_matrix_smoke.mjs",
+    "check:data-quality": "node scripts/check_dataset_quality.mjs",
     "migrate:supabase-state": "node scripts/migrate_state_to_supabase.mjs",
     "migrate:teacher-normalized": "node scripts/migrate_teacher_blob_to_normalized.mjs",
+    "seed:career-map": "node scripts/seed_chapter_career_map.mjs",
     "check:supabase-teacher": "node scripts/check_supabase_teacher_setup.mjs",
     "reset:supabase-soft": "node scripts/soft_reset_supabase.mjs",
     "seed:supabase-mock": "node scripts/seed_supabase_mock_data.mjs"

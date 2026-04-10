@@ -34,10 +34,11 @@ export default function AdminLoginPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Invalid admin key.');
+        setError(data?.error || data?.message || 'Invalid admin key.');
         return;
       }
-      const redirectTo = data?.role === 'developer' ? '/developer' : nextPath;
+      const role = data?.role || data?.data?.role;
+      const redirectTo = role === 'developer' ? '/developer' : nextPath;
       router.replace(redirectTo);
     } catch {
       setError('Failed to login.');

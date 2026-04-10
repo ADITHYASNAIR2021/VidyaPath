@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { csrfAllowedForMutation } from '@/lib/security/csrf';
 
 const ADMIN_SESSION_COOKIE = 'vp_admin_session';
 const TEACHER_SESSION_COOKIE = 'vp_teacher_session';
@@ -7,7 +8,16 @@ const STUDENT_SESSION_COOKIE = 'vp_student_session';
 const SUPABASE_ACCESS_COOKIE = 'vp_sb_access_token';
 const SUPABASE_REFRESH_COOKIE = 'vp_sb_refresh_token';
 const SUPABASE_ROLE_HINT_COOKIE = 'vp_role_hint';
-const DEFAULT_SESSION_SECRET = 'vidyapath-dev-session-secret';
+function resolveSessionSecret(): string {
+  const explicit = (process.env.SESSION_SIGNING_SECRET || '').trim();
+  if (explicit) return explicit;
+  if (process.env.NODE_ENV === 'production') return '';
+  return (
+    process.env.ADMIN_PORTAL_KEY ||
+    process.env.TEACHER_PORTAL_KEY ||
+    'vidyapath-dev-session-secret'
+  ).trim();
+}
 
 interface SessionPayload {
   role: 'admin' | 'teacher' | 'student';
@@ -91,14 +101,8 @@ async function isValidSignedSessionToken(
   if (!token) return false;
   const [encodedPayload, providedSignature] = token.split('.');
   if (!encodedPayload || !providedSignature) return false;
-  const secret = (
-    process.env.SESSION_SIGNING_SECRET ||
-    process.env.ADMIN_PORTAL_KEY ||
-    process.env.TEACHER_PORTAL_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SECRET_KEY ||
-    DEFAULT_SESSION_SECRET
-  ).trim();
+  const secret = resolveSessionSecret();
+  if (!secret) return false;
   const expectedSignature = await signBase64UrlPayload(encodedPayload, secret);
   if (expectedSignature !== providedSignature) return false;
   const decodedRaw = fromBase64Url(encodedPayload);
@@ -128,6 +132,23 @@ async function isValidSignedSessionToken(
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const isProtectedApiMutation =
+    (pathname.startsWith('/api/admin') ||
+      pathname.startsWith('/api/teacher') ||
+      pathname.startsWith('/api/developer') ||
+      pathname.startsWith('/api/integrations/sheets') ||
+      pathname.startsWith('/api/exam/session')) &&
+    !['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase());
+  if (isProtectedApiMutation && !csrfAllowedForMutation(request)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        errorCode: 'csrf-validation-failed',
+        message: 'CSRF validation failed for mutation request.',
+      },
+      { status: 403 }
+    );
+  }
   if (pathname === '/helper' || pathname.startsWith('/helper/')) {
     const url = request.nextUrl.clone();
     url.pathname = '/chapters';
@@ -234,6 +255,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    '/api/:path*',
     '/admin/:path*',
     '/teacher/:path*',
     '/student/:path*',

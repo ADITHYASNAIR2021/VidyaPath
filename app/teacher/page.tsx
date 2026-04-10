@@ -27,6 +27,19 @@ interface TeacherConfigResponse {
   storageStatus?: TeacherStorageStatus;
 }
 
+function unwrapApiPayload<T>(payload: unknown): T {
+  if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) {
+    return (payload as { data: T }).data;
+  }
+  return payload as T;
+}
+
+function extractApiError(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const raw = payload as Record<string, unknown>;
+  return String(raw.message || raw.error || fallback);
+}
+
 function fmt(value?: string): string {
   if (!value) return 'NA';
   const d = new Date(value);
@@ -181,19 +194,24 @@ export default function TeacherPortalPage() {
         fetch('/api/teacher/session/me', { cache: 'no-store' }),
         fetch('/api/teacher', { cache: 'no-store' }),
       ]);
-      const sessionData = await sessionRes.json().catch(() => null);
+      const sessionBody = await sessionRes.json().catch(() => null);
+      const sessionData = unwrapApiPayload<Record<string, unknown> | null>(sessionBody);
       if (!sessionRes.ok || !sessionData) {
         router.replace('/teacher/login');
         return;
       }
       const nextScopes = Array.isArray(sessionData.effectiveScopes) ? (sessionData.effectiveScopes as TeacherScope[]) : [];
+      const teacherInfo = sessionData.teacher && typeof sessionData.teacher === 'object'
+        ? (sessionData.teacher as { name?: string })
+        : undefined;
       setScopes(nextScopes);
-      setTeacherName(String(sessionData.teacher?.name || 'Teacher'));
+      setTeacherName(typeof teacherInfo?.name === 'string' && teacherInfo.name.trim() ? teacherInfo.name : 'Teacher');
       if (!chapterId && chapters.length > 0) setChapterId(chapters[0].id);
 
-      const cfg = (await configRes.json().catch(() => null)) as TeacherConfigResponse | null;
+      const cfgBody = await configRes.json().catch(() => null);
+      const cfg = unwrapApiPayload<TeacherConfigResponse | null>(cfgBody);
       if (!configRes.ok || !cfg) {
-        setError((cfg as { error?: string } | null)?.error || 'Failed to load dashboard.');
+        setError(extractApiError(cfgBody, 'Failed to load dashboard.'));
         return;
       }
       setConfig(cfg);
@@ -213,8 +231,9 @@ export default function TeacherPortalPage() {
       const response = await fetch(`/api/teacher/question-bank/item?chapterId=${encodeURIComponent(chapterId)}`, {
         cache: 'no-store',
       });
-      const data = await response.json().catch(() => null);
-      if (response.ok && data) setQbItems(Array.isArray(data.items) ? data.items : []);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<Record<string, unknown> | null>(body);
+      if (response.ok && data) setQbItems(Array.isArray(data.items) ? (data.items as TeacherQuestionBankItem[]) : []);
     } catch {
       // no-op
     }
@@ -247,8 +266,9 @@ export default function TeacherPortalPage() {
       const response = await fetch(`/api/teacher/submission-summary?packId=${encodeURIComponent(selectedPackId)}`, {
         cache: 'no-store',
       });
-      const data = await response.json().catch(() => null);
-      setSummary(response.ok && data ? (data as TeacherSubmissionSummary) : null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<TeacherSubmissionSummary | null>(body);
+      setSummary(response.ok && data ? data : null);
     }
     void run();
   }, [selectedPackId]);
@@ -262,9 +282,10 @@ export default function TeacherPortalPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await response.json().catch(() => null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<Record<string, unknown> | null>(body);
       if (!response.ok || !data) {
-        setError(data?.error || 'Update failed.');
+        setError(extractApiError(body, 'Update failed.'));
         return false;
       }
       await loadConfig();
@@ -298,9 +319,10 @@ export default function TeacherPortalPage() {
           section: section || undefined,
         }),
       });
-      const data = await response.json().catch(() => null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<Record<string, unknown> | null>(body);
       if (!response.ok || !data || !data.packId) {
-        setError(data?.error || 'Failed to create draft pack.');
+        setError(extractApiError(body, 'Failed to create draft pack.'));
         return;
       }
       setSelectedPackId(String(data.packId));
@@ -326,9 +348,10 @@ export default function TeacherPortalPage() {
           difficultyMix: action === 'regenerate' ? difficultyMix : undefined,
         }),
       });
-      const data = await response.json().catch(() => null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<Record<string, unknown> | null>(body);
       if (!response.ok || !data) {
-        setError(data?.error || `Failed to ${action} pack.`);
+        setError(extractApiError(body, `Failed to ${action} pack.`));
         return;
       }
       if (action === 'regenerate') setFeedback('');
@@ -361,9 +384,10 @@ export default function TeacherPortalPage() {
           section: section || undefined,
         }),
       });
-      const data = await response.json().catch(() => null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<Record<string, unknown> | null>(body);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to create question.');
+        setError(extractApiError(body, 'Failed to create question.'));
         return;
       }
       setQbPrompt('');
@@ -385,9 +409,10 @@ export default function TeacherPortalPage() {
     setError('');
     try {
       const response = await fetch(`/api/teacher/question-bank/item/${itemId}`, { method: 'DELETE' });
-      const data = await response.json().catch(() => null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<Record<string, unknown> | null>(body);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to delete question.');
+        setError(extractApiError(body, 'Failed to delete question.'));
         return;
       }
       await loadQuestionBank();
@@ -420,17 +445,19 @@ export default function TeacherPortalPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ submissionId, questionGrades }),
       });
-      const data = await response.json().catch(() => null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<Record<string, unknown> | null>(body);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to grade submission.');
+        setError(extractApiError(body, 'Failed to grade submission.'));
         return;
       }
       if (selectedPackId) {
         const res = await fetch(`/api/teacher/submission-summary?packId=${encodeURIComponent(selectedPackId)}`, {
           cache: 'no-store',
         });
-        const summaryData = await res.json().catch(() => null);
-        if (res.ok && summaryData) setSummary(summaryData as TeacherSubmissionSummary);
+        const summaryBody = await res.json().catch(() => null);
+        const summaryData = unwrapApiPayload<TeacherSubmissionSummary | null>(summaryBody);
+        if (res.ok && summaryData) setSummary(summaryData);
       }
     } catch {
       setError('Failed to grade submission.');
@@ -449,16 +476,18 @@ export default function TeacherPortalPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packId: selectedPackId }),
       });
-      const data = await response.json().catch(() => null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<Record<string, unknown> | null>(body);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to release results.');
+        setError(extractApiError(body, 'Failed to release results.'));
         return;
       }
       const res = await fetch(`/api/teacher/submission-summary?packId=${encodeURIComponent(selectedPackId)}`, {
         cache: 'no-store',
       });
-      const summaryData = await res.json().catch(() => null);
-      if (res.ok && summaryData) setSummary(summaryData as TeacherSubmissionSummary);
+      const summaryBody = await res.json().catch(() => null);
+      const summaryData = unwrapApiPayload<TeacherSubmissionSummary | null>(summaryBody);
+      if (res.ok && summaryData) setSummary(summaryData);
     } catch {
       setError('Failed to release results.');
     } finally {

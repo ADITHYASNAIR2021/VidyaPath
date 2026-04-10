@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { getStudentSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { logServerEvent } from '@/lib/observability';
 import {
   canTeacherAccessAssignmentPack,
   getAssignmentPack,
@@ -13,6 +15,7 @@ import {
   toAnswerKey,
 } from '@/lib/teacher-assignment';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
+import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,16 +24,28 @@ function parseClassLevel(value: unknown): 10 | 12 {
 }
 
 export async function GET(req: Request) {
+  const requestId = getRequestId(req);
+  const endpoint = '/api/teacher/assignment-pack';
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get('id')?.trim() ?? '';
     if (!id) {
-      return NextResponse.json({ error: 'id query param is required.' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'missing-pack-id',
+        message: 'id query param is required.',
+        status: 400,
+      });
     }
 
     const pack = await getAssignmentPack(id);
     if (!pack) {
-      return NextResponse.json({ error: 'Assignment pack not found.' }, { status: 404 });
+      return errorJson({
+        requestId,
+        errorCode: 'assignment-pack-not-found',
+        message: 'Assignment pack not found.',
+        status: 404,
+      });
     }
 
     const teacherSession = await getTeacherSessionFromRequestCookies();
@@ -39,53 +54,128 @@ export async function GET(req: Request) {
       canViewFullPack = await canTeacherAccessAssignmentPack(teacherSession.teacher.id, pack.packId);
     }
     if (!canViewFullPack && pack.status !== 'published') {
-      return NextResponse.json({ error: 'Assignment pack not found.' }, { status: 404 });
+      return errorJson({
+        requestId,
+        errorCode: 'assignment-pack-not-found',
+        message: 'Assignment pack not found.',
+        status: 404,
+      });
     }
 
     if (!canViewFullPack) {
       const studentSession = await getStudentSessionFromRequestCookies();
       if (!studentSession) {
-        return NextResponse.json({ error: 'Student login required.' }, { status: 401 });
+        return errorJson({
+          requestId,
+          errorCode: 'unauthorized',
+          message: 'Student login required.',
+          status: 401,
+        });
       }
       if (pack.classLevel !== studentSession.classLevel) {
-        return NextResponse.json({ error: 'This assignment is not available for your class.' }, { status: 403 });
+        return errorJson({
+          requestId,
+          errorCode: 'class-mismatch',
+          message: 'This assignment is not available for your class.',
+          status: 403,
+        });
       }
       if (pack.section && studentSession.section && pack.section !== studentSession.section) {
-        return NextResponse.json({ error: 'This assignment is section restricted.' }, { status: 403 });
+        return errorJson({
+          requestId,
+          errorCode: 'section-restricted',
+          message: 'This assignment is section restricted.',
+          status: 403,
+        });
       }
       if (pack.section && !studentSession.section) {
-        return NextResponse.json({ error: 'Student section is missing for this restricted assignment.' }, { status: 403 });
+        return errorJson({
+          requestId,
+          errorCode: 'missing-student-section',
+          message: 'Student section is missing for this restricted assignment.',
+          status: 403,
+        });
       }
       const { createdByKeyId: _createdByKeyId, ...publicPack } = pack;
-      return NextResponse.json({
+      const data = {
         ...publicPack,
         answerKey: [],
+      };
+      logServerEvent({
+        event: 'assignment-pack-read',
+        requestId,
+        endpoint,
+        role: 'student',
+        statusCode: 200,
+        details: { packId: pack.packId },
       });
+      return dataJson({ requestId, data });
     }
-    return NextResponse.json(pack);
+    logServerEvent({
+      event: 'assignment-pack-read',
+      requestId,
+      endpoint,
+      role: 'teacher',
+      statusCode: 200,
+      details: { packId: pack.packId, status: pack.status },
+    });
+    return dataJson({ requestId, data: pack });
   } catch (error) {
     console.error('[teacher-assignment-pack:get] error', error);
-    return NextResponse.json({ error: 'Failed to load assignment pack.' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to load assignment pack.';
+    return errorJson({
+      requestId,
+      errorCode: 'assignment-pack-read-failed',
+      message,
+      status: 500,
+    });
   }
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
+  const endpoint = '/api/teacher/assignment-pack';
+  const ip = getClientIp(req);
   try {
     const teacherSession = await getTeacherSessionFromRequestCookies();
     if (!teacherSession) {
-      return NextResponse.json({ error: 'Unauthorized teacher access.' }, { status: 401 });
+      await recordAuditEvent({
+        requestId,
+        endpoint,
+        action: 'assignment-pack-create-denied',
+        statusCode: 401,
+        actorRole: 'system',
+        metadata: { ip },
+      });
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Unauthorized teacher access.',
+        status: 401,
+      });
     }
     await assertTeacherStorageWritable();
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 96 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
     }
+    const body = bodyResult.value;
     const chapterId = typeof (body as Record<string, unknown>).chapterId === 'string'
       ? String((body as Record<string, unknown>).chapterId).trim()
       : '';
     if (!chapterId) {
-      return NextResponse.json({ error: 'chapterId is required.' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'missing-chapter-id',
+        message: 'chapterId is required.',
+        status: 400,
+      });
     }
     const section = typeof (body as Record<string, unknown>).section === 'string'
       ? String((body as Record<string, unknown>).section).trim()
@@ -125,14 +215,42 @@ export async function POST(req: Request) {
       status: 'draft',
     });
 
-    return NextResponse.json(pack);
+    const committedAt = new Date().toISOString();
+    await recordAuditEvent({
+      requestId,
+      endpoint,
+      action: 'assignment-pack-created',
+      statusCode: 200,
+      actorRole: 'teacher',
+      metadata: {
+        teacherId: teacherSession.teacher.id,
+        packId: pack.packId,
+        chapterId,
+        committedAt,
+      },
+    });
+    logServerEvent({
+      event: 'assignment-pack-created',
+      requestId,
+      endpoint,
+      role: 'teacher',
+      statusCode: 200,
+      details: { packId: pack.packId, chapterId },
+    });
+    return dataJson({
+      requestId,
+      data: pack,
+      meta: { committedAt },
+    });
   } catch (error) {
     console.error('[teacher-assignment-pack:post] error', error);
     const message = error instanceof Error ? error.message : 'Failed to create assignment pack.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
-    return NextResponse.json(
-      { error: message },
-      { status }
-    );
+    return errorJson({
+      requestId,
+      errorCode: 'assignment-pack-create-failed',
+      message,
+      status,
+    });
   }
 }

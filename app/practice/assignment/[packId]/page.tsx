@@ -33,6 +33,19 @@ interface StudentSessionPayload {
   section?: string;
 }
 
+function unwrapApiPayload<T>(payload: unknown): T {
+  if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) {
+    return (payload as { data: T }).data;
+  }
+  return payload as T;
+}
+
+function extractApiError(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const raw = payload as Record<string, unknown>;
+  return String(raw.message || raw.error || fallback);
+}
+
 export default function PracticeAssignmentPage() {
   const router = useRouter();
   const params = useParams<{ packId: string }>();
@@ -55,12 +68,13 @@ export default function PracticeAssignmentPage() {
     async function loadStudentSession() {
       try {
         const response = await fetch('/api/student/session/me', { cache: 'no-store' });
-        const data = await response.json().catch(() => null);
+        const body = await response.json().catch(() => null);
+        const data = unwrapApiPayload<StudentSessionPayload | null>(body);
         if (!response.ok || !data) {
           setStudentSession(null);
           return;
         }
-        setStudentSession(data as StudentSessionPayload);
+        setStudentSession(data);
       } catch {
         setStudentSession(null);
       }
@@ -72,17 +86,18 @@ export default function PracticeAssignmentPage() {
       setError('');
       try {
         const response = await fetch(`/api/teacher/assignment-pack?id=${encodeURIComponent(packId)}`, { cache: 'no-store' });
-        const data = await response.json().catch(() => null);
+        const body = await response.json().catch(() => null);
+        const data = unwrapApiPayload<TeacherAssignmentPack | null>(body);
         if (response.status === 401) {
           router.replace(`/student/login?next=${encodeURIComponent(`/practice/assignment/${packId}`)}&reason=auth-required`);
           return;
         }
         if (!response.ok || !data) {
-          setError(data?.error || 'Assignment pack not found.');
+          setError(extractApiError(body, 'Assignment pack not found.'));
           setPack(null);
           return;
         }
-        setPack(data as TeacherAssignmentPack);
+        setPack(data);
       } catch {
         setError('Failed to load assignment pack.');
       } finally {
@@ -93,7 +108,8 @@ export default function PracticeAssignmentPage() {
       if (!packId) return;
       try {
         const response = await fetch(`/api/student/submission-results?packId=${encodeURIComponent(packId)}`, { cache: 'no-store' });
-        const data = await response.json().catch(() => null);
+        const body = await response.json().catch(() => null);
+        const data = unwrapApiPayload<Record<string, unknown> | null>(body);
         if (!response.ok || !data) return;
         const attempts = Array.isArray(data.attempts) ? (data.attempts as StudentAttempt[]) : [];
         setLatestAttempt(attempts[0] ?? null);
@@ -143,14 +159,16 @@ export default function PracticeAssignmentPage() {
           answers,
         }),
       });
-      const data = await response.json().catch(() => null);
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<SubmissionResponse | null>(body);
       if (!response.ok || !data) {
-        setError(data?.error || 'Submission failed.');
+        setError(extractApiError(body, 'Submission failed.'));
         return;
       }
-      setResult(data as SubmissionResponse);
+      setResult(data);
       const attemptsResponse = await fetch(`/api/student/submission-results?packId=${encodeURIComponent(pack.packId)}`, { cache: 'no-store' });
-      const attemptsData = await attemptsResponse.json().catch(() => null);
+      const attemptsBody = await attemptsResponse.json().catch(() => null);
+      const attemptsData = unwrapApiPayload<Record<string, unknown> | null>(attemptsBody);
       if (attemptsResponse.ok && attemptsData && Array.isArray(attemptsData.attempts)) {
         setLatestAttempt((attemptsData.attempts as StudentAttempt[])[0] ?? null);
       }

@@ -1,13 +1,16 @@
-import { NextResponse } from 'next/server';
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
-import { createStudent, listStudents } from '@/lib/teacher-admin-db';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
+import { recordAuditEvent } from '@/lib/security/audit';
+import { createStudent, listStudents } from '@/lib/teacher-admin-db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
-  if (!adminSession) return unauthorizedJson('Admin session required.');
+  if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
   const url = new URL(req.url);
   const classLevelRaw = Number(url.searchParams.get('classLevel'));
   const classLevel = classLevelRaw === 10 || classLevelRaw === 12 ? classLevelRaw : undefined;
@@ -23,18 +26,25 @@ export async function GET(req: Request) {
     section,
     status: status === 'active' || status === 'inactive' ? status : undefined,
   });
-  return NextResponse.json({ students });
+  return dataJson({ requestId, data: { students } });
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
-  if (!adminSession) return unauthorizedJson('Admin session required.');
+  if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
   try {
     await assertTeacherStorageWritable();
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
     }
+    const body = bodyResult.value;
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const rollCode = typeof body.rollCode === 'string' ? body.rollCode.trim() : '';
     const rollNo = typeof body.rollNo === 'string' ? body.rollNo.trim() : '';
@@ -47,13 +57,28 @@ export async function POST(req: Request) {
       ? (typeof body.schoolId === 'string' ? body.schoolId.trim() : undefined)
       : adminSession.schoolId;
     if (!name || (classLevel !== 10 && classLevel !== 12)) {
-      return NextResponse.json({ error: 'Required: name and classLevel(10|12).' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-student-core-fields',
+        message: 'Required: name and classLevel(10|12).',
+        status: 400,
+      });
     }
     if (!rollNo && !rollCode) {
-      return NextResponse.json({ error: 'Provide rollNo (recommended) or rollCode.' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'missing-student-identifier',
+        message: 'Provide rollNo (recommended) or rollCode.',
+        status: 400,
+      });
     }
     if (!schoolId) {
-      return NextResponse.json({ error: 'School scope missing for admin session.' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'missing-school-scope',
+        message: 'School scope missing for admin session.',
+        status: 400,
+      });
     }
 
     const student = await createStudent({
@@ -67,7 +92,22 @@ export async function POST(req: Request) {
       pin,
       password,
     });
-    return NextResponse.json({ student });
+    const committedAt = new Date().toISOString();
+    await recordAuditEvent({
+      requestId,
+      endpoint: '/api/admin/students',
+      action: 'admin-create-student',
+      statusCode: 200,
+      actorRole: adminSession.role,
+      actorAuthUserId: adminSession.authUserId,
+      schoolId,
+      metadata: { studentId: student.id, committedAt },
+    });
+    return dataJson({
+      requestId,
+      data: { student },
+      meta: { committedAt },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create student.';
     const status = /valid|required/i.test(message)
@@ -75,6 +115,11 @@ export async function POST(req: Request) {
       : /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message)
         ? 503
         : 500;
-    return NextResponse.json({ error: message }, { status });
+    return errorJson({
+      requestId,
+      errorCode: 'create-student-failed',
+      message,
+      status,
+    });
   }
 }

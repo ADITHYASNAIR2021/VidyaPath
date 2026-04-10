@@ -1,7 +1,9 @@
-import { NextResponse } from 'next/server';
-import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
-import { gradeSubmission } from '@/lib/teacher-admin-db';
+import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
+import { recordAuditEvent } from '@/lib/security/audit';
+import { gradeSubmission } from '@/lib/teacher-admin-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,17 +31,32 @@ function parseQuestionGrades(value: unknown): QuestionGradeInput[] {
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
   try {
     const session = await getTeacherSessionFromRequestCookies();
-    if (!session) return NextResponse.json({ error: 'Unauthorized teacher access.' }, { status: 401 });
+    if (!session) return unauthorizedJson('Unauthorized teacher access.', requestId);
     await assertTeacherStorageWritable();
 
-    const body = await req.json().catch(() => null);
-    const submissionId = typeof body?.submissionId === 'string' ? body.submissionId.trim() : '';
-    const questionGrades = parseQuestionGrades(body?.questionGrades);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const body = bodyResult.value;
+    const submissionId = typeof body.submissionId === 'string' ? body.submissionId.trim() : '';
+    const questionGrades = parseQuestionGrades(body.questionGrades);
 
     if (!submissionId || questionGrades.length === 0) {
-      return NextResponse.json({ error: 'Required: submissionId and questionGrades[]' }, { status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-grade-payload',
+        message: 'Required: submissionId and questionGrades[]',
+        status: 400,
+      });
     }
 
     const submission = await gradeSubmission({
@@ -48,8 +65,28 @@ export async function POST(req: Request) {
       questionGrades,
     });
 
-    if (!submission) return NextResponse.json({ error: 'Submission not found.' }, { status: 404 });
-    return NextResponse.json({ submission });
+    if (!submission) {
+      return errorJson({
+        requestId,
+        errorCode: 'submission-not-found',
+        message: 'Submission not found.',
+        status: 404,
+      });
+    }
+    const committedAt = new Date().toISOString();
+    await recordAuditEvent({
+      requestId,
+      endpoint: '/api/teacher/submission/grade',
+      action: 'teacher-grade-submission',
+      statusCode: 200,
+      actorRole: 'teacher',
+      metadata: { teacherId: session.teacher.id, submissionId, committedAt },
+    });
+    return dataJson({
+      requestId,
+      data: { submission },
+      meta: { committedAt },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to grade submission.';
     const status = /required|valid|grade/i.test(message)
@@ -57,6 +94,11 @@ export async function POST(req: Request) {
       : /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message)
         ? 503
         : 500;
-    return NextResponse.json({ error: message }, { status });
+    return errorJson({
+      requestId,
+      errorCode: 'grade-submission-failed',
+      message,
+      status,
+    });
   }
 }

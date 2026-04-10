@@ -244,7 +244,7 @@ def infer_subject(class_level: int, relative_path: str) -> Optional[str]:
     token = re.sub(r"[^a-z]+", " ", candidate).strip()
 
     # Hard exclusions to prevent leaking non-target subjects into context
-    if any(x in token for x in ["social science", "home science", "physical education", "physical activity", "economics", "history", "geography"]):
+    if any(x in token for x in ["social science", "home science", "physical education", "physical activity", "history", "geography"]):
         return None
 
     if class_level == 10:
@@ -252,8 +252,18 @@ def infer_subject(class_level: int, relative_path: str) -> Optional[str]:
             return "Math"
         if any(x in token for x in ["science", "scince", "physics", "chemistry", "biology"]):
             return "Science"
+        if "english" in token:
+            return "English Core"
         return None
 
+    if any(x in token for x in ["accountancy", "accounts", "accounting", "financial accounting"]):
+        return "Accountancy"
+    if any(x in token for x in ["business studies", "business study", "business", "entrepreneurship", "marketing"]):
+        return "Business Studies"
+    if any(x in token for x in ["economics", "economy", "macroeconomics", "microeconomics", "indian economic development"]):
+        return "Economics"
+    if "english" in token:
+        return "English Core"
     if any(x in token for x in ["physics", "applied physics"]):
         return "Physics"
     if any(x in token for x in ["chemistry", "chem"]):

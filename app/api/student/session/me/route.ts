@@ -8,5 +8,9 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ error: 'Student session not found.' }, { status: 401 });
   }
-  return NextResponse.json(session);
+  return NextResponse.json({
+    ...session,
+    sessionExpiry: session.expiresAt,
+    availableRoles: ['student'],
+  });
 }

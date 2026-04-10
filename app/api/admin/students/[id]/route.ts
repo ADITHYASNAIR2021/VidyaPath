@@ -1,19 +1,28 @@
-import { NextResponse } from 'next/server';
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
-import { updateStudent } from '@/lib/teacher-admin-db';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
+import { recordAuditEvent } from '@/lib/security/audit';
+import { updateStudent } from '@/lib/teacher-admin-db';
 
 export const dynamic = 'force-dynamic';
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+  const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
-  if (!adminSession) return unauthorizedJson('Admin session required.');
+  if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
   try {
     await assertTeacherStorageWritable();
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
     }
+    const body = bodyResult.value;
     const updates: Partial<{
       name: string;
       rollCode: string;
@@ -35,8 +44,30 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     const schoolId = adminSession.role === 'admin' ? adminSession.schoolId : undefined;
     const student = await updateStudent(params.id, updates, schoolId);
-    if (!student) return NextResponse.json({ error: 'Student not found.' }, { status: 404 });
-    return NextResponse.json({ student });
+    if (!student) {
+      return errorJson({
+        requestId,
+        errorCode: 'student-not-found',
+        message: 'Student not found.',
+        status: 404,
+      });
+    }
+    const committedAt = new Date().toISOString();
+    await recordAuditEvent({
+      requestId,
+      endpoint: '/api/admin/students/[id]',
+      action: 'admin-update-student',
+      statusCode: 200,
+      actorRole: adminSession.role,
+      actorAuthUserId: adminSession.authUserId,
+      schoolId: schoolId,
+      metadata: { studentId: params.id, committedAt, fields: Object.keys(updates) },
+    });
+    return dataJson({
+      requestId,
+      data: { student },
+      meta: { committedAt },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update student.';
     const status = /valid|required/i.test(message)
@@ -44,6 +75,11 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       : /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message)
         ? 503
         : 500;
-    return NextResponse.json({ error: message }, { status });
+    return errorJson({
+      requestId,
+      errorCode: 'update-student-failed',
+      message,
+      status,
+    });
   }
 }

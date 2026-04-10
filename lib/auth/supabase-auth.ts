@@ -226,7 +226,9 @@ export function attachSupabaseSessionCookies(
   session: Pick<SupabaseAuthSession, 'access_token' | 'refresh_token' | 'expires_in'>,
   roleHint?: string
 ): void {
-  const expires = new Date(Date.now() + Math.max(60, session.expires_in) * 1000);
+  const accessMaxAge = Math.max(60, session.expires_in);
+  const refreshMaxAge = 30 * 24 * 60 * 60;
+  const expires = new Date(Date.now() + accessMaxAge * 1000);
   response.cookies.set({
     name: SUPABASE_ACCESS_COOKIE,
     value: session.access_token,
@@ -235,6 +237,7 @@ export function attachSupabaseSessionCookies(
     sameSite: 'lax',
     path: '/',
     expires,
+    maxAge: accessMaxAge,
   });
   response.cookies.set({
     name: SUPABASE_REFRESH_COOKIE,
@@ -243,7 +246,8 @@ export function attachSupabaseSessionCookies(
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    expires: new Date(Date.now() + refreshMaxAge * 1000),
+    maxAge: refreshMaxAge,
   });
   if (roleHint) {
     response.cookies.set({
@@ -254,6 +258,7 @@ export function attachSupabaseSessionCookies(
       sameSite: 'lax',
       path: '/',
       expires,
+      maxAge: accessMaxAge,
     });
   }
 }

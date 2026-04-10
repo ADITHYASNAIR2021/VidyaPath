@@ -6,6 +6,10 @@ export const TEACHER_SESSION_COOKIE = 'vp_teacher_session';
 export const STUDENT_SESSION_COOKIE = 'vp_student_session';
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 8;
+const COOKIE_MAX_AGE_SECONDS = Math.max(
+  300,
+  Math.min(60 * 60 * 24 * 30, Number(process.env.SESSION_COOKIE_MAX_AGE_SECONDS) || DEFAULT_TTL_SECONDS)
+);
 
 export interface AdminSession {
   role: 'admin';
@@ -34,13 +38,26 @@ export interface StudentSession {
 type SessionPayload = AdminSession | TeacherSession | StudentSession;
 
 function getSessionSecret(): string {
-  const fromEnv =
-    process.env.SESSION_SIGNING_SECRET?.trim() ||
+  const explicit = process.env.SESSION_SIGNING_SECRET?.trim();
+  if (explicit) return explicit;
+  if (process.env.NODE_ENV === 'production') return '';
+  const devFallback =
     process.env.ADMIN_PORTAL_KEY?.trim() ||
     process.env.TEACHER_PORTAL_KEY?.trim() ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
-    process.env.SUPABASE_SECRET_KEY?.trim();
-  return fromEnv || 'vidyapath-dev-session-secret';
+    'vidyapath-dev-session-secret';
+  return devFallback;
+}
+
+export function isSessionSigningConfigured(): boolean {
+  return !!getSessionSecret();
+}
+
+function requireSessionSecret(): string {
+  const secret = getSessionSecret();
+  if (!secret) {
+    throw new Error('SESSION_SIGNING_SECRET is required in production.');
+  }
+  return secret;
 }
 
 function encodeBase64Url(input: string): string {
@@ -52,7 +69,7 @@ function decodeBase64Url(input: string): string {
 }
 
 function signRaw(raw: string): string {
-  return createHmac('sha256', getSessionSecret()).update(raw).digest('base64url');
+  return createHmac('sha256', requireSessionSecret()).update(raw).digest('base64url');
 }
 
 function issueToken(payload: SessionPayload): string {
@@ -62,6 +79,7 @@ function issueToken(payload: SessionPayload): string {
 }
 
 function verifyToken(token: string): SessionPayload | null {
+  if (!getSessionSecret()) return null;
   const [encoded, sig] = token.split('.');
   if (!encoded || !sig) return null;
   const expected = signRaw(encoded);
@@ -169,6 +187,7 @@ export function attachAdminSessionCookie(res: NextResponse, token: string): void
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
+    maxAge: COOKIE_MAX_AGE_SECONDS,
   });
 }
 
@@ -180,6 +199,7 @@ export function attachTeacherSessionCookie(res: NextResponse, token: string): vo
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
+    maxAge: COOKIE_MAX_AGE_SECONDS,
   });
 }
 
@@ -191,6 +211,7 @@ export function attachStudentSessionCookie(res: NextResponse, token: string): vo
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
+    maxAge: COOKIE_MAX_AGE_SECONDS,
   });
 }
 

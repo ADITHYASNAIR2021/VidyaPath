@@ -161,3 +161,27 @@ h1, h2, h3 {
   color: #233155;
   overflow-x: auto;
 }
+
+:focus-visible {
+  outline: 3px solid #1f4fd6;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .animate-fade-in-up,
+  .animate-fade-in {
+    animation: none !important;
+  }
+}

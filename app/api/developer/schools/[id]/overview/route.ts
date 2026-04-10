@@ -1,18 +1,39 @@
-import { NextResponse } from 'next/server';
 import { getDeveloperSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { logServerEvent } from '@/lib/observability';
 import { getDeveloperSchoolOverview } from '@/lib/platform-rbac-db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  if (!(await getDeveloperSessionFromRequestCookies())) return unauthorizedJson('Developer session required.');
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const requestId = getRequestId(req);
+  const session = await getDeveloperSessionFromRequestCookies();
+  if (!session) return unauthorizedJson('Developer session required.', requestId);
   const schoolId = params.id?.trim();
   if (!schoolId) {
-    return NextResponse.json({ error: 'School id is required.' }, { status: 400 });
+    return errorJson({
+      requestId,
+      errorCode: 'missing-school-id',
+      message: 'School id is required.',
+      status: 400,
+    });
   }
   const overview = await getDeveloperSchoolOverview(schoolId);
   if (!overview) {
-    return NextResponse.json({ error: 'School not found.' }, { status: 404 });
+    return errorJson({
+      requestId,
+      errorCode: 'school-not-found',
+      message: 'School not found.',
+      status: 404,
+    });
   }
-  return NextResponse.json(overview);
+  logServerEvent({
+    event: 'developer-school-overview-read',
+    requestId,
+    endpoint: '/api/developer/schools/[id]/overview',
+    role: 'developer',
+    schoolId,
+    statusCode: 200,
+  });
+  return dataJson({ requestId, data: overview });
 }

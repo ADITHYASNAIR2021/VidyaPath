@@ -24,7 +24,9 @@ export interface RequestAuthContext {
   authUserId?: string;
   schoolId?: string;
   schoolCode?: string;
+  schoolName?: string;
   profileId?: string;
+  displayName?: string;
   classLevel?: 10 | 12;
   section?: string;
   availableRoles?: Array<Exclude<PlatformRole, 'anonymous'>>;
@@ -41,7 +43,9 @@ function toRequestAuthContext(
     authUserId: roleContext.authUserId,
     schoolId: roleContext.schoolId,
     schoolCode: roleContext.schoolCode,
+    schoolName: roleContext.schoolName,
     profileId: roleContext.profileId,
+    displayName: roleContext.displayName,
     classLevel: roleContext.classLevel,
     section: roleContext.section,
     availableRoles: roleContext.availableRoles,
@@ -132,7 +136,10 @@ export async function getAdminSessionFromRequestCookies(): Promise<{
   issuedAt?: number;
   expiresAt?: number;
   schoolId?: string;
+  schoolCode?: string;
+  schoolName?: string;
   authUserId?: string;
+  displayName?: string;
   role: 'admin' | 'developer';
 } | null> {
   const context = await requireRequestRole(['admin', 'developer']);
@@ -142,7 +149,10 @@ export async function getAdminSessionFromRequestCookies(): Promise<{
     issuedAt: context.issuedAt,
     expiresAt: context.expiresAt,
     schoolId: context.schoolId,
+    schoolCode: context.schoolCode,
+    schoolName: context.schoolName,
     authUserId: context.authUserId,
+    displayName: context.displayName,
   };
 }
 
@@ -196,6 +206,15 @@ export async function getDeveloperSessionFromRequestCookies(): Promise<{
   };
 }
 
-export function unauthorizedJson(message = 'Unauthorized'): NextResponse {
-  return NextResponse.json({ error: message }, { status: 401 });
+export function unauthorizedJson(message = 'Unauthorized', requestId = 'unauthorized'): NextResponse {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+      errorCode: 'unauthorized',
+      message,
+      requestId,
+    },
+    { status: 401 }
+  );
 }

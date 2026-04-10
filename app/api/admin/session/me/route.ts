@@ -10,7 +10,11 @@ export async function GET() {
     role: session.role,
     issuedAt: session.issuedAt,
     expiresAt: session.expiresAt,
+    sessionExpiry: session.expiresAt,
     schoolId: session.schoolId,
+    schoolCode: session.schoolCode,
+    schoolName: session.schoolName,
     authUserId: session.authUserId,
+    displayName: session.displayName,
   });
 }

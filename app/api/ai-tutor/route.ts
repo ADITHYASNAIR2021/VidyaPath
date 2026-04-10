@@ -6,6 +6,10 @@ import { generateTaskText, type ChatMessage } from '@/lib/ai/generator';
 import { trackAiQuestion } from '@/lib/analytics-store';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
+import { getClientIp, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { logServerEvent } from '@/lib/observability';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 interface ChapterContext {
   chapterId?: string;
@@ -101,33 +105,68 @@ function normalizeChapterContext(input: unknown): ChapterContext | undefined {
   return { chapterId: chapterId || undefined, title, subject, classLevel, topics };
 }
 
-function fallbackError(error: unknown): NextResponse {
+function fallbackError(error: unknown, requestId?: string): NextResponse {
   const message = error instanceof Error ? error.message : 'No response from AI. Please try again.';
   if (message.toLowerCase().includes('configured')) {
     return NextResponse.json(
-      { error: 'AI tutor not configured. Set GEMINI_API_KEY (primary) or GROQ_API_KEY (backup).' },
-      { status: 503 }
+      { error: 'AI tutor not configured. Set GEMINI_API_KEY (primary) or GROQ_API_KEY (backup).', requestId },
+      { status: 503, headers: requestId ? { 'X-Request-Id': requestId } : undefined }
     );
   }
-  return NextResponse.json({ error: 'No response from AI. Please try again.' }, { status: 502 });
+  return NextResponse.json(
+    { error: 'No response from AI. Please try again.', requestId },
+    { status: 502, headers: requestId ? { 'X-Request-Id': requestId } : undefined }
+  );
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = getRequestId(req);
   try {
     const { context, response } = await requireInteractiveAuth();
     if (response) return response;
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    const limit = await checkRateLimit({
+      key: buildRateLimitKey('ai:chat', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      windowSeconds: 60,
+      maxRequests: 24,
+      blockSeconds: 120,
+    });
+    if (!limit.allowed) {
+      return NextResponse.json(
+        {
+          error: 'Too many AI tutor requests. Please try again shortly.',
+          errorCode: 'rate-limit-exceeded',
+          requestId,
+        },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(limit.retryAfterSeconds), 'X-Request-Id': requestId },
+        }
+      );
     }
 
-    const payload = body as Record<string, unknown>;
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 48 * 1024);
+    if (!bodyResult.ok) {
+      return NextResponse.json(
+        {
+          error: bodyResult.message,
+          errorCode: bodyResult.reason,
+          requestId,
+        },
+        { status: bodyResult.reason === 'payload-too-large' ? 413 : 400, headers: { 'X-Request-Id': requestId } }
+      );
+    }
+    const body = bodyResult.value;
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body', requestId }, { status: 400, headers: { 'X-Request-Id': requestId } });
+    }
+
+    const payload = body;
     const messages = normalizeMessages(payload.messages);
     const chapterContext = normalizeChapterContext(payload.chapterContext);
 
     if (messages.length === 0) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid request', requestId }, { status: 400, headers: { 'X-Request-Id': requestId } });
     }
 
     const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
@@ -182,12 +221,28 @@ export async function POST(req: NextRequest) {
       model: generated.model,
       promptText: lastUserMessage,
       completionText: message,
+      requestId,
       estimated: true,
     });
+    logServerEvent({
+      event: 'ai-tutor-response',
+      requestId,
+      endpoint: '/api/ai-tutor',
+      role: context?.role,
+      schoolId: context?.schoolId,
+      statusCode: 200,
+    });
 
-    return NextResponse.json({ message, isOffTopic });
+    return NextResponse.json({ message, isOffTopic, requestId }, { headers: { 'X-Request-Id': requestId } });
   } catch (error) {
     console.error('AI tutor route error:', error);
-    return fallbackError(error);
+    logServerEvent({
+      level: 'error',
+      event: 'ai-tutor-error',
+      requestId,
+      endpoint: '/api/ai-tutor',
+      statusCode: 502,
+    });
+    return fallbackError(error, requestId);
   }
 }

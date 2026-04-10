@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { ALL_CHAPTERS, getChapterById, getAdjacentChapters } from '@/lib/data';
+import { getChapterCareerMap } from '@/lib/career-catalog';
 import { getPYQData, getFrequencyLabel } from '@/lib/pyq';
 import { chapterNotesSlug, slugify } from '@/lib/seo-notes';
 import AIChatBox from '@/components/AIChatBox';
@@ -160,6 +161,7 @@ export default function ChapterDetailPage({
   const SubjectIcon = style.icon ?? Atom;
   const section = typeof searchParams?.section === 'string' ? searchParams.section.trim() : '';
   const chapterPyq = getPYQData(chapter.id);
+  const careerMap = getChapterCareerMap(chapter.id);
 
   const youtubeUrl = `https://www.youtube.com/results?search_query=CBSE+Class+${chapter.classLevel}+${chapter.subject}+${encodeURIComponent(chapter.title)}+NCERT`;
   const ncertExemplarUrl = chapter.ncertExemplarUrl || `https://ncert.nic.in/exemplar-problems.php`;
@@ -274,6 +276,38 @@ export default function ChapterDetailPage({
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {careerMap && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                <h2 className="font-fraunces text-base font-bold text-navy-700 mb-2 flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-amber-600" />
+                  Career Relevance
+                </h2>
+                <p className="text-sm text-[#4A4A6A] leading-relaxed">{careerMap.relevance}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {careerMap.pathways.map((pathway) => (
+                    <span
+                      key={pathway}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white border border-amber-200 text-amber-700"
+                    >
+                      {pathway}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-3 text-xs text-[#6B6580]">
+                  Verified on {careerMap.lastVerifiedAt} by {careerMap.verificationOwner}
+                </div>
+                <a
+                  href={careerMap.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800"
+                >
+                  Official source
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
               </div>
             )}
 

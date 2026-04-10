@@ -31,6 +31,11 @@ SUBJECT_MAP = {
     "Mathematics": "Math",
     "Math":        "Math",
     "Science":     "Science",
+    "Accountancy": "Accountancy",
+    "Business_Studies": "Business Studies",
+    "Economics": "Economics",
+    "English": "English Core",
+    "English_Core": "English Core",
 }
 
 def hf_url(path: str) -> str:

@@ -18,6 +18,14 @@ interface AdminOverviewResponse {
   highRiskExamSessions?: number;
 }
 
+interface AdminSessionMeResponse {
+  role: 'admin' | 'developer';
+  schoolId?: string;
+  schoolCode?: string;
+  schoolName?: string;
+  displayName?: string;
+}
+
 const CLASS10_SUBJECT_OPTIONS: Array<TeacherScope['subject']> = ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'];
 const CLASS12_SUBJECT_OPTIONS: Array<TeacherScope['subject']> = [
   'Physics',
@@ -38,6 +46,7 @@ export default function AdminPage() {
   const router = useRouter();
   const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
   const [overview, setOverview] = useState<AdminOverviewResponse | null>(null);
+  const [adminSession, setAdminSession] = useState<AdminSessionMeResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [newTeacher, setNewTeacher] = useState({
@@ -71,33 +80,44 @@ export default function AdminPage() {
     setLoading(true);
     setError('');
     try {
-      const [teachersRes, overviewRes, studentsRes] = await Promise.all([
+      const [teachersRes, overviewRes, studentsRes, sessionRes] = await Promise.all([
         fetch('/api/admin/teachers', { cache: 'no-store' }),
         fetch('/api/admin/overview', { cache: 'no-store' }),
         fetch('/api/admin/students', { cache: 'no-store' }),
+        fetch('/api/admin/session/me', { cache: 'no-store' }),
       ]);
       const teachersJson = await teachersRes.json().catch(() => null);
       const overviewJson = await overviewRes.json().catch(() => null);
       const studentsJson = await studentsRes.json().catch(() => null);
-      if (teachersRes.status === 401 || overviewRes.status === 401 || studentsRes.status === 401) {
+      const sessionJson = await sessionRes.json().catch(() => null);
+      const teachersPayload = teachersJson?.data ?? teachersJson;
+      const overviewPayload = overviewJson?.data ?? overviewJson;
+      const studentsPayload = studentsJson?.data ?? studentsJson;
+      const sessionPayload = sessionJson?.data ?? sessionJson;
+      if (teachersRes.status === 401 || overviewRes.status === 401 || studentsRes.status === 401 || sessionRes.status === 401) {
         router.replace('/admin/login');
         return;
       }
       if (!teachersRes.ok || !teachersJson) {
-        setError(teachersJson?.error || 'Failed to load teachers.');
+        setError(teachersJson?.message || teachersJson?.error || 'Failed to load teachers.');
         return;
       }
       if (!overviewRes.ok || !overviewJson) {
-        setError(overviewJson?.error || 'Failed to load overview.');
+        setError(overviewJson?.message || overviewJson?.error || 'Failed to load overview.');
         return;
       }
       if (!studentsRes.ok || !studentsJson) {
-        setError(studentsJson?.error || 'Failed to load students.');
+        setError(studentsJson?.message || studentsJson?.error || 'Failed to load students.');
         return;
       }
-      setTeachers(Array.isArray(teachersJson.teachers) ? teachersJson.teachers : []);
-      setOverview(overviewJson as AdminOverviewResponse);
-      setStudents(Array.isArray(studentsJson.students) ? studentsJson.students : []);
+      if (!sessionPayload || typeof (sessionPayload as Record<string, unknown>).role !== 'string') {
+        setError('Failed to load admin session.');
+        return;
+      }
+      setTeachers(Array.isArray(teachersPayload.teachers) ? teachersPayload.teachers : []);
+      setOverview(overviewPayload as AdminOverviewResponse);
+      setStudents(Array.isArray(studentsPayload.students) ? studentsPayload.students : []);
+      setAdminSession(sessionPayload as AdminSessionMeResponse);
     } catch {
       setError('Failed to load admin data.');
     } finally {
@@ -141,7 +161,7 @@ export default function AdminPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to create teacher.');
+        setError(data?.message || data?.error || 'Failed to create teacher.');
         return;
       }
       setNewTeacher({ phone: '', name: '', pin: '', classLevel: 12, subject: 'Physics', section: '' });
@@ -174,7 +194,7 @@ export default function AdminPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to create student.');
+        setError(data?.message || data?.error || 'Failed to create student.');
         return;
       }
       setNewStudent({ name: '', rollCode: '', rollNo: '', batch: '', classLevel: 12, section: '', pin: '', password: '' });
@@ -197,7 +217,7 @@ export default function AdminPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to update student.');
+        setError(data?.message || data?.error || 'Failed to update student.');
         return;
       }
       await load();
@@ -219,7 +239,7 @@ export default function AdminPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to update teacher.');
+        setError(data?.message || data?.error || 'Failed to update teacher.');
         return;
       }
       await load();
@@ -243,7 +263,7 @@ export default function AdminPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to reset PIN.');
+        setError(data?.message || data?.error || 'Failed to reset PIN.');
         return;
       }
       setPinReset((prev) => ({ ...prev, [teacherId]: '' }));
@@ -280,7 +300,7 @@ export default function AdminPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to add scope.');
+        setError(data?.message || data?.error || 'Failed to add scope.');
         return;
       }
       await load();
@@ -300,7 +320,7 @@ export default function AdminPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || 'Failed to remove scope.');
+        setError(data?.message || data?.error || 'Failed to remove scope.');
         return;
       }
       await load();
@@ -328,6 +348,8 @@ export default function AdminPage() {
     () => teachers.filter((teacher) => teacher.status === 'active').length,
     [teachers]
   );
+  const activeStudents = useMemo(() => students.filter((student) => student.status === 'active'), [students]);
+  const inactiveStudents = useMemo(() => students.filter((student) => student.status !== 'active'), [students]);
 
   async function logout() {
     await fetch('/api/admin/session/logout', {
@@ -348,7 +370,13 @@ export default function AdminPage() {
                 <Shield className="w-6 h-6 text-indigo-100" />
                 Admin Control Plane
               </h1>
-              <p className="text-indigo-100 text-sm mt-1.5">Manage teachers, scopes, and classroom intelligence metrics.</p>
+              <p className="text-indigo-100 text-sm mt-1.5">
+                {adminSession?.displayName ? `${adminSession.displayName} | ` : ''}
+                {adminSession?.schoolName || 'School dashboard'}{adminSession?.schoolCode ? ` | ${adminSession.schoolCode}` : ''}
+              </p>
+              <p className="text-indigo-100/90 text-xs mt-1">
+                Manage teachers, students, scopes, and school operations.
+              </p>
             </div>
             <button onClick={logout} className="text-xs font-semibold bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30">
               Logout
@@ -579,7 +607,7 @@ export default function AdminPage() {
           </div>
 
           <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pr-1">
-            {students.map((student) => (
+            {activeStudents.map((student) => (
               <div key={student.id} className="rounded-xl border border-[#E8E4DC] bg-[#FAF9F5] px-3 py-2 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-[#21213A]">{student.name}</p>
@@ -592,16 +620,39 @@ export default function AdminPage() {
                   </p>
                 </div>
                 <button onClick={() => toggleStudentStatus(student)} className="text-xs font-semibold border border-[#DCD7CC] bg-white px-3 py-1.5 rounded-lg hover:bg-[#F1EEE8]">
-                  {student.status === 'active' ? 'Deactivate' : 'Activate'}
+                  Mark Alumni
                 </button>
               </div>
             ))}
-            {students.length === 0 && <p className="text-sm text-[#6E6984]">No students yet.</p>}
+            {activeStudents.length === 0 && <p className="text-sm text-[#6E6984]">No active students.</p>}
+          </div>
+
+          <div className="mt-4">
+            <p className="text-xs font-semibold text-[#5F5A73] mb-2">Archived / Alumni ({inactiveStudents.length})</p>
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {inactiveStudents.map((student) => (
+                <div key={`inactive-${student.id}`} className="rounded-xl border border-[#E8E4DC] bg-white px-3 py-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-[#21213A]">{student.name}</p>
+                    <p className="text-xs text-[#6E6984]">
+                      {student.rollCode}
+                      {student.rollNo ? ` | Roll ${student.rollNo}` : ''}
+                      {student.batch ? ` | Batch ${student.batch}` : ''}
+                      {` | Class ${student.classLevel}`}
+                      {student.section ? ` | Section ${student.section}` : ''}
+                    </p>
+                  </div>
+                  <button onClick={() => toggleStudentStatus(student)} className="text-xs font-semibold border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-100">
+                    Re-activate
+                  </button>
+                </div>
+              ))}
+              {inactiveStudents.length === 0 && <p className="text-sm text-[#6E6984]">No archived students.</p>}
+            </div>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-4">
-          <InfoCard title="Top weak topics" items={(overview?.topWeakTopics ?? []).map((item) => `${item.topic} (${item.count})`)} />
+        <div className="grid lg:grid-cols-2 gap-4">
           <InfoCard title="Top chapters in assignments" items={(overview?.topChapters ?? []).map((item) => `${item.chapterId} (${item.count})`)} />
           <InfoCard title="Scopes by section" items={(overview?.scopesBySection ?? []).map((item) => `${item.section} (${item.count})`)} />
         </div>

@@ -1,9 +1,12 @@
-import { NextResponse } from 'next/server';
 import { addSubmission, getAssignmentPack } from '@/lib/teacher-admin-db';
 import { evaluateTeacherAssignmentSubmission } from '@/lib/teacher-assignment';
 import type { TeacherSubmissionAnswer } from '@/lib/teacher-types';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { logServerEvent } from '@/lib/observability';
+import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,33 +35,79 @@ function parseSubmissionBody(value: unknown): SubmissionRequestBody | null {
 }
 
 export async function POST(req: Request) {
+  const requestId = getRequestId(req);
+  const endpoint = '/api/teacher/submission';
+  const ip = getClientIp(req);
   try {
     await assertTeacherStorageWritable();
     const studentSession = await getStudentSessionFromRequestCookies();
     if (!studentSession) {
-      return NextResponse.json({ error: 'Student login required.' }, { status: 401 });
+      await recordAuditEvent({
+        requestId,
+        endpoint,
+        action: 'submission-denied',
+        statusCode: 401,
+        actorRole: 'system',
+        metadata: { ip },
+      });
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Student login required.',
+        status: 401,
+      });
     }
-    const body = await req.json().catch(() => null);
-    const parsed = parseSubmissionBody(body);
+    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      });
+    }
+    const parsed = parseSubmissionBody(bodyResult.value);
     if (!parsed) {
-      return NextResponse.json(
-        { error: 'Invalid request. Required: { packId, answers: [{ questionNo, answerText }] }' },
-        { status: 400 }
-      );
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-request-body',
+        message: 'Invalid request. Required: { packId, answers: [{ questionNo, answerText }] }',
+        status: 400,
+      });
     }
 
     const pack = await getAssignmentPack(parsed.packId);
     if (!pack || pack.status !== 'published') {
-      return NextResponse.json({ error: 'Assignment pack not found.' }, { status: 404 });
+      return errorJson({
+        requestId,
+        errorCode: 'assignment-pack-not-found',
+        message: 'Assignment pack not found.',
+        status: 404,
+      });
     }
     if (pack.classLevel !== studentSession.classLevel) {
-      return NextResponse.json({ error: 'This assignment is not available for your class.' }, { status: 403 });
+      return errorJson({
+        requestId,
+        errorCode: 'class-mismatch',
+        message: 'This assignment is not available for your class.',
+        status: 403,
+      });
     }
     if (pack.section && studentSession.section && pack.section !== studentSession.section) {
-      return NextResponse.json({ error: 'This assignment is section restricted.' }, { status: 403 });
+      return errorJson({
+        requestId,
+        errorCode: 'section-restricted',
+        message: 'This assignment is section restricted.',
+        status: 403,
+      });
     }
     if (pack.section && !studentSession.section) {
-      return NextResponse.json({ error: 'Student section is missing for this restricted assignment.' }, { status: 403 });
+      return errorJson({
+        requestId,
+        errorCode: 'missing-student-section',
+        message: 'Student section is missing for this restricted assignment.',
+        status: 403,
+      });
     }
 
     const result = evaluateTeacherAssignmentSubmission(pack, parsed.answers);
@@ -71,19 +120,56 @@ export async function POST(req: Request) {
       result,
     });
 
-    return NextResponse.json({
-      submissionId: submission.submissionId,
-      status: submission.status,
-      message: 'Submission recorded. Waiting for teacher review and result release.',
-      duplicate,
+    const committedAt = new Date().toISOString();
+    await recordAuditEvent({
+      requestId,
+      endpoint,
+      action: 'submission-recorded',
+      statusCode: 200,
+      actorRole: 'student',
+      metadata: {
+        studentId: studentSession.studentId,
+        submissionId: submission.submissionId,
+        packId: parsed.packId,
+        duplicate,
+        committedAt,
+      },
+    });
+    logServerEvent({
+      event: 'submission-recorded',
+      requestId,
+      endpoint,
+      role: 'student',
+      statusCode: 200,
+      details: { studentId: studentSession.studentId, packId: parsed.packId, duplicate },
+    });
+    return dataJson({
+      requestId,
+      data: {
+        submissionId: submission.submissionId,
+        status: submission.status,
+        message: 'Submission recorded. Waiting for teacher review and result release.',
+        duplicate,
+      },
+      meta: { committedAt },
     });
   } catch (error) {
     console.error('[teacher-submission:post] error', error);
     const message = error instanceof Error ? error.message : 'Failed to submit assignment.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
-    return NextResponse.json(
-      { error: message },
-      { status }
-    );
+    await recordAuditEvent({
+      requestId,
+      endpoint,
+      action: 'submission-failed',
+      statusCode: status,
+      actorRole: 'system',
+      metadata: { message: message.slice(0, 300), ip },
+    });
+    return errorJson({
+      requestId,
+      errorCode: 'submission-failed',
+      message,
+      status,
+    });
   }
 }

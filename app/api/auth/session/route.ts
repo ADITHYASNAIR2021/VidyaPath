@@ -16,8 +16,11 @@ export async function GET() {
     authenticated: true,
     schoolId: context.schoolId,
     schoolCode: context.schoolCode,
+    schoolName: context.schoolName,
     profileId: context.profileId,
+    displayName: context.displayName,
     authUserId: context.authUserId,
     availableRoles: context.availableRoles ?? [context.role],
+    sessionExpiry: context.expiresAt,
   });
 }

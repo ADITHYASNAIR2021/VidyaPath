@@ -9,5 +9,6 @@ export async function GET() {
   return NextResponse.json({
     teacher: session.teacher,
     effectiveScopes: session.effectiveScopes,
+    sessionExpiry: Date.now() + 8 * 60 * 60 * 1000,
   });
 }

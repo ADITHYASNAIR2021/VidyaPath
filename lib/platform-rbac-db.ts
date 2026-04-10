@@ -21,6 +21,7 @@ export interface PlatformRoleContext {
   authUserId: string;
   schoolId?: string;
   schoolCode?: string;
+  schoolName?: string;
   profileId?: string;
   displayName?: string;
   classLevel?: 10 | 12;
@@ -291,6 +292,7 @@ export async function resolveRoleContextByAuthUserId(authUserId: string): Promis
     authUserId: normalizedId,
     schoolId: chosen.school_id ?? undefined,
     schoolCode: school?.schoolCode,
+    schoolName: school?.schoolName,
     profileId: chosen.profile_id ?? undefined,
     availableRoles: Array.from(new Set(allRoles)),
   };
@@ -358,6 +360,7 @@ export async function findTeacherAuthIdentity(input: {
   const school = await getSchoolByCode(input.schoolCode);
   if (!school || school.status !== 'active') return null;
   const identifier = sanitize(input.identifier, 80);
+  const normalizedIdentifier = identifier.toUpperCase();
   if (!identifier) return null;
   const rows = await supabaseSelect<Array<{
     id: string;
@@ -373,11 +376,47 @@ export async function findTeacherAuthIdentity(input: {
   }).catch(() => []);
   const matched = rows.find((row) => {
     const phone = sanitize(row.phone || '', 80);
-    const staff = sanitize(row.staff_code || '', 80);
-    return phone === identifier || staff === identifier;
+    const staff = sanitize(row.staff_code || '', 80).toUpperCase();
+    return phone === identifier || staff === normalizedIdentifier;
   });
   if (!matched || !matched.auth_email) return null;
   return { authEmail: matched.auth_email, teacherId: matched.id, schoolId: school.id };
+}
+
+export async function findTeacherAuthIdentities(input: {
+  identifier: string;
+  schoolCode?: string;
+}): Promise<Array<{ authEmail: string; teacherId: string; schoolId: string }>> {
+  if (!isSupabaseServiceConfigured()) return [];
+  const identifier = sanitize(input.identifier, 80);
+  const normalizedIdentifier = identifier.toUpperCase();
+  if (!identifier) return [];
+  const school = input.schoolCode ? await getSchoolByCode(input.schoolCode) : null;
+  if (input.schoolCode && (!school || school.status !== 'active')) return [];
+  const filters: Array<{ column: string; value: string }> = [{ column: 'status', value: 'active' }];
+  if (school?.id) filters.push({ column: 'school_id', value: school.id });
+  const rows = await supabaseSelect<Array<{
+    id: string;
+    school_id: string | null;
+    auth_email: string | null;
+    phone: string;
+    staff_code: string | null;
+  }>[number]>(TABLES.teacherProfiles, {
+    select: 'id,school_id,auth_email,phone,staff_code',
+    filters,
+    limit: 3000,
+  }).catch(() => []);
+  return rows
+    .filter((row) => {
+      const phone = sanitize(row.phone || '', 80);
+      const staff = sanitize(row.staff_code || '', 80).toUpperCase();
+      return (phone === identifier || staff === normalizedIdentifier) && !!row.auth_email && !!row.school_id;
+    })
+    .map((row) => ({
+      authEmail: String(row.auth_email),
+      teacherId: row.id,
+      schoolId: String(row.school_id),
+    }));
 }
 
 export async function findStudentAuthIdentity(input: {
@@ -412,6 +451,42 @@ export async function findStudentAuthIdentity(input: {
   const row = rows[0];
   if (!row || !row.auth_email) return null;
   return { authEmail: row.auth_email, studentId: row.id, schoolId: school.id };
+}
+
+export async function findStudentAuthIdentitiesByRollNo(input: {
+  rollNo: string;
+  schoolCode?: string;
+  classLevel?: 10 | 12;
+  section?: string;
+  batch?: string;
+}): Promise<Array<{ authEmail: string; studentId: string; schoolId: string }>> {
+  if (!isSupabaseServiceConfigured()) return [];
+  const rollNo = sanitize(input.rollNo, 50).toUpperCase();
+  if (!rollNo) return [];
+  const school = input.schoolCode ? await getSchoolByCode(input.schoolCode) : null;
+  if (input.schoolCode && (!school || school.status !== 'active')) return [];
+  const filters: Array<{ column: string; value: string | number }> = [{ column: 'status', value: 'active' }];
+  if (school?.id) filters.push({ column: 'school_id', value: school.id });
+  if (input.classLevel === 10 || input.classLevel === 12) filters.push({ column: 'class_level', value: input.classLevel });
+  if (input.section) filters.push({ column: 'section', value: sanitize(input.section, 20) });
+  if (input.batch) filters.push({ column: 'batch', value: sanitize(input.batch, 30) });
+  filters.push({ column: 'roll_no', value: rollNo });
+  const rows = await supabaseSelect<Array<{
+    id: string;
+    school_id: string | null;
+    auth_email: string | null;
+  }>[number]>(TABLES.studentProfiles, {
+    select: 'id,school_id,auth_email',
+    filters,
+    limit: 200,
+  }).catch(() => []);
+  return rows
+    .filter((row) => !!row.auth_email && !!row.school_id)
+    .map((row) => ({
+      authEmail: String(row.auth_email),
+      studentId: row.id,
+      schoolId: String(row.school_id),
+    }));
 }
 
 export async function findAdminAuthIdentity(input: {

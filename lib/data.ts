@@ -49,7 +49,7 @@ export interface Paper {
 export interface EntranceExam {
   id: string;
   name: string;
-  stream: 'PCM' | 'PCB' | 'Both';
+  stream: 'PCM' | 'PCB' | 'Commerce' | 'Both';
   forColleges: string;
   eligibility: string;
   pattern: string;
@@ -62,7 +62,7 @@ export interface EntranceExam {
 export interface College {
   name: string;
   tier: 'Elite' | 'Top' | 'Good';
-  stream: 'PCM' | 'PCB' | 'Both';
+  stream: 'PCM' | 'PCB' | 'Commerce' | 'Both';
   url: string;
 }
 
@@ -2197,9 +2197,69 @@ export const ENTRANCE_EXAMS: EntranceExam[] = [
     eligibility: 'Class 12 pass or appearing. No minimum percentage required.',
     pattern: 'MCQ | Domain Subjects + General Test + Languages | Online CBT',
     dates: 'May–June | Results: July',
-    officialUrl: 'https://cuet.samarth.ac.in',
+    officialUrl: 'https://exams.nta.ac.in/CUET-UG',
     topColleges: ['Delhi University (DU)', 'JNU Delhi', 'BHU Varanasi', 'Jamia Millia Islamia', 'Hyderabad Central University'],
     prepTip: 'NCERT is largely sufficient. Focus on your domain subject + General Test (Quantitative Reasoning + English). No negative marking for un-attempted questions.',
+  },
+  {
+    id: 'ca-foundation',
+    name: 'CA Foundation (ICAI)',
+    stream: 'Commerce',
+    forColleges: 'Chartered Accountancy pathway through ICAI',
+    eligibility: 'Class 12 pass/appearing as per ICAI notifications.',
+    pattern: 'Accounting, Law, Quantitative Aptitude and Business Economics sections as notified by ICAI.',
+    dates: 'Registration and exam windows as published by ICAI BoS announcements.',
+    officialUrl: 'https://boslive.icai.org/announcement_details.php?id=484',
+    topColleges: ['ICAI CA Pathway', 'SRCC', 'Loyola College Chennai', 'Christ University'],
+    prepTip: 'Build accounting and business law basics in Class 11–12, then use ICAI sample resources and timed mock practice.',
+  },
+  {
+    id: 'cseet',
+    name: 'CSEET (ICSI)',
+    stream: 'Commerce',
+    forColleges: 'Company Secretary pathway through ICSI',
+    eligibility: 'Class 12 pass/appearing as per ICSI eligibility norms.',
+    pattern: 'Business Communication, Legal Aptitude, Economics/Business Environment and Current Affairs as per ICSI structure.',
+    dates: 'Session-wise windows are published by ICSI (including updates effective June 2026).',
+    officialUrl: 'https://www.icsi.edu/',
+    topColleges: ['ICSI CS Pathway', 'St. Xavier\'s College Mumbai', 'NMIMS Mumbai'],
+    prepTip: 'Prioritize legal aptitude and business communication along with weekly current affairs revision.',
+  },
+  {
+    id: 'cma-foundation',
+    name: 'CMA Foundation (ICMAI)',
+    stream: 'Commerce',
+    forColleges: 'Cost and Management Accounting pathway through ICMAI',
+    eligibility: 'Class 12 pass/appearing as per ICMAI admission norms.',
+    pattern: 'Fundamentals of Economics and Management, Accounting, Laws and Ethics sections as per ICMAI pattern.',
+    dates: 'Term-wise schedules published by ICMAI.',
+    officialUrl: 'https://icmai.in/studentswebsite/mgmtaccexam.php',
+    topColleges: ['ICMAI CMA Pathway', 'Narsee Monjee College of Commerce', 'Symbiosis Pune'],
+    prepTip: 'Strengthen accountancy and economics fundamentals before moving into CMA pattern tests.',
+  },
+  {
+    id: 'ipmat-indore',
+    name: 'IPM AT (IIM Indore)',
+    stream: 'Commerce',
+    forColleges: 'IIM Indore IPM and allied management tracks',
+    eligibility: 'As per IIM Indore IPM admissions criteria for the current cycle.',
+    pattern: 'Aptitude test with quantitative and verbal sections plus admission process as notified by IIM Indore.',
+    dates: 'Application and exam dates announced on IIM Indore admissions page.',
+    officialUrl: 'https://iimidr.ac.in/programmes/academic-programmes/five-year-integrated-programme-in-management-ipm/ipm-admissions-details/',
+    topColleges: ['IIM Indore (IPM)', 'IIM Ranchi (IPM route)', 'NALSAR IPM'],
+    prepTip: 'Start aptitude prep in Class 11 with arithmetic, algebra, reading comprehension, and timed sectional mocks.',
+  },
+  {
+    id: 'ipm-ranchi',
+    name: 'IIM Ranchi IPM',
+    stream: 'Commerce',
+    forColleges: 'IIM Ranchi integrated management program route',
+    eligibility: 'As published by IIM Ranchi admissions for the relevant cycle.',
+    pattern: 'Institute-announced selection process aligned with IPM admissions.',
+    dates: 'Annual application windows are posted on IIM Ranchi official admissions portal.',
+    officialUrl: 'https://app.iimranchi.ac.in/admission/ipm.html',
+    topColleges: ['IIM Ranchi (IPM)', 'IIM Indore (IPM route)', 'BBA Finance pathways'],
+    prepTip: 'Track official updates early and keep aptitude preparation aligned with IPM-level quantitative and verbal demands.',
   },
   {
     id: 'bitsat',
@@ -2236,6 +2296,11 @@ export const TOP_COLLEGES: College[] = [
   { name: 'Maulana Azad GMC Delhi', tier: 'Top', stream: 'PCB', url: 'https://www.mamc.ac.in' },
   { name: 'Lady Hardinge Medical', tier: 'Top', stream: 'PCB', url: 'https://lhmc-hosp.gov.in' },
   { name: 'Kasturba Medical College', tier: 'Good', stream: 'PCB', url: 'https://manipal.edu/kmc-manipal.html' },
+  { name: 'Shri Ram College of Commerce (SRCC)', tier: 'Elite', stream: 'Commerce', url: 'https://www.srcc.edu' },
+  { name: 'Hindu College (Commerce/Economics)', tier: 'Top', stream: 'Commerce', url: 'https://hinducollege.ac.in' },
+  { name: 'Hansraj College', tier: 'Top', stream: 'Commerce', url: 'https://www.hansrajcollege.ac.in' },
+  { name: 'Loyola College Chennai', tier: 'Good', stream: 'Commerce', url: 'https://www.loyolacollege.edu' },
+  { name: 'Christ University', tier: 'Good', stream: 'Commerce', url: 'https://christuniversity.in' },
 ];
 
 // ============================================================
@@ -2288,5 +2353,52 @@ export const ROADMAP_PCB = [
   {
     stage: 'Class 12 — Boards + NEET', title: 'Final Sprint',
     steps: ['NEET is in May — board and NEET prep can run in parallel', 'Biology: 360/720 marks — perfect your MCQ accuracy here', 'Attempt 1 full NEET mock per week minimum, analyse fully', 'Register for NEET before March deadline', 'NCERT is sufficient for 90%+ of NEET questions — trust it'],
+  },
+];
+
+export const ROADMAP_COMMERCE = [
+  {
+    stage: 'Class 10',
+    title: 'Build Core Numeracy and Business Awareness',
+    steps: [
+      'Strengthen math fundamentals and reading comprehension for future aptitude exams.',
+      'Build a habit of reading business and economy news from reliable sources.',
+      'Explore commerce subjects early: Accountancy, Business Studies, Economics.',
+      'Discuss Class 11 subject combinations with school mentors and parents.',
+      'Keep board fundamentals strong because they affect all later pathways.',
+    ],
+  },
+  {
+    stage: 'Class 11',
+    title: 'Create Commerce Base for CA/CMA/CS/IPM',
+    steps: [
+      'Treat Accountancy and Economics as daily practice subjects, not last-minute theory.',
+      'Start basic aptitude prep (quantitative + verbal) for IPM and management routes.',
+      'Track official notifications for ICAI, ICSI, ICMAI, and CUET every month.',
+      'Build summary notes chapter-wise for journal entries, partnership basics, and macro concepts.',
+      'Attempt chapter-level mock tests with timed practice from Term 2 onward.',
+    ],
+  },
+  {
+    stage: 'Class 12 - First Half',
+    title: 'Finish Syllabus and Map Chapters to Career Paths',
+    steps: [
+      'Complete core board syllabus by October with weekly revision loops.',
+      'For CA/CMA/CS tracks, prioritize accounting standards, law basics, and economics concepts.',
+      'For CUET/IPM tracks, run regular aptitude and domain mocks.',
+      'Use official exam websites only for eligibility and schedule updates.',
+      'Maintain an error log for recurring mistakes in accounting formats and numericals.',
+    ],
+  },
+  {
+    stage: 'Class 12 - Boards and Entrance',
+    title: 'Execution and Application Cycle',
+    steps: [
+      'Run board preparation and entrance preparation in parallel using a fixed weekly timetable.',
+      'Complete full-length mocks for CUET/IPM and targeted section tests for CA/CMA/CS.',
+      'Track registration deadlines from official portals and keep document checklist ready.',
+      'Finalize pathway based on exam outcomes: CA, CMA, CS, BCom, BBA Finance, or IPM.',
+      'After results, execute counseling/admission steps quickly to avoid missed windows.',
+    ],
   },
 ];

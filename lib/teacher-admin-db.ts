@@ -553,6 +553,40 @@ export async function authenticateTeacher(phone: string, pin: string, schoolId?:
   return getTeacherSessionById(row.id, schoolId);
 }
 
+export async function authenticateTeacherByIdentifier(
+  identifier: string,
+  pin: string,
+  schoolId?: string
+): Promise<{ session: TeacherSession | null; ambiguous?: boolean }> {
+  if (!isSupabaseServiceConfigured()) return { session: null };
+  const cleanIdentifier = sanitizeText(identifier, 80);
+  if (!cleanIdentifier || !pin) return { session: null };
+  const normalizedPhone = normalizePhone(cleanIdentifier);
+  const normalizedStaff = normalizeRosterToken(cleanIdentifier, 50);
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'status', value: 'active' },
+  ];
+  if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
+  const rows = await supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
+    select: '*',
+    filters,
+    limit: 5000,
+  }).catch(() => []);
+  const candidates = rows.filter((row) => {
+    const phoneMatch = normalizePhone(row.phone || '') === normalizedPhone;
+    const staffMatch = normalizeRosterToken(row.staff_code || '', 50) === normalizedStaff;
+    return phoneMatch || (!!normalizedStaff && staffMatch);
+  });
+  if (candidates.length === 0) return { session: null };
+  const pinMatched = candidates.filter((row) => verifyPin(pin, row.pin_hash));
+  if (pinMatched.length === 0) return { session: null };
+  if (pinMatched.length > 1) return { session: null, ambiguous: true };
+  const matched = pinMatched[0];
+  return {
+    session: await getTeacherSessionById(matched.id, matched.school_id ?? schoolId),
+  };
+}
+
 export async function listStudents(filters?: {
   schoolId?: string;
   classLevel?: 10 | 12;
@@ -609,6 +643,32 @@ export async function getStudentByRollCode(rollCode: string, schoolId?: string):
     limit: 1,
   }).catch(() => []);
   return rows[0] ?? null;
+}
+
+export async function findStudentsByRollNo(input: {
+  rollNo: string;
+  schoolId?: string;
+  classLevel?: 10 | 12;
+  section?: string;
+  batch?: string;
+}): Promise<StudentProfileRow[]> {
+  if (!isSupabaseServiceConfigured()) return [];
+  const rollNo = normalizeRosterToken(input.rollNo, 50);
+  if (!rollNo) return [];
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'roll_no', value: rollNo },
+    { column: 'status', value: 'active' },
+  ];
+  if (input.schoolId) filters.push({ column: 'school_id', value: sanitizeText(input.schoolId, 80) });
+  if (input.classLevel === 10 || input.classLevel === 12) filters.push({ column: 'class_level', value: input.classLevel });
+  if (typeof input.section === 'string' && input.section.trim().length > 0) filters.push({ column: 'section', value: sanitizeText(input.section, 40) });
+  if (typeof input.batch === 'string' && input.batch.trim().length > 0) filters.push({ column: 'batch', value: sanitizeText(input.batch, 40) });
+  const rows = await supabaseSelect<StudentProfileRow>(TABLES.students, {
+    select: '*',
+    filters,
+    limit: 2000,
+  }).catch(() => []);
+  return rows.filter((row) => row.status === 'active');
 }
 
 export async function createStudent(input: {
@@ -774,6 +834,42 @@ export async function authenticateStudent(rollCode: string, pin?: string, school
     rollCode: row.roll_code,
     classLevel: row.class_level,
     section: row.section ?? undefined,
+  };
+}
+
+export async function authenticateStudentByRollNo(input: {
+  rollNo: string;
+  pin?: string;
+  schoolId?: string;
+  classLevel?: 10 | 12;
+  section?: string;
+  batch?: string;
+}): Promise<{ session: StudentSession | null; ambiguous?: boolean }> {
+  const rows = await findStudentsByRollNo({
+    rollNo: input.rollNo,
+    schoolId: input.schoolId,
+    classLevel: input.classLevel,
+    section: input.section,
+    batch: input.batch,
+  });
+  if (rows.length === 0) return { session: null };
+  const pin = typeof input.pin === 'string' ? input.pin.trim() : '';
+  const matched = rows.filter((row) => {
+    if (!row.pin_hash) return true;
+    return !!pin && verifyPin(pin, row.pin_hash);
+  });
+  if (matched.length === 0) return { session: null };
+  if (matched.length > 1) return { session: null, ambiguous: true };
+  const row = matched[0];
+  if (row.class_level !== 10 && row.class_level !== 12) return { session: null };
+  return {
+    session: {
+      studentId: row.id,
+      studentName: row.name,
+      rollCode: row.roll_code,
+      classLevel: row.class_level,
+      section: row.section ?? undefined,
+    },
   };
 }
 

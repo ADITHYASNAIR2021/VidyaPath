@@ -84,6 +84,10 @@ function normalizeSubject(classLevel: number, subject: string): string {
   if (classLevel === 10 && (s === 'physics' || s === 'chemistry' || s === 'biology')) {
     return 'Science';
   }
+  if (s.includes('account')) return 'Accountancy';
+  if (s.includes('business')) return 'Business Studies';
+  if (s.includes('econom')) return 'Economics';
+  if (s.includes('english')) return 'English Core';
   if (s.includes('phy')) return 'Physics';
   if (s.includes('chem')) return 'Chemistry';
   if (s.includes('bio')) return 'Biology';

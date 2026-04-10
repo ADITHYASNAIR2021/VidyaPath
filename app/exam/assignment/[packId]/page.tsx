@@ -49,6 +49,19 @@ type ViolationEvent = {
   detail?: string;
 };
 
+function unwrapApiPayload<T>(payload: unknown): T {
+  if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) {
+    return (payload as { data: T }).data;
+  }
+  return payload as T;
+}
+
+function extractApiError(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const raw = payload as Record<string, unknown>;
+  return String(raw.message || raw.error || fallback);
+}
+
 export default function ProctoredExamPage() {
   const params = useParams<{ packId: string }>();
   const packId = String(params.packId ?? '').trim();
@@ -73,12 +86,13 @@ export default function ProctoredExamPage() {
     async function loadStudentSession() {
       try {
         const response = await fetch('/api/student/session/me', { cache: 'no-store' });
-        const data = await response.json().catch(() => null);
+        const body = await response.json().catch(() => null);
+        const data = unwrapApiPayload<StudentSessionPayload | null>(body);
         if (!response.ok || !data) {
           setStudentSession(null);
           return;
         }
-        setStudentSession(data as StudentSessionPayload);
+        setStudentSession(data);
       } catch {
         setStudentSession(null);
       }
@@ -91,13 +105,14 @@ export default function ProctoredExamPage() {
         const response = await fetch(`/api/teacher/assignment-pack?id=${encodeURIComponent(packId)}`, {
           cache: 'no-store',
         });
-        const data = await response.json().catch(() => null);
+        const body = await response.json().catch(() => null);
+        const data = unwrapApiPayload<TeacherAssignmentPack | null>(body);
         if (!response.ok || !data) {
-          setError(data?.error || 'Assignment pack not found.');
+          setError(extractApiError(body, 'Assignment pack not found.'));
           setPack(null);
           return;
         }
-        setPack(data as TeacherAssignmentPack);
+        setPack(data);
       } catch {
         setError('Failed to load assignment pack.');
       } finally {
@@ -171,7 +186,8 @@ export default function ProctoredExamPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId, events }),
         });
-        const data = (await response.json().catch(() => null)) as HeartbeatResponse | null;
+        const body = await response.json().catch(() => null);
+        const data = unwrapApiPayload<HeartbeatResponse | null>(body);
         if (response.ok && data?.integritySummary) {
           setViolationCount(data.integritySummary.totalViolations);
           setRiskLevel(data.integritySummary.riskLevel);
@@ -218,9 +234,10 @@ export default function ProctoredExamPage() {
           packId: pack.packId,
         }),
       });
-      const data = (await response.json().catch(() => null)) as ExamSessionResponse | null;
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<ExamSessionResponse | null>(body);
       if (!response.ok || !data?.session?.sessionId) {
-        setError((data as { error?: string } | null)?.error || 'Failed to start exam session.');
+        setError(extractApiError(body, 'Failed to start exam session.'));
         return;
       }
       setSessionId(data.session.sessionId);
@@ -255,9 +272,10 @@ export default function ProctoredExamPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, answers }),
       });
-      const data = (await response.json().catch(() => null)) as ExamSubmitResponse | null;
+      const body = await response.json().catch(() => null);
+      const data = unwrapApiPayload<ExamSubmitResponse | null>(body);
       if (!response.ok || !data) {
-        setError((data as { error?: string } | null)?.error || 'Submission failed.');
+        setError(extractApiError(body, 'Submission failed.'));
         return;
       }
       setResult(data);
