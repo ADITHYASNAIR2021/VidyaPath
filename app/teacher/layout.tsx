@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
 import Sidebar from '@/components/Sidebar';
-import FloatingAIButton from '@/components/FloatingAIButton';
 import { TEACHER_SESSION_COOKIE, parseTeacherSession } from '@/lib/auth/session';
 import { getTeacherById } from '@/lib/teacher-admin-db';
 
@@ -26,7 +25,6 @@ export default async function TeacherLayout({ children }: { children: React.Reac
       <main className="flex-1 md:ml-60 transition-all duration-200 min-h-screen">
         {children}
       </main>
-      <FloatingAIButton />
     </div>
   );
 }

@@ -268,7 +268,7 @@ export async function middleware(request: NextRequest) {
     if (!hasTeacherSession) return redirectToLogin(request, '/teacher/login');
   }
   if (pathname.startsWith('/student') && pathname !== '/student/login') {
-    if (!hasStudentSession && !hasAdminSession) {
+    if (!hasStudentSession) {
       const url = request.nextUrl.clone();
       url.pathname = '/student/login';
       url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
@@ -295,7 +295,7 @@ export async function middleware(request: NextRequest) {
     }
   }
   if (pathname.startsWith('/dashboard') || pathname.startsWith('/bookmarks')) {
-    if (!hasStudentSession && !hasAdminSession && !hasDeveloperLikeSession) {
+    if (!hasStudentSession) {
       const url = request.nextUrl.clone();
       url.pathname = '/student/login';
       url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);

@@ -1,4 +1,4 @@
-import { clearAdminSessionCookie, clearStudentSessionCookie, clearTeacherSessionCookie } from '@/lib/auth/session';
+import { clearAllRoleSessionCookies } from '@/lib/auth/session';
 import { clearSupabaseSessionCookies } from '@/lib/auth/supabase-auth';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 
@@ -10,9 +10,7 @@ export async function POST(req: Request) {
       data: { loggedOut: true },
       meta: { committedAt: new Date().toISOString() },
     });
-    clearAdminSessionCookie(response);
-    clearTeacherSessionCookie(response);
-    clearStudentSessionCookie(response);
+    clearAllRoleSessionCookies(response);
     clearSupabaseSessionCookies(response);
     return response;
   } catch (error) {

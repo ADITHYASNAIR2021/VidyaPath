@@ -6,6 +6,7 @@ import MobileBottomNav from '@/components/MobileBottomNav';
 import FloatingAIButton from '@/components/FloatingAIButton';
 import PrivacyAnalytics from '@/components/PrivacyAnalytics';
 import SiteFooter from '@/components/SiteFooter';
+import AppMainShell from '@/components/AppMainShell';
 
 const fraunces = Fraunces({
   subsets: ['latin'],
@@ -114,7 +115,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </a>
         <PrivacyAnalytics />
         <Navbar />
-        <main id="main-content" tabIndex={-1}>{children}</main>
+        <AppMainShell>{children}</AppMainShell>
         <SiteFooter />
         <MobileBottomNav />
         <FloatingAIButton />

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Activity, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Activity, ChevronLeft, ChevronRight, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 
 type EventType = 'exam' | 'assignment_due' | 'holiday' | 'meeting' | 'other';
@@ -34,8 +34,12 @@ const TYPE_COLORS: Record<EventType, string> = {
   other: 'bg-gray-50 text-gray-700 border-gray-200',
 };
 
-function todayIso() {
+function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function toMonthKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
 export default function AdminEventsPage() {
@@ -44,6 +48,8 @@ export default function AdminEventsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string>('');
+  const [activeMonth, setActiveMonth] = useState(toMonthKey(new Date()));
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -59,7 +65,7 @@ export default function AdminEventsPage() {
     try {
       const [sessionRes, eventsRes] = await Promise.all([
         fetch('/api/admin/session/me', { cache: 'no-store' }),
-        fetch('/api/admin/events?limit=400', { cache: 'no-store' }),
+        fetch('/api/admin/events?limit=500', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
         router.replace('/admin/login');
@@ -85,7 +91,41 @@ export default function AdminEventsPage() {
     void loadEvents();
   }, []);
 
-  const orderedEvents = useMemo(() => [...events].sort((a, b) => a.eventDate.localeCompare(b.eventDate)), [events]);
+  const monthDate = useMemo(() => {
+    const [year, month] = activeMonth.split('-').map((part) => Number(part));
+    return new Date(year, (month || 1) - 1, 1);
+  }, [activeMonth]);
+
+  const sortedEvents = useMemo(
+    () => [...events].sort((a, b) => a.eventDate.localeCompare(b.eventDate)),
+    [events]
+  );
+
+  const eventsByDate = useMemo(() => {
+    const map = new Map<string, EventItem[]>();
+    for (const event of events) {
+      const list = map.get(event.eventDate) ?? [];
+      list.push(event);
+      map.set(event.eventDate, list);
+    }
+    return map;
+  }, [events]);
+
+  const monthCells = useMemo(() => {
+    const year = monthDate.getFullYear();
+    const month = monthDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const firstWeekday = (firstDay.getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells: Array<{ iso?: string; day?: number }> = [];
+    for (let i = 0; i < firstWeekday; i += 1) cells.push({});
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      cells.push({ iso, day });
+    }
+    while (cells.length % 7 !== 0) cells.push({});
+    return cells;
+  }, [monthDate]);
 
   async function addEvent() {
     if (!form.title.trim() || !form.eventDate) return;
@@ -126,28 +166,35 @@ export default function AdminEventsPage() {
   }
 
   async function removeEvent(id: string) {
+    setError('');
     try {
       const response = await fetch(`/api/admin/events?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const body = await response.json().catch(() => null);
       if (!response.ok) {
-        const body = await response.json().catch(() => null);
         setError(body?.message || 'Failed to delete event.');
         return;
       }
       setEvents((prev) => prev.filter((event) => event.id !== id));
+      setDeleteConfirmId('');
     } catch {
       setError('Failed to delete event.');
     }
   }
 
+  function shiftMonth(offset: number) {
+    const next = new Date(monthDate.getFullYear(), monthDate.getMonth() + offset, 1);
+    setActiveMonth(toMonthKey(next));
+  }
+
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="mx-auto max-w-6xl p-6">
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <Activity className="h-6 w-6 text-indigo-600" />
             Events
           </h1>
-          <p className="mt-0.5 text-sm text-gray-500">Create and manage school-level events and dates.</p>
+          <p className="mt-0.5 text-sm text-gray-500">Manage school-wide and class-targeted events with a monthly calendar view.</p>
         </div>
         <button
           onClick={() => void loadEvents()}
@@ -224,24 +271,79 @@ export default function AdminEventsPage() {
         </div>
       </div>
 
+      <div className="mb-6 rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm">
+        <div className="mb-4 flex items-center justify-between">
+          <button
+            onClick={() => shiftMonth(-1)}
+            className="rounded-lg border border-gray-200 px-2 py-1 text-gray-600 hover:bg-gray-50"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <h3 className="font-semibold text-gray-800">
+            {monthDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+          </h3>
+          <button
+            onClick={() => shiftMonth(1)}
+            className="rounded-lg border border-gray-200 px-2 py-1 text-gray-600 hover:bg-gray-50"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-gray-500 mb-2">
+          <div>Mon</div>
+          <div>Tue</div>
+          <div>Wed</div>
+          <div>Thu</div>
+          <div>Fri</div>
+          <div>Sat</div>
+          <div>Sun</div>
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {monthCells.map((cell, index) => {
+            const dayEvents = cell.iso ? (eventsByDate.get(cell.iso) ?? []) : [];
+            return (
+              <div
+                key={`${cell.iso || 'empty'}-${index}`}
+                className={clsx(
+                  'min-h-[72px] rounded-lg border p-1.5 text-xs',
+                  cell.iso ? 'border-[#E8E4DC] bg-white' : 'border-transparent bg-transparent'
+                )}
+              >
+                {cell.day ? (
+                  <>
+                    <p className="font-semibold text-gray-600">{cell.day}</p>
+                    <div className="mt-1 space-y-1">
+                      {dayEvents.slice(0, 2).map((event) => (
+                        <p key={event.id} className="truncate rounded bg-indigo-50 px-1 py-0.5 text-[10px] text-indigo-700">
+                          {event.title}
+                        </p>
+                      ))}
+                      {dayEvents.length > 2 && <p className="text-[10px] text-gray-400">+{dayEvents.length - 2} more</p>}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {loading ? (
         <div className="flex h-40 items-center justify-center text-gray-400">
           <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
           Loading events...
         </div>
-      ) : orderedEvents.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-gray-300 p-10 text-center text-gray-500">
-          No events found.
-        </div>
+      ) : sortedEvents.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-gray-300 p-10 text-center text-gray-500">No events found.</div>
       ) : (
         <div className="space-y-3">
-          {orderedEvents.map((event) => (
+          {sortedEvents.map((event) => (
             <div key={event.id} className="rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-gray-900">{event.title}</p>
                   <p className="mt-1 text-xs text-gray-500">
-                    {new Date(event.eventDate).toLocaleDateString()}
+                    {new Date(event.eventDate).toLocaleDateString('en-IN')}
                     {event.classLevel ? ` | Class ${event.classLevel}` : ''}
                     {event.section ? ` | Section ${event.section}` : ''}
                   </p>
@@ -251,14 +353,31 @@ export default function AdminEventsPage() {
                   <span className={clsx('rounded-full border px-2 py-1 text-[11px] font-semibold capitalize', TYPE_COLORS[event.type])}>
                     {event.type.replace('_', ' ')}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => void removeEvent(event.id)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Delete
-                  </button>
+                  {deleteConfirmId === event.id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => void removeEvent(event.id)}
+                        className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId('')}
+                        className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmId(event.id)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

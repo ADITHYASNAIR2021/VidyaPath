@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { StudentProfile } from '@/lib/teacher-types';
-import { GraduationCap, Plus, RefreshCw, Search } from 'lucide-react';
+import { GraduationCap, Plus, RefreshCw, Search, KeyRound } from 'lucide-react';
 
 function unwrap<T>(payload: unknown): T {
   if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) return (payload as { data: T }).data;
@@ -22,6 +22,12 @@ export default function AdminStudentsPage() {
     name: '', rollCode: '', rollNo: '', batch: '',
     classLevel: 12 as 10 | 12, section: '', pin: '',
   });
+
+  // PIN reset state
+  const [resetPinFor, setResetPinFor] = useState<string | null>(null);
+  const [newPin, setNewPin] = useState('');
+  const [pinSaving, setPinSaving] = useState(false);
+  const [pinSuccess, setPinSuccess] = useState('');
 
   async function load() {
     setLoading(true);
@@ -66,6 +72,39 @@ export default function AdminStudentsPage() {
     }
   }
 
+  async function savePin(studentId: string) {
+    if (!newPin.trim() || !/^\d{4,8}$/.test(newPin)) { setError('PIN must be 4–8 digits.'); return; }
+    setPinSaving(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/admin/students/${studentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: newPin }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) { setError(body?.message ?? 'Failed to reset PIN.'); return; }
+      setPinSuccess('PIN updated successfully.');
+      setResetPinFor(null);
+      setNewPin('');
+      setTimeout(() => setPinSuccess(''), 3000);
+    } finally {
+      setPinSaving(false);
+    }
+  }
+
+  function openPinReset(studentId: string) {
+    setResetPinFor(studentId);
+    setNewPin('');
+    setError('');
+  }
+
+  function cancelPinReset() {
+    setResetPinFor(null);
+    setNewPin('');
+    setError('');
+  }
+
   const filtered = students.filter((s) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -85,6 +124,12 @@ export default function AdminStudentsPage() {
           <Plus className="w-4 h-4" /> Add Student
         </button>
       </div>
+
+      {pinSuccess && (
+        <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
+          <span className="font-medium">{pinSuccess}</span>
+        </div>
+      )}
 
       {error && <div className="mb-4 rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
@@ -171,24 +216,72 @@ export default function AdminStudentsPage() {
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 hidden md:table-cell">Class</th>
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 hidden lg:table-cell">Batch</th>
                 <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500">Status</th>
+                <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((s) => (
-                <tr key={s.id} className="border-b border-[#E8E4DC] last:border-0 hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-700 flex-shrink-0">{(s.name ?? 'S')[0]}</div>
-                      <span className="text-sm font-medium text-gray-800">{s.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">{s.rollCode}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">Class {s.classLevel}{s.section ? ` §${s.section}` : ''}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500 hidden lg:table-cell">{s.batch ?? '—'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">Active</span>
-                  </td>
-                </tr>
+                <>
+                  <tr key={s.id} className="border-b border-[#E8E4DC] last:border-0 hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-700 flex-shrink-0">{(s.name ?? 'S')[0]}</div>
+                        <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">{s.rollCode}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">Class {s.classLevel}{s.section ? ` §${s.section}` : ''}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500 hidden lg:table-cell">{s.batch ?? '—'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">Active</span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => resetPinFor === s.id ? cancelPinReset() : openPinReset(s.id)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                      >
+                        <KeyRound className="w-3 h-3" />
+                        {resetPinFor === s.id ? 'Cancel' : 'Reset PIN'}
+                      </button>
+                    </td>
+                  </tr>
+                  {resetPinFor === s.id && (
+                    <tr key={`${s.id}-pin`} className="border-b border-[#E8E4DC] bg-amber-50">
+                      <td colSpan={6} className="px-4 py-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <KeyRound className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                            <span className="text-sm font-medium text-amber-800">Reset PIN for <span className="font-semibold">{s.name}</span></span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-1 min-w-[260px]">
+                            <input
+                              type="password"
+                              value={newPin}
+                              onChange={(e) => setNewPin(e.target.value)}
+                              placeholder="New 4–8 digit PIN"
+                              maxLength={8}
+                              className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                              onKeyDown={(e) => { if (e.key === 'Enter') void savePin(s.id); }}
+                            />
+                            <button
+                              onClick={() => void savePin(s.id)}
+                              disabled={pinSaving || !newPin.trim()}
+                              className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                            >
+                              {pinSaving ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              onClick={cancelPinReset}
+                              className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>

@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
 import Sidebar from '@/components/Sidebar';
-import FloatingAIButton from '@/components/FloatingAIButton';
 import { DEVELOPER_SESSION_COOKIE, parseDeveloperSession } from '@/lib/auth/session';
 
 export default async function DeveloperLayout({ children }: { children: React.ReactNode }) {
@@ -17,7 +16,6 @@ export default async function DeveloperLayout({ children }: { children: React.Re
       <main className="flex-1 md:ml-60 transition-all duration-200 min-h-screen">
         {children}
       </main>
-      <FloatingAIButton />
     </div>
   );
 }

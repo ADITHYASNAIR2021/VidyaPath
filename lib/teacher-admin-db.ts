@@ -281,7 +281,9 @@ function sanitizeText(value: string, max = 240): string {
 }
 
 function normalizePhone(phone: string): string {
-  return phone.replace(/[^\d+]/g, '').trim();
+  const digits = phone.replace(/[^\d]/g, '').trim();
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
 }
 
 function normalizeSubmissionCode(value: string): string {
@@ -305,6 +307,17 @@ function normalizeAuthLocalPart(value: string, max = 40): string {
   return cleaned || randomUUID().slice(0, 12);
 }
 
+function normalizeSchoolCodeForId(value: string): string {
+  const compact = normalizeRosterToken(value, 12).replace(/[_-]/g, '').slice(0, 6);
+  return compact || 'SCH';
+}
+
+function normalizePhoneForIdentifier(value: string): string {
+  const digits = normalizePhone(value).replace(/\D/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
+}
+
 async function getSchoolCodeById(schoolId: string): Promise<string | null> {
   if (!isSupabaseServiceConfigured()) return null;
   const cleanSchoolId = sanitizeText(schoolId, 80);
@@ -317,6 +330,33 @@ async function getSchoolCodeById(schoolId: string): Promise<string | null> {
   const schoolCode = rows[0]?.school_code;
   if (typeof schoolCode !== 'string' || schoolCode.trim().length === 0) return null;
   return normalizeAuthLocalPart(schoolCode, 30);
+}
+
+async function getSchoolCodeForIdentifiers(schoolId: string): Promise<string | null> {
+  if (!isSupabaseServiceConfigured()) return null;
+  const cleanSchoolId = sanitizeText(schoolId, 80);
+  if (!cleanSchoolId) return null;
+  const rows = await supabaseSelect<SchoolRow>(TABLES.schools, {
+    select: 'id,school_code',
+    filters: [{ column: 'id', value: cleanSchoolId }],
+    limit: 1,
+  }).catch(() => []);
+  const schoolCode = rows[0]?.school_code;
+  if (typeof schoolCode !== 'string' || schoolCode.trim().length === 0) return null;
+  return normalizeSchoolCodeForId(schoolCode);
+}
+
+async function resolveTeacherStaffCode(input: {
+  schoolId: string;
+  phone: string;
+}): Promise<string> {
+  const schoolId = sanitizeText(input.schoolId, 80);
+  const schoolCode = (await getSchoolCodeForIdentifiers(schoolId)) || normalizeSchoolCodeForId(schoolId);
+  const phoneToken = normalizePhoneForIdentifier(input.phone);
+  if (phoneToken.length !== 10) {
+    throw new Error('Teacher phone must include a valid 10-digit mobile number.');
+  }
+  return normalizeRosterToken(`${schoolCode}${phoneToken}`, 50);
 }
 
 function buildProvisionedAuthEmail(input: {
@@ -969,20 +1009,38 @@ export async function createTeacher(input: {
   const schoolId = input.schoolId ? sanitizeText(input.schoolId, 80) : '';
   const phone = normalizePhone(input.phone);
   const name = sanitizeText(input.name, 120);
-  const staffCode = input.staffCode ? normalizeRosterToken(input.staffCode, 50) : null;
   if (!schoolId) throw new Error('schoolId is required to create teacher.');
   if (!phone || !name) throw new Error('Valid phone and name are required.');
+  const staffCode = await resolveTeacherStaffCode({
+    schoolId,
+    phone,
+  });
+  const duplicateTeacher = await supabaseSelect<Pick<TeacherProfileRow, 'id'>>(TABLES.profiles, {
+    select: 'id',
+    filters: [
+      { column: 'school_id', value: schoolId },
+      { column: 'staff_code', value: staffCode },
+    ],
+    limit: 1,
+  }).catch(() => []);
+  if (duplicateTeacher[0]) {
+    throw new Error('Teacher identifier already exists for this school. Use a different phone number.');
+  }
   const teacherId = randomUUID();
   const schoolCodeToken = (await getSchoolCodeById(schoolId)) || normalizeAuthLocalPart(schoolId, 30);
   const authEmail = buildProvisionedAuthEmail({
     role: 'teacher',
     schoolToken: schoolCodeToken,
-    userToken: staffCode || phone,
+    userToken: staffCode,
     profileId: teacherId,
   });
+  const teacherPassword = (input.password?.trim() || input.pin || '').trim();
+  if (teacherPassword.length !== 6) {
+    throw new Error('Teacher password must be exactly 6 characters.');
+  }
   const authUser = await createSupabaseAuthUser({
     email: authEmail,
-    password: input.password?.trim() || input.pin,
+    password: teacherPassword,
     emailConfirm: true,
     userMetadata: {
       role: 'teacher',

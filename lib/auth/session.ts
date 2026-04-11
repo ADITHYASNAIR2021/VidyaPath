@@ -321,3 +321,10 @@ export function clearDeveloperSessionCookie(res: NextResponse): void {
     maxAge: 0,
   });
 }
+
+export function clearAllRoleSessionCookies(res: NextResponse): void {
+  clearAdminSessionCookie(res);
+  clearTeacherSessionCookie(res);
+  clearStudentSessionCookie(res);
+  clearDeveloperSessionCookie(res);
+}

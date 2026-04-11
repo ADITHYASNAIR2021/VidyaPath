@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { createSupabaseAuthUser } from '@/lib/auth/supabase-auth';
 import { createSchool, getSchoolByCode, type SchoolProfile } from '@/lib/platform-rbac-db';
 import { isSupabaseServiceConfigured, supabaseInsert, supabaseSelect, supabaseUpdate } from '@/lib/supabase-rest';
@@ -115,19 +115,41 @@ function normalizeSchoolCode(value: string): string {
 }
 
 function normalizePhone(value: string): string {
-  return sanitize(value, 24).replace(/[^\d+]/g, '');
+  const digits = sanitize(value, 24).replace(/[^\d]/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
 }
 
-function normalizeIdentifier(value: string, fallbackPrefix = 'ADM'): string {
-  const normalized = sanitize(value, 50).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
-  if (normalized) return normalized;
-  return `${fallbackPrefix}${Math.floor(1000 + Math.random() * 9000)}`;
+function normalizeSchoolCodeForId(value: string): string {
+  const code = normalizeSchoolCode(value).replace(/[_-]/g, '').slice(0, 6);
+  return code || 'SCH';
 }
 
-function buildDefaultPassword(seed: string): string {
-  const clean = sanitize(seed, 80).replace(/[^a-zA-Z0-9]/g, '');
-  const suffix = randomUUID().replace(/-/g, '').slice(0, 4);
-  return `Vp${clean.slice(-4) || 'Adm'}${suffix}!`;
+function normalizePhoneForIdentifier(value: string): string {
+  const digits = normalizePhone(value).replace(/\D/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
+}
+
+function buildDefaultPassword(_seed: string): string {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const specials = '!@#$%^&*()';
+  const all = `${letters}${digits}${specials}`;
+  const bytes = randomBytes(8);
+  const chars = [
+    letters[bytes[0] % letters.length],
+    digits[bytes[1] % digits.length],
+    specials[bytes[2] % specials.length],
+    all[bytes[3] % all.length],
+    all[bytes[4] % all.length],
+    all[bytes[5] % all.length],
+  ];
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = bytes[(6 + i) % bytes.length] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
 }
 
 function toAffiliateRequest(row: AffiliateRequestRow): AffiliateSchoolRequest {
@@ -418,9 +440,28 @@ export async function provisionSchoolAdminByDeveloper(input: {
   if (!school) throw new Error('School not found.');
   const name = sanitize(input.name, 120);
   if (!name) throw new Error('Admin name is required.');
-  const adminIdentifier = normalizeIdentifier(input.adminIdentifier || '', 'ADM');
   const phone = input.phone ? normalizePhone(input.phone) : '';
-  const password = sanitize(input.password || '', 160) || buildDefaultPassword(adminIdentifier || phone || name);
+  const phoneToken = normalizePhoneForIdentifier(phone);
+  if (phoneToken.length !== 10) {
+    throw new Error('Admin phone must include a valid 10-digit mobile number.');
+  }
+  const adminIdentifier = `${normalizeSchoolCodeForId(school.school_code)}${phoneToken}`;
+  const providedPassword = typeof input.password === 'string' ? input.password.trim() : '';
+  if (providedPassword && providedPassword.length !== 6) {
+    throw new Error('Admin password must be exactly 6 characters.');
+  }
+  const password = providedPassword || buildDefaultPassword(adminIdentifier || phone || name);
+  const existingIdentifier = await supabaseSelect<Pick<SchoolAdminProfileRow, 'id'>>(TABLES.schoolAdmins, {
+    select: 'id',
+    filters: [
+      { column: 'school_id', value: school.id },
+      { column: 'admin_identifier', value: adminIdentifier },
+    ],
+    limit: 1,
+  }).catch(() => []);
+  if (existingIdentifier[0]) {
+    throw new Error('Admin identifier already exists for this school. Use a different phone number.');
+  }
   const emailFallback = `${adminIdentifier.toLowerCase()}.${school.school_code.toLowerCase()}@vidyapath.local`;
   const authEmail = sanitize(input.authEmail || emailFallback, 160).toLowerCase();
 

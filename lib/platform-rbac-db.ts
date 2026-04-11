@@ -130,6 +130,12 @@ function normalizeSchoolCode(value: string): string {
   return sanitize(value, 40).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
 }
 
+function normalizePhoneIdentifier(value: string): string {
+  const digits = sanitize(value, 40).replace(/[^\d]/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
+}
+
 function toSchoolProfile(row: SchoolRow): SchoolProfile {
   return {
     id: row.id,
@@ -146,7 +152,7 @@ function toSchoolProfile(row: SchoolRow): SchoolProfile {
   };
 }
 
-async function getSchoolById(schoolId: string): Promise<SchoolProfile | null> {
+export async function getSchoolById(schoolId: string): Promise<SchoolProfile | null> {
   if (!isSupabaseServiceConfigured() || !schoolId) return null;
   const rows = await supabaseSelect<SchoolRow>(TABLES.schools, {
     select: '*',
@@ -361,6 +367,7 @@ export async function findTeacherAuthIdentity(input: {
   if (!school || school.status !== 'active') return null;
   const identifier = sanitize(input.identifier, 80);
   const normalizedIdentifier = identifier.toUpperCase();
+  const normalizedPhone = normalizePhoneIdentifier(identifier);
   if (!identifier) return null;
   const rows = await supabaseSelect<Array<{
     id: string;
@@ -375,9 +382,9 @@ export async function findTeacherAuthIdentity(input: {
     limit: 1000,
   }).catch(() => []);
   const matched = rows.find((row) => {
-    const phone = sanitize(row.phone || '', 80);
+    const phone = normalizePhoneIdentifier(row.phone || '');
     const staff = sanitize(row.staff_code || '', 80).toUpperCase();
-    return phone === identifier || staff === normalizedIdentifier;
+    return (normalizedPhone ? phone === normalizedPhone : false) || staff === normalizedIdentifier;
   });
   if (!matched || !matched.auth_email) return null;
   return { authEmail: matched.auth_email, teacherId: matched.id, schoolId: school.id };
@@ -390,6 +397,7 @@ export async function findTeacherAuthIdentities(input: {
   if (!isSupabaseServiceConfigured()) return [];
   const identifier = sanitize(input.identifier, 80);
   const normalizedIdentifier = identifier.toUpperCase();
+  const normalizedPhone = normalizePhoneIdentifier(identifier);
   if (!identifier) return [];
   const school = input.schoolCode ? await getSchoolByCode(input.schoolCode) : null;
   if (input.schoolCode && (!school || school.status !== 'active')) return [];
@@ -408,9 +416,9 @@ export async function findTeacherAuthIdentities(input: {
   }).catch(() => []);
   return rows
     .filter((row) => {
-      const phone = sanitize(row.phone || '', 80);
+      const phone = normalizePhoneIdentifier(row.phone || '');
       const staff = sanitize(row.staff_code || '', 80).toUpperCase();
-      return (phone === identifier || staff === normalizedIdentifier) && !!row.auth_email && !!row.school_id;
+      return ((normalizedPhone ? phone === normalizedPhone : false) || staff === normalizedIdentifier) && !!row.auth_email && !!row.school_id;
     })
     .map((row) => ({
       authEmail: String(row.auth_email),
@@ -497,6 +505,8 @@ export async function findAdminAuthIdentity(input: {
   const school = await getSchoolByCode(input.schoolCode);
   if (!school || school.status !== 'active') return null;
   const identifier = sanitize(input.identifier, 90);
+  const normalizedIdentifier = identifier.toUpperCase();
+  const normalizedPhone = normalizePhoneIdentifier(identifier);
   if (!identifier) return null;
   const rows = await supabaseSelect<Array<{
     id: string;
@@ -511,9 +521,9 @@ export async function findAdminAuthIdentity(input: {
     limit: 100,
   }).catch(() => []);
   const matched = rows.find((row) => {
-    const adminIdentifier = sanitize(row.admin_identifier || '', 90);
-    const phone = sanitize(row.phone || '', 40);
-    return adminIdentifier === identifier || phone === identifier;
+    const adminIdentifier = sanitize(row.admin_identifier || '', 90).toUpperCase();
+    const phone = normalizePhoneIdentifier(row.phone || '');
+    return adminIdentifier === normalizedIdentifier || (normalizedPhone ? phone === normalizedPhone : false);
   });
   if (!matched || !matched.auth_email) return null;
   return { authEmail: matched.auth_email, adminId: matched.id, schoolId: school.id };

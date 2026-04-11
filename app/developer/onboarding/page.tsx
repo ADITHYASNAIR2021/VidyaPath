@@ -37,6 +37,7 @@ export default function DeveloperOnboardingPage() {
   const [requests, setRequests] = useState<AffiliateRequestItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [reviewState, setReviewState] = useState<Record<string, { schoolCode: string; reviewNotes: string }>>({});
   const [adminForm, setAdminForm] = useState({
     schoolId: '',
@@ -117,6 +118,10 @@ export default function DeveloperOnboardingPage() {
         setError(payload?.message || payload?.error || 'Failed to review request.');
         return;
       }
+      const schoolCode = payload?.data?.linkedSchool?.schoolCode || payload?.data?.request?.schoolCodeHint;
+      setSuccess(decision === 'approve'
+        ? `Affiliate request approved${schoolCode ? ` for ${schoolCode}` : ''}.`
+        : 'Affiliate request rejected.');
       await load();
     } catch {
       setError('Failed to review request.');
@@ -128,6 +133,7 @@ export default function DeveloperOnboardingPage() {
   async function provisionSchoolAdmin() {
     setLoading(true);
     setError('');
+    setSuccess('');
     setIssuedCredentials(null);
     try {
       if (!adminForm.schoolId || !adminForm.name) {
@@ -152,6 +158,8 @@ export default function DeveloperOnboardingPage() {
       }
       const data = payload?.data ?? payload;
       setIssuedCredentials(data?.issuedCredentials ?? null);
+      const identifier = data?.issuedCredentials?.loginIdentifier;
+      setSuccess(identifier ? `Admin provisioned. Login id: ${identifier}` : 'School admin provisioned successfully.');
       setAdminForm((prev) => ({
         ...prev,
         name: '',
@@ -186,6 +194,11 @@ export default function DeveloperOnboardingPage() {
           {error && (
             <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
               {error}
+            </p>
+          )}
+          {success && (
+            <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+              {success}
             </p>
           )}
         </div>

@@ -3,6 +3,7 @@ import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { listTimetableSlots, replaceTimetableSlots } from '@/lib/school-ops-db';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { listTeachers } from '@/lib/teacher-admin-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,14 +49,26 @@ export async function GET(req: Request) {
   }
 
   try {
-    const slots = await listTimetableSlots({
-      schoolId: adminSession.schoolId,
-      classLevel,
-      section,
-    });
+    const [slots, teachers] = await Promise.all([
+      listTimetableSlots({
+        schoolId: adminSession.schoolId,
+        classLevel,
+        section,
+      }),
+      listTeachers(adminSession.schoolId),
+    ]);
     return dataJson({
       requestId,
-      data: { classLevel, section, slots },
+      data: {
+        classLevel,
+        section,
+        slots,
+        teachers: teachers.map((teacher) => ({
+          id: teacher.id,
+          name: teacher.name,
+          status: teacher.status,
+        })),
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load timetable.';
@@ -171,4 +184,3 @@ export async function PUT(req: Request) {
     });
   }
 }
-

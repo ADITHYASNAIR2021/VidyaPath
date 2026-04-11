@@ -1,5 +1,14 @@
-import { attachStudentSessionCookie, createStudentSessionToken, isSessionSigningConfigured } from '@/lib/auth/session';
-import { attachSupabaseSessionCookies, signInWithPassword } from '@/lib/auth/supabase-auth';
+import {
+  attachStudentSessionCookie,
+  clearAllRoleSessionCookies,
+  createStudentSessionToken,
+  isSessionSigningConfigured,
+} from '@/lib/auth/session';
+import {
+  attachSupabaseSessionCookies,
+  clearSupabaseSessionCookies,
+  signInWithPassword,
+} from '@/lib/auth/supabase-auth';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import {
@@ -145,6 +154,8 @@ export async function POST(req: Request) {
         sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
       },
     });
+    clearSupabaseSessionCookies(response);
+    clearAllRoleSessionCookies(response);
     attachStudentSessionCookie(
       response,
       createStudentSessionToken({

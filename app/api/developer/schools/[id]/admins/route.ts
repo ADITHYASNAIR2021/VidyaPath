@@ -118,7 +118,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       requestId,
       endpoint,
       action: 'developer-school-admin-provision-failed',
-      statusCode: /required|valid|not found|exists/i.test(message) ? 400 : 500,
+      statusCode: /required|valid|not found|exists|password|phone/i.test(message) ? 400 : 500,
       actorRole: 'developer',
       actorAuthUserId: session.authUserId,
       schoolId,
@@ -131,7 +131,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       requestId,
       errorCode: 'developer-school-admin-provision-failed',
       message,
-      status: /required|valid/i.test(message) ? 400 : (/not found/i.test(message) ? 404 : 500),
+      status: /required|valid|password|phone/i.test(message) ? 400 : (/not found/i.test(message) ? 404 : 500),
     });
   }
 }

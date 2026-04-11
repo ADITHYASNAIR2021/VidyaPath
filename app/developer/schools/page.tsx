@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { RefreshCw, School } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -80,6 +81,26 @@ export default function DeveloperSchoolsPage() {
     [schoolDirectory]
   );
 
+  function getHealthScore(row: SchoolDirectoryItem): number {
+    let score = 0;
+    if (row.status === 'active') score += 30;
+    if (row.admins > 0) score += 15;
+    if (row.teachers > 0) score += 15;
+    if (row.students > 0) score += 20;
+    if (row.totalTokens > 0) score += 10;
+    if (row.students > 0 && row.teachers > 0) {
+      const ratio = row.students / row.teachers;
+      if (ratio >= 10 && ratio <= 60) score += 10;
+    }
+    return Math.min(100, score);
+  }
+
+  function healthBadge(score: number): string {
+    if (score >= 80) return 'bg-emerald-50 text-emerald-700';
+    if (score >= 55) return 'bg-amber-50 text-amber-700';
+    return 'bg-rose-50 text-rose-700';
+  }
+
   return (
     <div className="mx-auto max-w-7xl p-6">
       <div className="mb-6 flex items-center justify-between gap-3">
@@ -133,20 +154,33 @@ export default function DeveloperSchoolsPage() {
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500">Class 10/12</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500">Admins</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500">Tokens</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500">Health</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">Contacts</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {schoolDirectory.map((row) => (
+              {schoolDirectory.map((row) => {
+                const health = getHealthScore(row);
+                return (
                 <tr key={row.schoolId} className="border-b border-[#E8E4DC] last:border-0">
-                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">{row.schoolName}</td>
+                  <td className="px-4 py-3 text-sm font-semibold text-gray-900">
+                    <Link href={`/developer/schools/${row.schoolId}`} className="hover:underline text-violet-700">
+                      {row.schoolName}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3 text-xs text-gray-600">{row.schoolCode}</td>
                   <td className="px-4 py-3 text-right text-sm">{row.teachers}</td>
                   <td className="px-4 py-3 text-right text-sm">{row.students}</td>
                   <td className="px-4 py-3 text-right text-sm">{row.studentsClass10}/{row.studentsClass12}</td>
                   <td className="px-4 py-3 text-right text-sm">{row.admins}</td>
                   <td className="px-4 py-3 text-right text-sm">{row.totalTokens.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right">
+                    <span className={clsx('rounded-full px-2 py-1 text-[11px] font-semibold', healthBadge(health))}>
+                      {health}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-xs text-gray-600">
                     {row.adminContacts.length === 0 ? '-' : row.adminContacts.slice(0, 2).map((contact) => (
                       <p key={contact.id}>{contact.name}{contact.phone ? ` | ${contact.phone}` : ''}</p>
@@ -160,8 +194,16 @@ export default function DeveloperSchoolsPage() {
                       {row.status}
                     </span>
                   </td>
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/developer/schools/${row.schoolId}`}
+                      className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100"
+                    >
+                      Open
+                    </Link>
+                  </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>

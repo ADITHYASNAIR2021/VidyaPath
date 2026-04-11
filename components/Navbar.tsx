@@ -22,12 +22,12 @@ import {
   Zap,
   Upload,
   BarChart2,
-  Search,
   FlaskConical,
 } from 'lucide-react';
 import clsx from 'clsx';
 import CommandPalette from '@/components/CommandPalette';
 import type { PlatformRole } from '@/lib/auth/roles';
+import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
 
 type ActiveRole = PlatformRole;
 
@@ -110,7 +110,7 @@ async function callLogout(role: ActiveRole) {
     developer: '/api/developer/session/logout',
   };
   const url = urls[role];
-  if (url) await fetch(url, { method: 'POST' }).catch(() => undefined);
+  if (url) await fetch(url, { method: 'POST', credentials: 'include' }).catch(() => undefined);
 }
 
 /* ── Component ────────────────────────────────────────────────────────── */
@@ -121,17 +121,18 @@ export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const isExamRoute = pathname.startsWith('/exam/assignment/');
-  const isPortalRoute =
-    pathname.startsWith('/teacher') ||
-    pathname.startsWith('/admin') ||
-    pathname.startsWith('/developer');
+  const isPortalRoute = isPortalPath(pathname);
+  const isRoleSidebarMode = session.authenticated && (
+    (session.role === 'student' && isStudentShellPath(pathname)) ||
+    (session.role !== 'student' && session.role !== 'anonymous' && isSharedRoleShellPath(pathname))
+  );
   const navLinks = useMemo(() => getNavLinks(session.role), [session.role]);
   const roleMeta = session.role !== 'anonymous' ? ROLE_META[session.role] : null;
 
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    fetch('/api/auth/session', { signal: controller.signal, cache: 'no-store' })
+    fetch('/api/auth/session', { signal: controller.signal, cache: 'no-store', credentials: 'include' })
       .then(async (res) => {
         const payload = await res.json().catch(() => null);
         const data = payload?.data ?? payload;
@@ -161,8 +162,8 @@ export default function Navbar() {
     }
   }
 
-  /* Portal routes — Sidebar handles navigation */
-  if (isPortalRoute) return null;
+  /* Sidebar routes — dedicated role shell handles navigation */
+  if (isPortalRoute || isRoleSidebarMode) return null;
 
   /* Exam mode — minimal nav */
   if (isExamRoute) {

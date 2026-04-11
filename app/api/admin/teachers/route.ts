@@ -1,6 +1,7 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { isSupportedSubject } from '@/lib/academic-taxonomy';
 import { isValidPin } from '@/lib/auth/pin';
+import { randomBytes } from 'node:crypto';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
@@ -29,6 +30,7 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
   const password = typeof body.password === 'string' ? body.password.trim() : undefined;
   if (!phone || !name) return null;
   if (pin && !isValidPin(pin)) return null;
+  if (password && password.length !== 6) return null;
   const scopes: Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }> = [];
   if (Array.isArray(body.scopes)) {
     body.scopes.forEach((item) => {
@@ -46,9 +48,30 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
 
 function generatePin(seed: string): string {
   const digits = seed.replace(/\D/g, '');
-  const fromSeed = digits.slice(-4);
-  if (fromSeed.length === 4) return fromSeed;
-  return `${Math.floor(1000 + Math.random() * 9000)}`;
+  const fromSeed = digits.slice(-6);
+  if (fromSeed.length === 6) return fromSeed;
+  return `${Math.floor(100000 + Math.random() * 900000)}`;
+}
+
+function generatePassword(): string {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const specials = '!@#$%^&*()';
+  const all = `${letters}${digits}${specials}`;
+  const bytes = randomBytes(8);
+  const chars = [
+    letters[bytes[0] % letters.length],
+    digits[bytes[1] % digits.length],
+    specials[bytes[2] % specials.length],
+    all[bytes[3] % all.length],
+    all[bytes[4] % all.length],
+    all[bytes[5] % all.length],
+  ];
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = bytes[(6 + i) % bytes.length] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
 }
 
 export async function GET(req: Request) {
@@ -79,7 +102,7 @@ export async function POST(req: Request) {
     return errorJson({
       requestId,
       errorCode: 'invalid-create-teacher-payload',
-      message: 'Invalid request. Required: { phone, name, scopes? } and optional { pin, password }.',
+      message: 'Invalid request. Required: { phone, name, scopes? } and optional { pin(4-8 digits), password(exactly 6 chars) }.',
       status: 400,
     });
   }
@@ -97,7 +120,7 @@ export async function POST(req: Request) {
       });
     }
     const issuedPin = parsed.pin || generatePin(parsed.phone);
-    const issuedPassword = (parsed.password && parsed.password.trim()) || issuedPin;
+    const issuedPassword = (parsed.password && parsed.password.trim()) || generatePassword();
     const teacher = await createTeacher({
       ...parsed,
       schoolId,
@@ -120,7 +143,7 @@ export async function POST(req: Request) {
       data: {
         teacher,
         issuedCredentials: {
-          loginIdentifier: teacher.phone,
+          loginIdentifier: teacher.staffCode || teacher.phone,
           alternateIdentifier: teacher.staffCode || undefined,
           pin: issuedPin,
           password: issuedPassword,
@@ -130,7 +153,7 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create teacher.';
-    const status = /required|valid|pin|subject/i.test(message)
+    const status = /required|valid|pin|password|subject/i.test(message)
       ? 400
       : /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message)
         ? 503

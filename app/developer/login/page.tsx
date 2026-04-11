@@ -25,6 +25,7 @@ export default function DeveloperLoginPage() {
       const response = await fetch('/api/developer/session/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ username: username.trim(), password: password.trim() }),
       });
       const data = await response.json().catch(() => null);

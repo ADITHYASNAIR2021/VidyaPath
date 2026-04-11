@@ -8,9 +8,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   attachDeveloperSessionCookie,
+  clearAllRoleSessionCookies,
   createDeveloperSessionToken,
   isSessionSigningConfigured,
 } from '@/lib/auth/session';
+import { clearSupabaseSessionCookies } from '@/lib/auth/supabase-auth';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
@@ -120,6 +122,8 @@ export async function POST(req: Request) {
       sessionExpiry: Date.now() + 8 * 60 * 60 * 1000,
     },
   });
+  clearAllRoleSessionCookies(response);
+  clearSupabaseSessionCookies(response);
   attachDeveloperSessionCookie(response, token);
 
   await recordAuditEvent({

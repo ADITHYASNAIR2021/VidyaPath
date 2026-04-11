@@ -41,11 +41,11 @@ export async function GET(req: Request) {
       chapterId: chapterId || undefined,
       limit,
     });
-    const allowedSubjects = new Set(studentSession.enrolledSubjects);
+    const allowedSubjects = new Set((studentSession.enrolledSubjects ?? []).map((item) => String(item)));
     const filtered = resources.filter((item) => {
       if (!item.subject) return true;
       if (allowedSubjects.size === 0) return true;
-      return allowedSubjects.has(item.subject as string);
+      return allowedSubjects.has(item.subject);
     }).filter((item) => !subject || item.subject === subject);
     return dataJson({
       requestId,
@@ -61,4 +61,3 @@ export async function GET(req: Request) {
     });
   }
 }
-

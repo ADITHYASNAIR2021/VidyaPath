@@ -15,10 +15,17 @@ interface TimetableSlot {
   endTime?: string;
 }
 
+interface TimetableTeacher {
+  id: string;
+  name: string;
+  status: 'active' | 'inactive';
+}
+
 interface TimetableResponse {
   classLevel: 10 | 12;
   section: string;
   slots: TimetableSlot[];
+  teachers?: TimetableTeacher[];
 }
 
 function unwrap<T>(payload: unknown): T {
@@ -38,7 +45,7 @@ const DAYS = [
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8];
 
-function toKey(day: number, period: number) {
+function slotKey(day: number, period: number): string {
   return `${day}-${period}`;
 }
 
@@ -47,18 +54,21 @@ export default function TimetablePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [classLevel, setClassLevel] = useState<10 | 12>(12);
   const [section, setSection] = useState('A');
   const [slotMap, setSlotMap] = useState<Record<string, TimetableSlot>>({});
+  const [teachers, setTeachers] = useState<TimetableTeacher[]>([]);
 
   async function loadTimetable(nextClassLevel: 10 | 12, nextSection: string) {
-    if (!nextSection.trim()) return;
+    const sectionValue = nextSection.trim().toUpperCase();
+    if (!sectionValue) return;
     setLoading(true);
     setError('');
     try {
       const [sessionRes, timetableRes] = await Promise.all([
         fetch('/api/admin/session/me', { cache: 'no-store' }),
-        fetch(`/api/admin/timetable?classLevel=${nextClassLevel}&section=${encodeURIComponent(nextSection.trim().toUpperCase())}`, { cache: 'no-store' }),
+        fetch(`/api/admin/timetable?classLevel=${nextClassLevel}&section=${encodeURIComponent(sectionValue)}`, { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
         router.replace('/admin/login');
@@ -68,19 +78,22 @@ export default function TimetablePage() {
       if (!timetableRes.ok) {
         setError(body?.message || 'Failed to load timetable.');
         setSlotMap({});
+        setTeachers([]);
         return;
       }
       const data = unwrap<TimetableResponse>(body);
-      const next: Record<string, TimetableSlot> = {};
+      const nextMap: Record<string, TimetableSlot> = {};
       for (const slot of data.slots || []) {
-        next[toKey(slot.dayOfWeek, slot.periodNo)] = slot;
+        nextMap[slotKey(slot.dayOfWeek, slot.periodNo)] = slot;
       }
-      setSlotMap(next);
+      setSlotMap(nextMap);
+      setTeachers(Array.isArray(data.teachers) ? data.teachers : []);
       setClassLevel(data.classLevel);
       setSection(data.section);
     } catch {
       setError('Failed to load timetable.');
       setSlotMap({});
+      setTeachers([]);
     } finally {
       setLoading(false);
     }
@@ -90,17 +103,29 @@ export default function TimetablePage() {
     void loadTimetable(classLevel, section);
   }, []);
 
-  const totalFilled = useMemo(() => Object.values(slotMap).filter((slot) => slot.subject.trim()).length, [slotMap]);
+  const totalFilled = useMemo(
+    () => Object.values(slotMap).filter((slot) => slot.subject.trim()).length,
+    [slotMap]
+  );
 
-  function updateCell(dayOfWeek: number, periodNo: number, subject: string) {
-    const key = toKey(dayOfWeek, periodNo);
+  const teacherById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const teacher of teachers) {
+      map.set(teacher.id, teacher.name);
+    }
+    return map;
+  }, [teachers]);
+
+  function updateCell(dayOfWeek: number, periodNo: number, patch: Partial<TimetableSlot>) {
+    const key = slotKey(dayOfWeek, periodNo);
     setSlotMap((prev) => ({
       ...prev,
       [key]: {
         ...prev[key],
         dayOfWeek,
         periodNo,
-        subject,
+        subject: prev[key]?.subject ?? '',
+        ...patch,
       },
     }));
   }
@@ -127,21 +152,20 @@ export default function TimetablePage() {
     }
     setSaving(true);
     setError('');
+    setSuccess('');
     try {
       const response = await fetch('/api/admin/timetable', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          classLevel,
-          section: sectionValue,
-          slots,
-        }),
+        body: JSON.stringify({ classLevel, section: sectionValue, slots }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
         setError(body?.message || 'Failed to save timetable.');
         return;
       }
+      setSuccess('Timetable saved.');
+      setTimeout(() => setSuccess(''), 1800);
       await loadTimetable(classLevel, sectionValue);
     } catch {
       setError('Failed to save timetable.');
@@ -151,14 +175,14 @@ export default function TimetablePage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
+    <div className="mx-auto max-w-7xl p-6">
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <CalendarDays className="h-6 w-6 text-indigo-600" />
             Timetable Builder
           </h1>
-          <p className="mt-0.5 text-sm text-gray-500">Create and publish weekly timetable slots for each section.</p>
+          <p className="mt-0.5 text-sm text-gray-500">Build weekly timetable with subject and teacher mapping for each period.</p>
         </div>
         <button
           onClick={() => void loadTimetable(classLevel, section)}
@@ -173,6 +197,7 @@ export default function TimetablePage() {
       </div>
 
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      {success && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</div>}
 
       <div className="mb-5 rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
         <div className="grid gap-3 sm:grid-cols-4">
@@ -205,7 +230,7 @@ export default function TimetablePage() {
             </button>
           </div>
           <div className="flex items-end text-xs text-gray-500">
-            {totalFilled} slot{totalFilled !== 1 ? 's' : ''} filled
+            {totalFilled} slots filled
           </div>
         </div>
       </div>
@@ -217,7 +242,7 @@ export default function TimetablePage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-[#E8E4DC] bg-white shadow-sm">
-          <table className="min-w-[980px] w-full">
+          <table className="min-w-[1200px] w-full">
             <thead>
               <tr className="border-b border-[#E8E4DC] bg-gray-50">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">Period</th>
@@ -231,16 +256,36 @@ export default function TimetablePage() {
                 <tr key={periodNo} className="border-b border-[#E8E4DC] last:border-0">
                   <td className="px-4 py-3 text-sm font-semibold text-gray-700">P{periodNo}</td>
                   {DAYS.map((day) => {
-                    const key = toKey(day.id, periodNo);
+                    const key = slotKey(day.id, periodNo);
                     const slot = slotMap[key];
+                    const teacherName = slot?.teacherId ? teacherById.get(slot.teacherId) : '';
                     return (
-                      <td key={key} className="px-3 py-3">
-                        <input
-                          value={slot?.subject || ''}
-                          onChange={(event) => updateCell(day.id, periodNo, event.target.value)}
-                          placeholder="Subject"
-                          className="w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm"
-                        />
+                      <td key={key} className="px-3 py-3 align-top">
+                        <div className="space-y-1.5">
+                          <input
+                            value={slot?.subject || ''}
+                            onChange={(event) => updateCell(day.id, periodNo, { subject: event.target.value })}
+                            placeholder="Subject"
+                            className="w-full rounded-lg border border-gray-200 px-2.5 py-2 text-sm"
+                          />
+                          <select
+                            value={slot?.teacherId || ''}
+                            onChange={(event) => updateCell(day.id, periodNo, { teacherId: event.target.value || undefined })}
+                            className="w-full rounded-lg border border-gray-200 px-2.5 py-2 text-xs text-gray-700"
+                          >
+                            <option value="">Teacher (optional)</option>
+                            {teachers
+                              .filter((teacher) => teacher.status === 'active')
+                              .map((teacher) => (
+                                <option key={teacher.id} value={teacher.id}>
+                                  {teacher.name}
+                                </option>
+                              ))}
+                          </select>
+                          {teacherName && (
+                            <p className="text-[11px] text-gray-500">Assigned: {teacherName}</p>
+                          )}
+                        </div>
                       </td>
                     );
                   })}

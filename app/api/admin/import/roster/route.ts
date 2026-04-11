@@ -1,6 +1,7 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { isSupportedSubject } from '@/lib/academic-taxonomy';
 import { isValidPin } from '@/lib/auth/pin';
+import { randomBytes } from 'node:crypto';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -26,11 +27,39 @@ function readClassLevel(value: unknown): 10 | 12 | null {
   return null;
 }
 
-function generatePin(seed: string): string {
+function generateStudentPin(seed: string): string {
   const digits = seed.replace(/\D/g, '');
   const fromSeed = digits.slice(-4);
   if (fromSeed.length === 4) return fromSeed;
   return `${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+function generateTeacherPin(seed: string): string {
+  const digits = seed.replace(/\D/g, '');
+  const fromSeed = digits.slice(-6);
+  if (fromSeed.length === 6) return fromSeed;
+  return `${Math.floor(100000 + Math.random() * 900000)}`;
+}
+
+function generatePassword(): string {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const specials = '!@#$%^&*()';
+  const all = `${letters}${digits}${specials}`;
+  const bytes = randomBytes(8);
+  const chars = [
+    letters[bytes[0] % letters.length],
+    digits[bytes[1] % digits.length],
+    specials[bytes[2] % specials.length],
+    all[bytes[3] % all.length],
+    all[bytes[4] % all.length],
+    all[bytes[5] % all.length],
+  ];
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = bytes[(6 + i) % bytes.length] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
 }
 
 function normalizeSubject(value: string): TeacherScope['subject'] | null {
@@ -154,7 +183,7 @@ export async function POST(req: Request) {
           throw new Error('Required student fields: name, classLevel, and rollNo or rollCode.');
         }
         const pinInput = readString(row.pin, 16);
-        const pin = pinInput && isValidPin(pinInput) ? pinInput : generatePin(rollNo || rollCode || name);
+        const pin = pinInput && isValidPin(pinInput) ? pinInput : generateStudentPin(rollNo || rollCode || name);
         const password = readString(row.password, 120) || pin;
         const student = await createStudent({
           schoolId,
@@ -193,8 +222,12 @@ export async function POST(req: Request) {
           throw new Error('Each teacher row must include at least one valid scope (class + subject).');
         }
         const pinInput = readString(row.pin, 16);
-        const pin = pinInput && isValidPin(pinInput) ? pinInput : generatePin(phone || staffCode || name);
-        const password = readString(row.password, 120) || pin;
+        const pin = pinInput && isValidPin(pinInput) ? pinInput : generateTeacherPin(phone || staffCode || name);
+        const providedPassword = readString(row.password, 120);
+        if (providedPassword && providedPassword.length !== 6) {
+          throw new Error('Teacher password must be exactly 6 characters.');
+        }
+        const password = providedPassword || generatePassword();
         const teacher = await createTeacher({
           schoolId,
           name,
@@ -210,7 +243,7 @@ export async function POST(req: Request) {
           entity: 'teacher',
           name: teacher.name,
           issuedCredentials: {
-            loginIdentifier: teacher.phone,
+            loginIdentifier: teacher.staffCode || teacher.phone,
             alternateIdentifier: teacher.staffCode,
             pin,
             password,

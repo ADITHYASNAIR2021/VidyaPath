@@ -4,16 +4,15 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import {
-  Home, BookOpen, Users, ShieldCheck, Wrench, LogOut, Zap, Upload,
-  BarChart2, Terminal, GraduationCap, ClipboardList, PenSquare,
-  FileCheck, UserCheck, Megaphone, Wand2, HelpCircle, BookMarked,
-  CalendarDays, Package, LayoutDashboard, School, Activity,
+  BookOpen, Users, LogOut, Upload, BarChart2, Terminal, GraduationCap,
+  ClipboardList, PenSquare, FileCheck, Megaphone, Wand2, HelpCircle,
+  BookMarked, CalendarDays, Package, LayoutDashboard, School, Activity,
   Settings, ScrollText, Menu, X, ChevronLeft, ChevronRight,
-  Bell, ClipboardCheck, Layers,
+  Bell, ClipboardCheck, Layers, Bookmark,
 } from 'lucide-react';
 import clsx from 'clsx';
 
-type Role = 'teacher' | 'admin' | 'developer';
+type Role = 'student' | 'teacher' | 'admin' | 'developer';
 
 interface NavItem {
   href: string;
@@ -36,12 +35,28 @@ const TEACHER_NAV: NavItem[] = [
   { href: '/teacher/calendar',      label: 'Calendar',       icon: CalendarDays },
 ];
 
+const STUDENT_NAV: NavItem[] = [
+  { href: '/dashboard',         label: 'Overview',      icon: LayoutDashboard },
+  { href: '/chapters',          label: 'Study',         icon: BookOpen },
+  { href: '/formulas',          label: 'Formulas',      icon: BookMarked },
+  { href: '/equations',         label: 'Equations',     icon: HelpCircle },
+  { href: '/papers',            label: 'Papers',        icon: ClipboardList },
+  { href: '/bookmarks',         label: 'Bookmarks',     icon: Bookmark },
+  { href: '/student/grades',    label: 'Grades',        icon: ScrollText },
+  { href: '/student/attendance',label: 'Attendance',    icon: ClipboardCheck },
+  { href: '/student/timetable', label: 'Timetable',     icon: CalendarDays },
+  { href: '/student/resources', label: 'Resources',     icon: BookMarked },
+  { href: '/student/calendar',  label: 'Calendar',      icon: CalendarDays },
+  { href: '/student/achievements', label: 'Achievements', icon: Activity },
+];
+
 const ADMIN_NAV: NavItem[] = [
   { href: '/admin',                 label: 'Overview',       icon: LayoutDashboard },
   { href: '/admin/teachers',        label: 'Teachers',       icon: Users },
   { href: '/admin/students',        label: 'Students',       icon: GraduationCap },
   { href: '/admin/class-sections',  label: 'Class Sections', icon: Layers },
   { href: '/admin/analytics',       label: 'Analytics',      icon: BarChart2 },
+  { href: '/admin/gradebook',       label: 'Gradebook',      icon: ScrollText },
   { href: '/admin/announcements',   label: 'Announcements',  icon: Bell },
   { href: '/admin/timetable',       label: 'Timetable',      icon: CalendarDays },
   { href: '/admin/events',          label: 'Events',         icon: Activity },
@@ -68,6 +83,14 @@ const ROLE_CONFIG: Record<Role, {
   logoutUrl: string;
   logoutRedirect: string;
 }> = {
+  student: {
+    nav: STUDENT_NAV,
+    label: 'Student Hub',
+    gradient: 'from-emerald-600 to-teal-600',
+    ring: 'ring-emerald-400/30',
+    logoutUrl: '/api/student/session/logout',
+    logoutRedirect: '/student/login?logout=1',
+  },
   teacher: {
     nav: TEACHER_NAV,
     label: 'Teacher Portal',

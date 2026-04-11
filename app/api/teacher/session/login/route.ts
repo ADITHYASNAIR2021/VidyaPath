@@ -1,5 +1,14 @@
-import { attachTeacherSessionCookie, createTeacherSessionToken, isSessionSigningConfigured } from '@/lib/auth/session';
-import { attachSupabaseSessionCookies, signInWithPassword } from '@/lib/auth/supabase-auth';
+import {
+  attachTeacherSessionCookie,
+  clearAllRoleSessionCookies,
+  createTeacherSessionToken,
+  isSessionSigningConfigured,
+} from '@/lib/auth/session';
+import {
+  attachSupabaseSessionCookies,
+  clearSupabaseSessionCookies,
+  signInWithPassword,
+} from '@/lib/auth/supabase-auth';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { logServerEvent } from '@/lib/observability';
@@ -138,6 +147,8 @@ export async function POST(req: Request) {
           sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
         },
       });
+      clearSupabaseSessionCookies(response);
+      clearAllRoleSessionCookies(response);
       attachTeacherSessionCookie(response, createTeacherSessionToken(legacyResolved.session.teacher.id));
       return response;
     }
@@ -168,6 +179,8 @@ export async function POST(req: Request) {
           sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
         },
       });
+      clearSupabaseSessionCookies(response);
+      clearAllRoleSessionCookies(response);
       attachSupabaseSessionCookies(response, authSession, 'teacher');
       attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
       await recordAuditEvent({
@@ -219,6 +232,8 @@ export async function POST(req: Request) {
             sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
           },
         });
+        clearSupabaseSessionCookies(response);
+        clearAllRoleSessionCookies(response);
         attachSupabaseSessionCookies(response, authSession, 'teacher');
         attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
         return response;
@@ -266,6 +281,8 @@ export async function POST(req: Request) {
         sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
       },
     });
+    clearSupabaseSessionCookies(response);
+    clearAllRoleSessionCookies(response);
     attachTeacherSessionCookie(response, createTeacherSessionToken(phoneSession.teacher.id));
     return response;
   }
@@ -281,6 +298,8 @@ export async function POST(req: Request) {
       sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
     },
   });
+  clearSupabaseSessionCookies(response);
+  clearAllRoleSessionCookies(response);
   attachTeacherSessionCookie(response, createTeacherSessionToken(legacyResolved.session.teacher.id));
   return response;
 }

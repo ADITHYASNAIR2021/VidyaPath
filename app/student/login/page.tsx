@@ -13,21 +13,34 @@ export default function StudentLoginPage() {
 
   const [roll, setRoll] = useState('');
   const [key, setKey] = useState('');
+  const [schoolCode, setSchoolCode] = useState('');
+  const [classLevel, setClassLevel] = useState('');
+  const [section, setSection] = useState('');
+  const [batch, setBatch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   async function login() {
     setLoading(true);
     setError('');
+    const parsedClassLevel = classLevel === '10' || classLevel === '12' ? Number(classLevel) : undefined;
     try {
       const response = await fetch('/api/student/session/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roll, password: key }),
+        credentials: 'include',
+        body: JSON.stringify({
+          roll,
+          password: key,
+          schoolCode: schoolCode.trim() || undefined,
+          classLevel: parsedClassLevel,
+          section: section.trim() || undefined,
+          batch: batch.trim() || undefined,
+        }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || data?.message || 'Student login failed.');
+        setError(data?.message || data?.error || data?.hint || 'Student login failed.');
         return;
       }
       router.replace(nextPath);
@@ -54,6 +67,35 @@ export default function StudentLoginPage() {
 
         <div className="space-y-3 mt-5">
           <input
+            value={schoolCode}
+            onChange={(event) => setSchoolCode(event.target.value)}
+            placeholder="School code (recommended)"
+            className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+          />
+          <div className="grid grid-cols-3 gap-2">
+            <select
+              value={classLevel}
+              onChange={(event) => setClassLevel(event.target.value)}
+              className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 bg-white"
+            >
+              <option value="">Class</option>
+              <option value="10">10</option>
+              <option value="12">12</option>
+            </select>
+            <input
+              value={section}
+              onChange={(event) => setSection(event.target.value)}
+              placeholder="Section"
+              className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+            />
+            <input
+              value={batch}
+              onChange={(event) => setBatch(event.target.value)}
+              placeholder="Batch"
+              className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+            />
+          </div>
+          <input
             value={roll}
             onChange={(event) => setRoll(event.target.value)}
             placeholder="Roll number or roll code"
@@ -74,6 +116,9 @@ export default function StudentLoginPage() {
             {loading ? 'Signing in...' : 'Continue as Student'}
           </button>
         </div>
+        <p className="mt-2 text-[11px] text-[#7A7490]">
+          Tip: if login fails, add your school code + class/section for exact roster match.
+        </p>
         {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
         <p className="mt-4 text-xs text-[#7A7490]">
           Teacher portal: <Link href="/teacher/login" className="font-semibold text-indigo-700 hover:text-indigo-800">/teacher/login</Link>

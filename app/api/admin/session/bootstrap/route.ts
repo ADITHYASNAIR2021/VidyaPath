@@ -1,5 +1,14 @@
-import { attachAdminSessionCookie, createAdminSessionToken, isSessionSigningConfigured } from '@/lib/auth/session';
-import { attachSupabaseSessionCookies, signInWithPassword } from '@/lib/auth/supabase-auth';
+import {
+  attachAdminSessionCookie,
+  clearAllRoleSessionCookies,
+  createAdminSessionToken,
+  isSessionSigningConfigured,
+} from '@/lib/auth/session';
+import {
+  attachSupabaseSessionCookies,
+  clearSupabaseSessionCookies,
+  signInWithPassword,
+} from '@/lib/auth/supabase-auth';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { logServerEvent } from '@/lib/observability';
@@ -136,6 +145,7 @@ export async function POST(req: Request) {
         },
       });
       attachSupabaseSessionCookies(response, authSession, roleContext.role);
+      clearAllRoleSessionCookies(response);
       attachAdminSessionCookie(response, createAdminSessionToken());
       await recordAuditEvent({
         requestId,
@@ -213,6 +223,8 @@ export async function POST(req: Request) {
       sessionExpiry: Date.now() + 8 * 60 * 60 * 1000,
     },
   });
+  clearAllRoleSessionCookies(response);
+  clearSupabaseSessionCookies(response);
   attachAdminSessionCookie(response, createAdminSessionToken());
   await recordAuditEvent({
     requestId,

@@ -1,6 +1,5 @@
 import { cookies } from 'next/headers';
 import Sidebar from '@/components/Sidebar';
-import FloatingAIButton from '@/components/FloatingAIButton';
 import {
   ADMIN_SESSION_COOKIE,
   DEVELOPER_SESSION_COOKIE,
@@ -27,7 +26,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <main className="flex-1 md:ml-60 transition-all duration-200 min-h-screen">
         {children}
       </main>
-      <FloatingAIButton />
     </div>
   );
 }

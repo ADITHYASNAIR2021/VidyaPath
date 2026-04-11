@@ -7,7 +7,6 @@ import {
   Home,
   BookOpen,
   FileText,
-  Compass,
   Target,
   Users,
   Calculator,
@@ -16,6 +15,7 @@ import {
   Bookmark,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
 
 type Role = 'student' | 'teacher' | 'admin' | 'developer' | 'anonymous';
 
@@ -74,10 +74,14 @@ export default function MobileBottomNav() {
   const pathname = usePathname();
   const [role, setRole] = useState<Role>('anonymous');
   const isExamRoute = pathname.startsWith('/exam/');
+  const isPortalRoute = isPortalPath(pathname);
+  const isRoleSidebarMode =
+    (role === 'student' && isStudentShellPath(pathname)) ||
+    (role !== 'student' && role !== 'anonymous' && isSharedRoleShellPath(pathname));
 
   useEffect(() => {
     let active = true;
-    fetch('/api/auth/session', { cache: 'no-store' })
+    fetch('/api/auth/session', { cache: 'no-store', credentials: 'include' })
       .then(async (res) => {
         const payload = await res.json().catch(() => null);
         const data = payload?.data ?? payload;
@@ -89,7 +93,7 @@ export default function MobileBottomNav() {
     return () => { active = false; };
   }, [pathname]);
 
-  if (isExamRoute) return null;
+  if (isExamRoute || isPortalRoute || isRoleSidebarMode) return null;
 
   const navItems = getNavItems(role);
 

@@ -94,7 +94,7 @@ export default function FloatingAIButton() {
   useEffect(() => {
     let active = true;
     setAuthRole('loading');
-    fetch('/api/auth/session', { cache: 'no-store' })
+    fetch('/api/auth/session', { cache: 'no-store', credentials: 'include' })
       .then(async (response) => {
         const payload = await response.json().catch(() => null);
         const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'

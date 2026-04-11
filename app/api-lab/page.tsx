@@ -529,7 +529,7 @@ const ENDPOINTS: EndpointPreset[] = [
     method: 'POST',
     path: '/api/admin/session/bootstrap',
     auth: 'none',
-    sampleBody: { schoolCode: 'VIDYAPATH-001', identifier: 'ADMIN01', password: 'Admin@123' },
+      sampleBody: { schoolCode: 'SPS', identifier: 'SPS8136800901', password: 'A01#B1' },
   },
   {
     id: 'admin-me',

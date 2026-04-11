@@ -27,6 +27,7 @@ export default function AdminLoginPage() {
       const response = await fetch('/api/admin/session/bootstrap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(
           candidateKey
             ? { key: candidateKey }
@@ -35,7 +36,7 @@ export default function AdminLoginPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
-        setError(data?.error || data?.message || 'Invalid admin key.');
+        setError(data?.message || data?.error || data?.hint || 'Invalid admin credentials.');
         return;
       }
       const role = data?.role || data?.data?.role;
