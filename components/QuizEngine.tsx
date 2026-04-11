@@ -36,6 +36,7 @@ function toQuiz(item: unknown): Quiz | null {
 
 export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject, chapterTitle }: { chapterId: string; quizzes: Quiz[]; subject?: string; chapterTitle?: string; }) {
   const [quizzes, setQuizzes] = useState<Quiz[]>(initialQuizzes);
+  const [studentAiEnabled, setStudentAiEnabled] = useState<boolean | null>(null);
   const [currentQ, setCurrentQ] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [showAnswer, setShowAnswer] = useState(false);
@@ -50,6 +51,25 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
     const saved = localStorage.getItem(`quiz-score-[${chapterId}]`);
     if (saved) setBestScore(parseInt(saved, 10));
   }, [chapterId]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
+          ? payload.data as Record<string, unknown>
+          : payload as Record<string, unknown> | null;
+        const role = typeof data?.role === 'string' ? data.role : '';
+        if (active) setStudentAiEnabled(['student', 'teacher', 'admin', 'developer'].includes(role));
+      })
+      .catch(() => {
+        if (active) setStudentAiEnabled(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (!quizzes || quizzes.length === 0) return null;
 
@@ -160,10 +180,10 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
           <button 
             onClick={handleGenerateValues}
             type="button"
-            disabled={isGenerating}
+            disabled={isGenerating || studentAiEnabled === false}
             className="inline-flex items-center gap-2 bg-saffron-50 border border-saffron-200 text-saffron-700 hover:bg-saffron-100 px-4 py-2.5 rounded-xl font-semibold transition-colors disabled:opacity-50"
           >
-            {isGenerating ? "Generating..." : "Generate New Test"}
+            {studentAiEnabled === false ? 'Login Needed' : isGenerating ? 'Generating...' : 'Generate New Test'}
           </button>
         </div>
       </div>
@@ -197,10 +217,10 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
           <button 
             onClick={handleGenerateValues}
             type="button"
-            disabled={isGenerating}
+            disabled={isGenerating || studentAiEnabled === false}
             className="flex items-center gap-2 text-xs font-semibold text-navy-600 bg-navy-50 hover:bg-navy-100 px-3 py-1.5 rounded-lg border border-navy-100 transition-colors disabled:opacity-50"
           >
-            {isGenerating ? "AI Thinking..." : "AI Generate"}
+            {studentAiEnabled === false ? 'Login for AI' : isGenerating ? 'AI Thinking...' : 'AI Generate'}
           </button>
         </div>
         <div className="text-xs font-bold text-[#8A8AAA] tracking-widest uppercase">
@@ -267,6 +287,11 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
                 {selectedOption === q.correctAnswerIndex ? 'Correct!' : 'Incorrect.'}
               </div>
               {q.explanation && <div className="opacity-90">{q.explanation}</div>}
+              {selectedOption !== q.correctAnswerIndex && studentAiEnabled === false && (
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Login to get AI explanations and adaptive hints for wrong answers.
+                </div>
+              )}
             </div>
 
             <div className="mt-4 flex justify-end">

@@ -8,7 +8,9 @@ export async function requireInteractiveAuth() {
       context: null,
       response: NextResponse.json(
         {
-          error: 'Authentication required. Login as student, teacher, admin, or developer to use interactive AI features.',
+          error: 'Login required to use AI features.',
+          errorCode: 'auth-required',
+          message: 'Please login to use VidyaAI features.',
         },
         { status: 401 }
       ),

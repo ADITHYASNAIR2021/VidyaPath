@@ -1,12 +1,15 @@
 ﻿'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Fuse from 'fuse.js';
 import { Calculator, Search, Filter } from 'lucide-react';
 import { BlockMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import { getAllFormulaEntries } from '@/lib/formulas';
+import { fetchClientStudentSession } from '@/lib/client-student-session';
+import type { Subject } from '@/lib/data';
+import PushNotificationToggle from '@/components/PushNotificationToggle';
 
 const SUBJECTS = [
   'All',
@@ -28,6 +31,62 @@ export default function FormulasPage() {
   const [selectedSubject, setSelectedSubject] = useState<(typeof SUBJECTS)[number]>('All');
   const [selectedClass, setSelectedClass] = useState<(typeof CLASSES)[number]>('All');
   const [jeeOnly, setJeeOnly] = useState(false);
+  const [isStudent, setIsStudent] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [enrolledSubjects, setEnrolledSubjects] = useState<Subject[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      fetchClientStudentSession().catch(() => null),
+      fetch('/api/auth/session', { cache: 'no-store' })
+        .then(async (response) => {
+          const payload = await response.json().catch(() => null);
+          const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
+            ? payload.data as Record<string, unknown>
+            : payload as Record<string, unknown> | null;
+          return typeof data?.role === 'string' ? data.role : 'anonymous';
+        })
+        .catch(() => 'anonymous'),
+    ])
+      .then(([studentSession, role]) => {
+        if (!active) return;
+        setIsAuthenticated(role !== 'anonymous');
+        if (!studentSession?.studentId) {
+          setIsStudent(false);
+          setEnrolledSubjects([]);
+          return;
+        }
+        setIsStudent(true);
+        setEnrolledSubjects(studentSession.enrolledSubjects);
+      })
+      .catch(() => {
+        if (!active) return;
+        setIsStudent(false);
+        setIsAuthenticated(false);
+        setEnrolledSubjects([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const enrolledSubjectSet = useMemo(() => {
+    if (!isStudent) return null;
+    return new Set<Subject>(enrolledSubjects);
+  }, [enrolledSubjects, isStudent]);
+
+  const subjectChoices = useMemo(
+    () => SUBJECTS.filter((subject) => subject === 'All' || !enrolledSubjectSet || enrolledSubjectSet.has(subject as Subject)),
+    [enrolledSubjectSet]
+  );
+
+  useEffect(() => {
+    if (selectedSubject === 'All') return;
+    if (!subjectChoices.includes(selectedSubject)) {
+      setSelectedSubject('All');
+    }
+  }, [selectedSubject, subjectChoices]);
 
   const fuse = useMemo(
     () =>
@@ -50,6 +109,7 @@ export default function FormulasPage() {
       if (selectedSubject !== 'All' && item.subject !== selectedSubject) return false;
       if (selectedClass !== 'All' && String(item.classLevel) !== selectedClass) return false;
       if (jeeOnly && !item.appearsInJee) return false;
+      if (enrolledSubjectSet && !enrolledSubjectSet.has(item.subject as Subject)) return false;
       return true;
     });
 
@@ -58,10 +118,10 @@ export default function FormulasPage() {
     return base
       .filter((item) => ranked.has(item.id))
       .sort((a, b) => (ranked.get(a.id) ?? 9999) - (ranked.get(b.id) ?? 9999));
-  }, [fuse, jeeOnly, query, selectedClass, selectedSubject]);
+  }, [enrolledSubjectSet, fuse, jeeOnly, query, selectedClass, selectedSubject]);
 
   return (
-    <div className="min-h-screen bg-[#FDFAF6] overflow-x-hidden">
+    <div className="min-h-screen bg-[#FDFAF6]">
       <div className="bg-gradient-to-br from-purple-700 to-indigo-700 text-white px-4 py-12">
         <div className="max-w-6xl mx-auto">
           <h1 className="font-fraunces text-3xl sm:text-4xl font-bold">Formula Database</h1>
@@ -72,6 +132,11 @@ export default function FormulasPage() {
             <Calculator className="w-3.5 h-3.5" />
             {formulaEntries.length} formulas indexed
           </div>
+          {isAuthenticated && (
+            <div className="mt-3">
+              <PushNotificationToggle />
+            </div>
+          )}
         </div>
       </div>
 
@@ -94,7 +159,7 @@ export default function FormulasPage() {
             </span>
             <div className="-mx-1 overflow-x-auto pb-1">
               <div className="px-1 inline-flex gap-2 min-w-max">
-                {SUBJECTS.map((subject) => (
+                {subjectChoices.map((subject) => (
                   <button
                     key={subject}
                     onClick={() => setSelectedSubject(subject)}
@@ -138,6 +203,17 @@ export default function FormulasPage() {
         <p className="text-sm text-[#6A6A84] mb-4">
           Showing <span className="font-semibold text-navy-700">{filtered.length}</span> formulas
         </p>
+        {isStudent && (
+          <p className="mb-4 text-xs font-semibold text-indigo-700">
+            Showing enrolled subjects only: {enrolledSubjects.join(', ') || 'None assigned yet'}.
+          </p>
+        )}
+        {!isStudent && (
+          <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-2.5 flex items-center gap-3 text-sm">
+            <span className="text-indigo-700">Login to filter formulas by your enrolled subjects and track your revision.</span>
+            <Link href="/student/login" className="ml-auto flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">Login</Link>
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-2 gap-4">
           {filtered.map((item) => (
@@ -155,7 +231,9 @@ export default function FormulasPage() {
               </div>
 
               <div className="mt-3 overflow-x-auto rounded-xl border border-[#F0ECE4] bg-[#FCFBF8] px-3 py-2">
-                <BlockMath math={item.latex} />
+                <div className="equation-scroll">
+                  <BlockMath math={item.latex} />
+                </div>
               </div>
 
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -200,5 +278,3 @@ export default function FormulasPage() {
     </div>
   );
 }
-
-

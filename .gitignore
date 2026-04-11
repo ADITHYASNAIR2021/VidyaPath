@@ -34,9 +34,6 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
-
-# Dataset — PDFs are too large for GitHub (2+ GB).
-# Store these in Cloudflare R2 / GitHub Releases / Hugging Face Datasets.
 dataset/
 
 # Temp scraping artifacts

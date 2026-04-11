@@ -8,6 +8,7 @@ import {
   getAssignmentPack,
   upsertAssignmentPack,
 } from '@/lib/teacher-admin-db';
+import { studentCanAccessChapter } from '@/lib/school-management-db';
 import {
   buildTeacherAssignmentPackDraft,
   buildTeacherPackUrls,
@@ -21,6 +22,26 @@ export const dynamic = 'force-dynamic';
 
 function parseClassLevel(value: unknown): 10 | 12 {
   return Number(value) === 10 ? 10 : 12;
+}
+
+function isPackOpenForStudents(pack: {
+  status: string;
+  visibilityStatus?: string;
+  validFrom?: string;
+  validUntil?: string;
+}): boolean {
+  if (pack.status !== 'published') return false;
+  if ((pack.visibilityStatus || 'open') !== 'open') return false;
+  const now = Date.now();
+  if (pack.validFrom) {
+    const start = Date.parse(pack.validFrom);
+    if (Number.isFinite(start) && start > now) return false;
+  }
+  if (pack.validUntil) {
+    const end = Date.parse(pack.validUntil);
+    if (Number.isFinite(end) && end < now) return false;
+  }
+  return true;
 }
 
 export async function GET(req: Request) {
@@ -93,6 +114,27 @@ export async function GET(req: Request) {
           requestId,
           errorCode: 'missing-student-section',
           message: 'Student section is missing for this restricted assignment.',
+          status: 403,
+        });
+      }
+      if (!isPackOpenForStudents(pack)) {
+        return errorJson({
+          requestId,
+          errorCode: 'assignment-pack-closed',
+          message: 'This assignment is currently closed.',
+          status: 403,
+        });
+      }
+      const allowedByEnrollment = await studentCanAccessChapter({
+        studentId: studentSession.studentId,
+        chapterId: pack.chapterId,
+        schoolId: studentSession.schoolId,
+      });
+      if (!allowedByEnrollment) {
+        return errorJson({
+          requestId,
+          errorCode: 'subject-enrollment-required',
+          message: 'This assignment is not available for your enrolled subjects.',
           status: 403,
         });
       }

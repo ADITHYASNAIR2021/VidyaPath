@@ -44,8 +44,10 @@ export default function FormulaCard({ formulas }: { formulas: { name: string; la
               {formulas.map((formula, idx) => (
                 <div key={idx} className="bg-[#FDFAF6] rounded-xl p-4 border border-[#E8E4DC]/60">
                   <div className="text-sm font-semibold text-navy-700 mb-2">{formula.name}</div>
-                  <div className="overflow-x-auto pb-1 text-lg">
-                    <BlockMath math={formula.latex} />
+                  <div className="equation-mobile-wrap pb-1 text-lg">
+                    <div>
+                      <BlockMath math={formula.latex} />
+                    </div>
                   </div>
                 </div>
               ))}

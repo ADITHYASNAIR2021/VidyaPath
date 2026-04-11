@@ -41,6 +41,8 @@ import ChapterIntelligenceHub from '@/components/ChapterIntelligenceHub';
 import TeacherChapterPanel from '@/components/TeacherChapterPanel';
 import ImageQuestionSolver from '@/components/ImageQuestionSolver';
 import AnalyticsTracker from '@/components/AnalyticsTracker';
+import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
+import StudentSubjectGate from '@/components/StudentSubjectGate';
 
 // Generate static params for all chapters
 export function generateStaticParams() {
@@ -168,11 +170,13 @@ export default function ChapterDetailPage({
   const chapterNotesUrl = `/cbse-notes/${chapter.classLevel}/${slugify(chapter.subject)}/${chapterNotesSlug(chapter)}`;
 
   return (
-    <div className="min-h-screen bg-[#FDFAF6]">
-      <AnalyticsTracker eventName="chapter_view" chapterId={chapter.id} />
-      {/* Chapter Header */}
-      <div className={clsx('bg-gradient-to-br text-white px-4 py-8', style.header)}>
-        <div className="max-w-6xl mx-auto">
+    <StudentSubjectGate subject={chapter.subject}>
+      <div className="min-h-screen bg-[#FDFAF6]">
+        <ScrollToTopOnMount />
+        <AnalyticsTracker eventName="chapter_view" chapterId={chapter.id} />
+        {/* Chapter Header */}
+        <div className={clsx('bg-gradient-to-br text-white px-4 py-8', style.header)}>
+          <div className="max-w-6xl mx-auto">
           {/* Breadcrumb */}
           <div className="flex items-center gap-1.5 text-white/70 text-xs mb-4">
             <Link href="/chapters" className="hover:text-white transition-colors">
@@ -186,6 +190,7 @@ export default function ChapterDetailPage({
 
           <Link
             href="/chapters"
+            scroll
             className="inline-flex items-center gap-1.5 text-white/80 hover:text-white text-sm mb-5 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -232,11 +237,11 @@ export default function ChapterDetailPage({
             <BookmarkButton chapterId={chapter.id} />
             <StudiedButton chapterId={chapter.id} />
           </div>
+          </div>
         </div>
-      </div>
 
-      {/* Content Grid */}
-      <div className="max-w-6xl mx-auto px-4 py-8">
+        {/* Content Grid */}
+        <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="grid lg:grid-cols-5 gap-6">
           {/* LEFT — Study Material (3/5) */}
           <div className="lg:col-span-3 space-y-5">
@@ -522,6 +527,7 @@ export default function ChapterDetailPage({
               {prev ? (
                 <Link
                   href={`/chapters/${prev.id}`}
+                  scroll
                   className="group flex items-start gap-3 p-4 bg-white rounded-2xl border border-[#E8E4DC] hover:border-saffron-200 hover:shadow-sm transition-all"
                 >
                   <ArrowLeft className="w-4 h-4 text-[#8A8AAA] group-hover:text-saffron-500 mt-0.5 flex-shrink-0 transition-colors" />
@@ -540,6 +546,7 @@ export default function ChapterDetailPage({
               {next ? (
                 <Link
                   href={`/chapters/${next.id}`}
+                  scroll
                   className="group flex items-start gap-3 p-4 bg-white rounded-2xl border border-[#E8E4DC] hover:border-saffron-200 hover:shadow-sm transition-all text-right justify-end"
                 >
                   <div className="min-w-0">
@@ -600,8 +607,9 @@ export default function ChapterDetailPage({
             </div>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </StudentSubjectGate>
   );
 }
 

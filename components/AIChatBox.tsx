@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import { Send, Loader2, Zap, RefreshCw, MessageCircle, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
 import 'katex/dist/katex.min.css';
@@ -198,6 +199,7 @@ export default function AIChatBox({
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -206,6 +208,25 @@ export default function AIChatBox({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
+          ? payload.data as Record<string, unknown>
+          : payload as Record<string, unknown> | null;
+        const role = typeof data?.role === 'string' ? data.role : '';
+        if (active) setAiEnabled(['student', 'teacher', 'admin', 'developer'].includes(role));
+      })
+      .catch(() => {
+        if (active) setAiEnabled(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function sendMessage(messageText: string) {
     if (!messageText.trim() || loading) return;
@@ -262,6 +283,28 @@ export default function AIChatBox({
     }
   }
 
+  if (aiEnabled === false) {
+    return (
+      <div className="flex flex-col bg-white rounded-2xl border border-[#E8E4DC] shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-saffron-500 to-saffron-600 px-4 py-3.5">
+          <div className="font-semibold text-white text-sm">VidyaAI Tutor</div>
+          <div className="text-white/80 text-xs">Login required</div>
+        </div>
+        <div className="p-4">
+          <p className="text-sm text-[#4A4A6A]">
+            Login with any account to unlock chapter AI tools.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Link href={`/student/login?next=/chapters/${chapterId}`} className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Student</Link>
+            <Link href="/teacher/login" className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700">Teacher</Link>
+            <Link href="/admin/login" className="inline-flex items-center justify-center rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">Admin</Link>
+            <Link href="/developer/login" className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700">Developer</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col bg-white rounded-2xl border border-[#E8E4DC] shadow-sm overflow-hidden">
       {/* Header */}
@@ -272,7 +315,7 @@ export default function AIChatBox({
           </div>
           <div>
             <div className="font-semibold text-white text-sm">VidyaAI Tutor</div>
-            <div className="text-white/70 text-xs">CBSE Class 10 &amp; 12 - Free - Always available</div>
+            <div className="text-white/70 text-xs">CBSE Class 10 &amp; 12 - login required</div>
           </div>
         </div>
         {messages.length > 0 && (
@@ -419,7 +462,7 @@ export default function AIChatBox({
           </button>
         </div>
         <p className="text-xs text-[#8A8AAA] mt-1.5 text-center">
-          CBSE Science &amp; Math only - Powered by Gemini (with backup) - Free
+          Login required AI feature - Powered by Gemini (with backup)
         </p>
       </div>
     </div>

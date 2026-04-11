@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, BrainCircuit, ClipboardList, Loader2, Sparkles, Target } from 'lucide-react';
 
 interface ChapterIntelligenceHubProps {
@@ -89,9 +90,29 @@ export default function ChapterIntelligenceHub({
   const [loadingDiagnose, setLoadingDiagnose] = useState(false);
   const [loadingRemediate, setLoadingRemediate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
 
   const [difficulty, setDifficulty] = useState('mixed');
   const [questionCount, setQuestionCount] = useState(8);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
+          ? payload.data as Record<string, unknown>
+          : payload as Record<string, unknown> | null;
+        const role = typeof data?.role === 'string' ? data.role : '';
+        if (active) setAiEnabled(['student', 'teacher', 'admin', 'developer'].includes(role));
+      })
+      .catch(() => {
+        if (active) setAiEnabled(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const localPerformance = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -127,6 +148,26 @@ export default function ChapterIntelligenceHub({
 
     return { quizScore, flashcardsDue, studied, bookmarked };
   }, [chapterId, flashcardCount]);
+
+  if (aiEnabled === false) {
+    return (
+      <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
+        <h3 className="font-fraunces text-lg font-bold text-navy-700 flex items-center gap-2">
+          <BrainCircuit className="w-5 h-5 text-indigo-500" />
+          Chapter Intelligence
+        </h3>
+        <p className="mt-2 text-sm text-[#4A4A6A]">
+          Login with any account to unlock AI chapter tools.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Link href={`/student/login?next=/chapters/${chapterId}`} className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Student</Link>
+          <Link href="/teacher/login" className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700">Teacher</Link>
+          <Link href="/admin/login" className="inline-flex items-center justify-center rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">Admin</Link>
+          <Link href="/developer/login" className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700">Developer</Link>
+        </div>
+      </div>
+    );
+  }
 
   async function generatePack() {
     setLoadingPack(true);

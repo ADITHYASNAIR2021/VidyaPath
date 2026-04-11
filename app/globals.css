@@ -162,6 +162,48 @@ h1, h2, h3 {
   overflow-x: auto;
 }
 
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.2rem;
+  max-width: 100%;
+}
+
+.katex-display > .katex {
+  white-space: nowrap;
+}
+
+.equation-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: auto;
+  max-width: 100%;
+}
+
+.equation-scroll .katex-display {
+  margin: 0.2rem 0;
+  min-width: max-content;
+  padding-bottom: 0.2rem;
+}
+
+.equation-scroll .katex-display > .katex {
+  display: inline-block;
+}
+
+.equation-mobile-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: auto;
+  max-width: 100%;
+}
+
+.equation-mobile-wrap > * {
+  min-width: max-content;
+}
+
 :focus-visible {
   outline: 3px solid #1f4fd6;
   outline-offset: 2px;

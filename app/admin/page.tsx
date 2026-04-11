@@ -1,704 +1,161 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Shield, UserPlus, KeyRound } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { StudentProfile, TeacherProfile, TeacherScope } from '@/lib/teacher-types';
+import { useRouter } from 'next/navigation';
+import {
+  LayoutDashboard, Users, GraduationCap, Layers, BarChart2,
+  Bell, CalendarDays, Activity, Upload, Settings, ChevronRight,
+  RefreshCw, AlertCircle, TrendingUp, School,
+} from 'lucide-react';
 
 interface AdminOverviewResponse {
   totalTeachers: number;
   activeTeachers: number;
   scopesByClass: Array<{ classLevel: 10 | 12; count: number }>;
-  scopesBySubject: Array<{ subject: string; count: number }>;
-  scopesBySection: Array<{ section: string; count: number }>;
   topWeakTopics: Array<{ topic: string; count: number }>;
-  topChapters: Array<{ chapterId: string; count: number }>;
   assignmentCompletionsThisWeek: number;
   storageStatus?: { mode: 'connected' | 'degraded'; message: string };
   highRiskExamSessions?: number;
 }
 
-interface AdminSessionMeResponse {
-  role: 'admin' | 'developer';
-  schoolId?: string;
-  schoolCode?: string;
-  schoolName?: string;
-  displayName?: string;
+function unwrap<T>(payload: unknown): T {
+  if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) return (payload as { data: T }).data;
+  return payload as T;
 }
 
-const CLASS10_SUBJECT_OPTIONS: Array<TeacherScope['subject']> = ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'];
-const CLASS12_SUBJECT_OPTIONS: Array<TeacherScope['subject']> = [
-  'Physics',
-  'Chemistry',
-  'Biology',
-  'Math',
-  'Accountancy',
-  'Business Studies',
-  'Economics',
-  'English Core',
+const QUICK_LINKS = [
+  { href: '/admin/teachers',        label: 'Teachers',        icon: Users,         desc: 'Manage teacher accounts',     color: 'from-indigo-500 to-blue-500'     },
+  { href: '/admin/students',        label: 'Students',        icon: GraduationCap, desc: 'Manage student roster',       color: 'from-emerald-500 to-teal-500'    },
+  { href: '/admin/class-sections',  label: 'Class Sections',  icon: Layers,        desc: 'Configure classes & batches', color: 'from-violet-500 to-purple-500'   },
+  { href: '/admin/analytics',       label: 'Analytics',       icon: BarChart2,     desc: 'School-wide insights',        color: 'from-amber-500 to-orange-500'    },
+  { href: '/admin/announcements',   label: 'Announcements',   icon: Bell,          desc: 'Broadcast school notices',    color: 'from-rose-500 to-pink-500'       },
+  { href: '/admin/timetable',       label: 'Timetable',       icon: CalendarDays,  desc: 'Class schedule builder',      color: 'from-sky-500 to-blue-600'        },
+  { href: '/admin/events',          label: 'Events',          icon: Activity,      desc: 'School events & holidays',    color: 'from-lime-500 to-green-500'      },
+  { href: '/admin/roster-import',   label: 'Roster Import',   icon: Upload,        desc: 'Bulk import students',        color: 'from-cyan-500 to-sky-500'        },
+  { href: '/admin/settings',        label: 'Settings',        icon: Settings,      desc: 'School configuration',        color: 'from-slate-500 to-gray-600'      },
 ];
 
-function getSubjectsForClass(classLevel: 10 | 12): Array<TeacherScope['subject']> {
-  return classLevel === 10 ? CLASS10_SUBJECT_OPTIONS : CLASS12_SUBJECT_OPTIONS;
-}
-
-export default function AdminPage() {
+export default function AdminOverviewPage() {
   const router = useRouter();
-  const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
+  const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<AdminOverviewResponse | null>(null);
-  const [adminSession, setAdminSession] = useState<AdminSessionMeResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [newTeacher, setNewTeacher] = useState({
-    phone: '',
-    name: '',
-    pin: '',
-    classLevel: 12 as 10 | 12,
-    subject: 'Physics' as TeacherScope['subject'],
-    section: '',
-  });
-  const [pendingScopes, setPendingScopes] = useState<
-    Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }>
-  >([]);
-  const [pinReset, setPinReset] = useState<Record<string, string>>({});
-  const [scopeDrafts, setScopeDrafts] = useState<
-    Record<string, { classLevel: 10 | 12; subject: TeacherScope['subject']; section: string }>
-  >({});
-  const [students, setStudents] = useState<StudentProfile[]>([]);
-  const [newStudent, setNewStudent] = useState({
-    name: '',
-    rollCode: '',
-    rollNo: '',
-    batch: '',
-    classLevel: 12 as 10 | 12,
-    section: '',
-    pin: '',
-    password: '',
-  });
-
-  async function load() {
-    setLoading(true);
-    setError('');
-    try {
-      const [teachersRes, overviewRes, studentsRes, sessionRes] = await Promise.all([
-        fetch('/api/admin/teachers', { cache: 'no-store' }),
-        fetch('/api/admin/overview', { cache: 'no-store' }),
-        fetch('/api/admin/students', { cache: 'no-store' }),
-        fetch('/api/admin/session/me', { cache: 'no-store' }),
-      ]);
-      const teachersJson = await teachersRes.json().catch(() => null);
-      const overviewJson = await overviewRes.json().catch(() => null);
-      const studentsJson = await studentsRes.json().catch(() => null);
-      const sessionJson = await sessionRes.json().catch(() => null);
-      const teachersPayload = teachersJson?.data ?? teachersJson;
-      const overviewPayload = overviewJson?.data ?? overviewJson;
-      const studentsPayload = studentsJson?.data ?? studentsJson;
-      const sessionPayload = sessionJson?.data ?? sessionJson;
-      if (teachersRes.status === 401 || overviewRes.status === 401 || studentsRes.status === 401 || sessionRes.status === 401) {
-        router.replace('/admin/login');
-        return;
-      }
-      if (!teachersRes.ok || !teachersJson) {
-        setError(teachersJson?.message || teachersJson?.error || 'Failed to load teachers.');
-        return;
-      }
-      if (!overviewRes.ok || !overviewJson) {
-        setError(overviewJson?.message || overviewJson?.error || 'Failed to load overview.');
-        return;
-      }
-      if (!studentsRes.ok || !studentsJson) {
-        setError(studentsJson?.message || studentsJson?.error || 'Failed to load students.');
-        return;
-      }
-      if (!sessionPayload || typeof (sessionPayload as Record<string, unknown>).role !== 'string') {
-        setError('Failed to load admin session.');
-        return;
-      }
-      setTeachers(Array.isArray(teachersPayload.teachers) ? teachersPayload.teachers : []);
-      setOverview(overviewPayload as AdminOverviewResponse);
-      setStudents(Array.isArray(studentsPayload.students) ? studentsPayload.students : []);
-      setAdminSession(sessionPayload as AdminSessionMeResponse);
-    } catch {
-      setError('Failed to load admin data.');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [schoolName, setSchoolName] = useState('');
 
   useEffect(() => {
-    async function init() {
-      await load();
+    async function load() {
+      setLoading(true);
+      try {
+        const [sessionRes, overviewRes] = await Promise.all([
+          fetch('/api/admin/session/me', { cache: 'no-store' }),
+          fetch('/api/admin/overview', { cache: 'no-store' }),
+        ]);
+        if (!sessionRes.ok) { router.replace('/admin/login'); return; }
+        const sessionBody = unwrap<{ schoolName?: string; displayName?: string } | null>(await sessionRes.json().catch(() => null));
+        setSchoolName(sessionBody?.schoolName ?? sessionBody?.displayName ?? 'School Admin');
+
+        const ovBody = await overviewRes.json().catch(() => null);
+        const ov = unwrap<AdminOverviewResponse | null>(ovBody);
+        if (overviewRes.ok && ov) setOverview(ov);
+      } finally {
+        setLoading(false);
+      }
     }
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void load();
   }, []);
 
-  async function createTeacher() {
-    setLoading(true);
-    setError('');
-    try {
-      const baseScope = {
-        classLevel: newTeacher.classLevel,
-        subject: newTeacher.subject,
-        section: newTeacher.section.trim() || undefined,
-      };
-      const dedupe = new Set<string>();
-      const scopes = [...pendingScopes, baseScope].filter((scope) => {
-        const key = `${scope.classLevel}|${scope.subject}|${scope.section || ''}`;
-        if (dedupe.has(key)) return false;
-        dedupe.add(key);
-        return true;
-      });
-      const response = await fetch('/api/admin/teachers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: newTeacher.phone,
-          name: newTeacher.name,
-          pin: newTeacher.pin,
-          scopes,
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        setError(data?.message || data?.error || 'Failed to create teacher.');
-        return;
-      }
-      setNewTeacher({ phone: '', name: '', pin: '', classLevel: 12, subject: 'Physics', section: '' });
-      setPendingScopes([]);
-      await load();
-    } catch {
-      setError('Failed to create teacher.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function createStudent() {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch('/api/admin/students', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newStudent.name,
-          rollCode: newStudent.rollCode,
-          rollNo: newStudent.rollNo || undefined,
-          batch: newStudent.batch || undefined,
-          classLevel: newStudent.classLevel,
-          section: newStudent.section || undefined,
-          pin: newStudent.pin || undefined,
-          password: newStudent.password || undefined,
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        setError(data?.message || data?.error || 'Failed to create student.');
-        return;
-      }
-      setNewStudent({ name: '', rollCode: '', rollNo: '', batch: '', classLevel: 12, section: '', pin: '', password: '' });
-      await load();
-    } catch {
-      setError('Failed to create student.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function toggleStudentStatus(student: StudentProfile) {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch(`/api/admin/students/${student.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: student.status === 'active' ? 'inactive' : 'active' }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        setError(data?.message || data?.error || 'Failed to update student.');
-        return;
-      }
-      await load();
-    } catch {
-      setError('Failed to update student.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function toggleTeacherStatus(teacher: TeacherProfile) {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch(`/api/admin/teachers/${teacher.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: teacher.status === 'active' ? 'inactive' : 'active' }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        setError(data?.message || data?.error || 'Failed to update teacher.');
-        return;
-      }
-      await load();
-    } catch {
-      setError('Failed to update teacher.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function resetPin(teacherId: string) {
-    const pin = pinReset[teacherId]?.trim();
-    if (!pin) return;
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch(`/api/admin/teachers/${teacherId}/reset-pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        setError(data?.message || data?.error || 'Failed to reset PIN.');
-        return;
-      }
-      setPinReset((prev) => ({ ...prev, [teacherId]: '' }));
-    } catch {
-      setError('Failed to reset PIN.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function getScopeDraft(teacherId: string): { classLevel: 10 | 12; subject: TeacherScope['subject']; section: string } {
-    return (
-      scopeDrafts[teacherId] ?? {
-        classLevel: 12,
-        subject: 'Physics',
-        section: '',
-      }
-    );
-  }
-
-  async function addScope(teacherId: string) {
-    const draft = getScopeDraft(teacherId);
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch(`/api/admin/teachers/${teacherId}/scopes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          classLevel: draft.classLevel,
-          subject: draft.subject,
-          section: draft.section.trim() || undefined,
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        setError(data?.message || data?.error || 'Failed to add scope.');
-        return;
-      }
-      await load();
-    } catch {
-      setError('Failed to add scope.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function removeScope(teacherId: string, scopeId: string) {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch(`/api/admin/teachers/${teacherId}/scopes/${scopeId}`, {
-        method: 'DELETE',
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        setError(data?.message || data?.error || 'Failed to remove scope.');
-        return;
-      }
-      await load();
-    } catch {
-      setError('Failed to remove scope.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function addPendingScope() {
-    const next = {
-      classLevel: newTeacher.classLevel,
-      subject: newTeacher.subject,
-      section: newTeacher.section.trim() || undefined,
-    };
-    const key = `${next.classLevel}|${next.subject}|${next.section || ''}`;
-    if (pendingScopes.some((scope) => `${scope.classLevel}|${scope.subject}|${scope.section || ''}` === key)) {
-      return;
-    }
-    setPendingScopes((prev) => [...prev, next]);
-  }
-
-  const activeTeachers = useMemo(
-    () => teachers.filter((teacher) => teacher.status === 'active').length,
-    [teachers]
-  );
-  const activeStudents = useMemo(() => students.filter((student) => student.status === 'active'), [students]);
-  const inactiveStudents = useMemo(() => students.filter((student) => student.status !== 'active'), [students]);
-
-  async function logout() {
-    await fetch('/api/admin/session/logout', {
-      method: 'POST',
-      cache: 'no-store',
-      credentials: 'include',
-    }).catch(() => undefined);
-    window.location.assign('/admin/login?logout=1');
-  }
-
   return (
-    <div className="min-h-screen bg-[#FDFAF6] px-4 py-8">
-      <div className="max-w-7xl mx-auto space-y-5">
-        <div className="rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-700 text-white px-5 py-6">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h1 className="font-fraunces text-3xl font-bold flex items-center gap-2">
-                <Shield className="w-6 h-6 text-indigo-100" />
-                Admin Control Plane
-              </h1>
-              <p className="text-indigo-100 text-sm mt-1.5">
-                {adminSession?.displayName ? `${adminSession.displayName} | ` : ''}
-                {adminSession?.schoolName || 'School dashboard'}{adminSession?.schoolCode ? ` | ${adminSession.schoolCode}` : ''}
-              </p>
-              <p className="text-indigo-100/90 text-xs mt-1">
-                Manage teachers, students, scopes, and school operations.
-              </p>
+    <div className="p-6 max-w-6xl mx-auto">
+      {/* Header */}
+      <div className="rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-700 text-white px-6 py-6 mb-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="font-fraunces text-2xl sm:text-3xl font-bold">Admin Console</h1>
+            <p className="text-indigo-100 text-sm mt-1.5">{schoolName} — manage teachers, students, and school settings.</p>
+          </div>
+          <School className="w-8 h-8 text-white/40 flex-shrink-0" />
+        </div>
+      </div>
+
+      {/* Storage */}
+      {overview?.storageStatus && (
+        <div className={`rounded-xl border px-4 py-2.5 text-xs mb-4 flex items-center gap-2 ${overview.storageStatus.mode === 'connected' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+          <span><span className="font-semibold">Storage:</span> {overview.storageStatus.message}</span>
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        {[
+          { label: 'Total Teachers', value: overview?.totalTeachers ?? '—', icon: Users, color: 'text-indigo-600 bg-indigo-50' },
+          { label: 'Active Teachers', value: overview?.activeTeachers ?? '—', icon: TrendingUp, color: 'text-emerald-600 bg-emerald-50' },
+          { label: 'Completions (Week)', value: overview?.assignmentCompletionsThisWeek ?? '—', icon: BarChart2, color: 'text-amber-600 bg-amber-50' },
+          { label: 'High Risk Sessions', value: overview?.highRiskExamSessions ?? 0, icon: AlertCircle, color: 'text-rose-600 bg-rose-50' },
+        ].map(({ label, value, icon: Icon, color }) => (
+          <div key={label} className="rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${color}`}>
+              <Icon className="w-4.5 h-4.5" />
             </div>
-            <div className="flex items-center gap-2">
+            <p className="text-2xl font-bold text-gray-900">{loading ? '—' : value}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Quick nav */}
+        <div className="lg:col-span-2">
+          <h2 className="font-semibold text-gray-700 mb-3 text-sm">Quick Navigation</h2>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {QUICK_LINKS.map(({ href, label, icon: Icon, desc, color }) => (
               <Link
-                href="/admin/roster-import"
-                className="text-xs font-semibold bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30"
+                key={href}
+                href={href}
+                className="group flex items-center gap-3 rounded-2xl border border-[#E8E4DC] bg-white p-4 hover:border-indigo-300 hover:shadow-md transition-all"
               >
-                Bulk Import
+                <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center flex-shrink-0 shadow-sm`}>
+                  <Icon className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">{label}</p>
+                  <p className="text-xs text-gray-400 truncate">{desc}</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-indigo-400 transition-colors" />
               </Link>
-              <button onClick={logout} className="text-xs font-semibold bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg border border-white/30">
-                Logout
-              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Weak topics */}
+        <div>
+          <h2 className="font-semibold text-gray-700 mb-3 text-sm">Top Weak Topics</h2>
+          {loading ? (
+            <div className="flex items-center justify-center h-32 text-gray-400">
+              <RefreshCw className="w-4 h-4 animate-spin mr-2" /> Loading…
             </div>
-          </div>
-        </div>
-
-        <div className="grid md:grid-cols-6 gap-3">
-          <Stat label="Total teachers" value={overview?.totalTeachers ?? teachers.length} />
-          <Stat label="Active teachers" value={overview?.activeTeachers ?? activeTeachers} />
-          <Stat label="Assignments this week" value={overview?.assignmentCompletionsThisWeek ?? 0} />
-          <Stat label="Subjects scoped" value={overview?.scopesBySubject.length ?? 0} />
-          <Stat label="High-risk exam sessions" value={overview?.highRiskExamSessions ?? 0} />
-          <Stat
-            label="Storage status"
-            value={overview?.storageStatus?.mode === 'connected' ? 'Connected' : 'Degraded'}
-          />
-        </div>
-
-        {overview?.storageStatus && (
-          <div className={`rounded-xl border px-4 py-3 text-sm ${overview.storageStatus.mode === 'connected' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
-            <span className="font-semibold">Storage:</span> {overview.storageStatus.message}
-          </div>
-        )}
-
-        <div className="bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-4">
-          <h2 className="font-fraunces text-lg font-bold text-navy-700 flex items-center gap-2">
-            <UserPlus className="w-5 h-5 text-emerald-600" />
-            Add Teacher
-          </h2>
-          <div className="grid md:grid-cols-6 gap-2 mt-3">
-            <input value={newTeacher.name} onChange={(e) => setNewTeacher((prev) => ({ ...prev, name: e.target.value }))} placeholder="Name" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <input value={newTeacher.phone} onChange={(e) => setNewTeacher((prev) => ({ ...prev, phone: e.target.value }))} placeholder="Phone" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <input value={newTeacher.pin} onChange={(e) => setNewTeacher((prev) => ({ ...prev, pin: e.target.value }))} placeholder="PIN" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <select
-              value={newTeacher.classLevel}
-              onChange={(e) => {
-                const nextClass = Number(e.target.value) as 10 | 12;
-                const allowed = getSubjectsForClass(nextClass);
-                setNewTeacher((prev) => ({
-                  ...prev,
-                  classLevel: nextClass,
-                  subject: allowed.includes(prev.subject) ? prev.subject : allowed[0],
-                }));
-              }}
-              className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2"
-            >
-              <option value={10}>Class 10</option>
-              <option value={12}>Class 12</option>
-            </select>
-            <select value={newTeacher.subject} onChange={(e) => setNewTeacher((prev) => ({ ...prev, subject: e.target.value as TeacherScope['subject'] }))} className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2">
-              {getSubjectsForClass(newTeacher.classLevel).map((subject) => (
-                <option key={subject}>{subject}</option>
+          ) : (overview?.topWeakTopics ?? []).length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-200 p-8 text-center text-gray-400">
+              <BarChart2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">No analytics yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {overview!.topWeakTopics.slice(0, 6).map(({ topic, count }) => (
+                <div key={topic} className="flex items-center gap-3 rounded-xl border border-[#E8E4DC] bg-white px-4 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate capitalize">{topic}</p>
+                  </div>
+                  <span className="text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">{count}</span>
+                </div>
               ))}
-            </select>
-            <input value={newTeacher.section} onChange={(e) => setNewTeacher((prev) => ({ ...prev, section: e.target.value }))} placeholder="Section (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={addPendingScope}
-              className="text-xs font-semibold border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg"
-            >
-              Add scope to teacher
-            </button>
-            <span className="text-xs text-[#6E6984]">
-              Added scopes: {pendingScopes.length + 1} (including current selection)
-            </span>
-          </div>
-          {pendingScopes.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {pendingScopes.map((scope, index) => (
-                <span key={`${scope.classLevel}-${scope.subject}-${scope.section || 'all'}-${index}`} className="inline-flex items-center gap-1 rounded-full border border-[#DCD7CC] bg-white px-2 py-0.5 text-xs">
-                  Class {scope.classLevel} {scope.subject}{scope.section ? ` (${scope.section})` : ''}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPendingScopes((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
-                    }
-                    className="text-rose-700 hover:text-rose-800 font-bold"
-                    aria-label="Remove pending scope"
-                  >
-                    x
-                  </button>
-                </span>
-              ))}
+              <Link href="/admin/analytics" className="text-xs font-medium text-indigo-600 hover:text-indigo-700 block text-center py-1">
+                View full analytics →
+              </Link>
             </div>
           )}
-          <button disabled={loading} onClick={createTeacher} className="mt-3 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl disabled:opacity-50">
-            Create teacher
-          </button>
         </div>
-
-        <div className="bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-4">
-          <h2 className="font-fraunces text-lg font-bold text-navy-700">Teachers</h2>
-          <div className="mt-3 space-y-3">
-            {teachers.map((teacher) => (
-              <div key={teacher.id} className="rounded-xl border border-[#E8E4DC] bg-[#FAF9F5] p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-[#21213A]">{teacher.name}</p>
-                    <p className="text-xs text-[#6E6984]">{teacher.phone}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => toggleTeacherStatus(teacher)} className="text-xs font-semibold border border-[#DCD7CC] bg-white px-3 py-1.5 rounded-lg hover:bg-[#F1EEE8]">
-                      {teacher.status === 'active' ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-2 text-xs text-[#5F5A73]">
-                  <div className="font-semibold text-[#4D4963] mb-1">Active scopes</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {teacher.scopes.filter((scope) => scope.isActive).map((scope) => (
-                      <span key={scope.id} className="inline-flex items-center gap-1 rounded-full border border-[#DCD7CC] bg-white px-2 py-0.5">
-                        Class {scope.classLevel} {scope.subject}{scope.section ? ` (${scope.section})` : ''}
-                        <button
-                          onClick={() => removeScope(teacher.id, scope.id)}
-                          className="text-rose-700 hover:text-rose-800 font-bold"
-                          aria-label={`Remove scope ${scope.id}`}
-                        >
-                          x
-                        </button>
-                      </span>
-                    ))}
-                    {teacher.scopes.filter((scope) => scope.isActive).length === 0 && <span>No active scopes</span>}
-                  </div>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <input
-                    value={pinReset[teacher.id] ?? ''}
-                    onChange={(event) => setPinReset((prev) => ({ ...prev, [teacher.id]: event.target.value }))}
-                    placeholder="New PIN"
-                    className="text-xs border border-[#E8E4DC] rounded-lg px-2 py-1.5"
-                  />
-                  <button
-                    onClick={() => resetPin(teacher.id)}
-                    className="text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 rounded-lg flex items-center gap-1"
-                  >
-                    <KeyRound className="w-3 h-3" />
-                    Reset PIN
-                  </button>
-                </div>
-                <div className="mt-3 rounded-lg border border-[#E8E4DC] bg-white p-2.5">
-                  <p className="text-[11px] font-semibold text-[#4D4963] mb-1.5">Assign new scope</p>
-                  <div className="grid sm:grid-cols-4 gap-2">
-                    <select
-                      value={getScopeDraft(teacher.id).classLevel}
-                      onChange={(event) =>
-                        setScopeDrafts((prev) => {
-                          const nextClass = Number(event.target.value) as 10 | 12;
-                          const currentDraft = getScopeDraft(teacher.id);
-                          const allowed = getSubjectsForClass(nextClass);
-                          return {
-                            ...prev,
-                            [teacher.id]: {
-                              ...currentDraft,
-                              classLevel: nextClass,
-                              subject: allowed.includes(currentDraft.subject) ? currentDraft.subject : allowed[0],
-                            },
-                          };
-                        })
-                      }
-                      className="text-xs border border-[#E8E4DC] rounded-lg px-2 py-1.5"
-                    >
-                      <option value={10}>Class 10</option>
-                      <option value={12}>Class 12</option>
-                    </select>
-                    <select
-                      value={getScopeDraft(teacher.id).subject}
-                      onChange={(event) =>
-                        setScopeDrafts((prev) => ({
-                          ...prev,
-                          [teacher.id]: {
-                            ...getScopeDraft(teacher.id),
-                            subject: event.target.value as TeacherScope['subject'],
-                          },
-                        }))
-                      }
-                      className="text-xs border border-[#E8E4DC] rounded-lg px-2 py-1.5"
-                    >
-                      {getSubjectsForClass(getScopeDraft(teacher.id).classLevel).map((subject) => (
-                        <option key={`${teacher.id}-${subject}`}>{subject}</option>
-                      ))}
-                    </select>
-                    <input
-                      value={getScopeDraft(teacher.id).section}
-                      onChange={(event) =>
-                        setScopeDrafts((prev) => ({
-                          ...prev,
-                          [teacher.id]: {
-                            ...getScopeDraft(teacher.id),
-                            section: event.target.value,
-                          },
-                        }))
-                      }
-                      placeholder="Section (optional)"
-                      className="text-xs border border-[#E8E4DC] rounded-lg px-2 py-1.5"
-                    />
-                    <button
-                      onClick={() => addScope(teacher.id)}
-                      className="text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 rounded-lg"
-                    >
-                      Add scope
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {teachers.length === 0 && <p className="text-sm text-[#6E6984]">No teachers yet.</p>}
-          </div>
-        </div>
-
-        <div className="bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-4">
-          <h2 className="font-fraunces text-lg font-bold text-navy-700">Student Roster</h2>
-          <div className="grid md:grid-cols-8 gap-2 mt-3">
-            <input value={newStudent.name} onChange={(e) => setNewStudent((prev) => ({ ...prev, name: e.target.value }))} placeholder="Student name" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <input value={newStudent.rollCode} onChange={(e) => setNewStudent((prev) => ({ ...prev, rollCode: e.target.value }))} placeholder="Roll code" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <input value={newStudent.rollNo} onChange={(e) => setNewStudent((prev) => ({ ...prev, rollNo: e.target.value }))} placeholder="Roll no" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <input value={newStudent.batch} onChange={(e) => setNewStudent((prev) => ({ ...prev, batch: e.target.value }))} placeholder="Batch (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <select value={newStudent.classLevel} onChange={(e) => setNewStudent((prev) => ({ ...prev, classLevel: Number(e.target.value) as 10 | 12 }))} className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2">
-              <option value={10}>Class 10</option>
-              <option value={12}>Class 12</option>
-            </select>
-            <input value={newStudent.section} onChange={(e) => setNewStudent((prev) => ({ ...prev, section: e.target.value }))} placeholder="Section (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <input value={newStudent.pin} onChange={(e) => setNewStudent((prev) => ({ ...prev, pin: e.target.value }))} placeholder="PIN (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <input value={newStudent.password} onChange={(e) => setNewStudent((prev) => ({ ...prev, password: e.target.value }))} placeholder="Password (optional)" className="text-sm border border-[#E8E4DC] rounded-xl px-3 py-2" />
-            <button disabled={loading} onClick={createStudent} className="text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl disabled:opacity-50">Create student</button>
-          </div>
-
-          <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pr-1">
-            {activeStudents.map((student) => (
-              <div key={student.id} className="rounded-xl border border-[#E8E4DC] bg-[#FAF9F5] px-3 py-2 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-[#21213A]">{student.name}</p>
-                  <p className="text-xs text-[#6E6984]">
-                    {student.rollCode}
-                    {student.rollNo ? ` | Roll ${student.rollNo}` : ''}
-                    {student.batch ? ` | Batch ${student.batch}` : ''}
-                    {` | Class ${student.classLevel}`}
-                    {student.section ? ` | Section ${student.section}` : ''}
-                  </p>
-                </div>
-                <button onClick={() => toggleStudentStatus(student)} className="text-xs font-semibold border border-[#DCD7CC] bg-white px-3 py-1.5 rounded-lg hover:bg-[#F1EEE8]">
-                  Mark Alumni
-                </button>
-              </div>
-            ))}
-            {activeStudents.length === 0 && <p className="text-sm text-[#6E6984]">No active students.</p>}
-          </div>
-
-          <div className="mt-4">
-            <p className="text-xs font-semibold text-[#5F5A73] mb-2">Archived / Alumni ({inactiveStudents.length})</p>
-            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-              {inactiveStudents.map((student) => (
-                <div key={`inactive-${student.id}`} className="rounded-xl border border-[#E8E4DC] bg-white px-3 py-2 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-[#21213A]">{student.name}</p>
-                    <p className="text-xs text-[#6E6984]">
-                      {student.rollCode}
-                      {student.rollNo ? ` | Roll ${student.rollNo}` : ''}
-                      {student.batch ? ` | Batch ${student.batch}` : ''}
-                      {` | Class ${student.classLevel}`}
-                      {student.section ? ` | Section ${student.section}` : ''}
-                    </p>
-                  </div>
-                  <button onClick={() => toggleStudentStatus(student)} className="text-xs font-semibold border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-100">
-                    Re-activate
-                  </button>
-                </div>
-              ))}
-              {inactiveStudents.length === 0 && <p className="text-sm text-[#6E6984]">No archived students.</p>}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid lg:grid-cols-2 gap-4">
-          <InfoCard title="Top chapters in assignments" items={(overview?.topChapters ?? []).map((item) => `${item.chapterId} (${item.count})`)} />
-          <InfoCard title="Scopes by section" items={(overview?.scopesBySection ?? []).map((item) => `${item.section} (${item.count})`)} />
-        </div>
-
-        {error && (
-          <div
-            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
-            role="alert"
-            aria-live="assertive"
-          >
-            {error}
-          </div>
-        )}
       </div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-4">
-      <p className="text-xs text-[#6E6984]">{label}</p>
-      <p className="text-2xl font-bold text-navy-700 mt-1">{value}</p>
-    </div>
-  );
-}
-
-function InfoCard({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-4">
-      <h3 className="font-fraunces text-lg font-bold text-navy-700">{title}</h3>
-      <ul className="mt-2 space-y-1">
-        {items.slice(0, 8).map((item) => (
-          <li key={item} className="text-sm text-[#4C4860]">{item}</li>
-        ))}
-        {items.length === 0 && <li className="text-sm text-[#6E6984]">No data yet.</li>}
-      </ul>
     </div>
   );
 }

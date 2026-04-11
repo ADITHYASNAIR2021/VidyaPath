@@ -194,6 +194,10 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
       <div className="px-5 pb-5 pt-2 grid grid-cols-3 gap-2 border-t border-gray-100">
         <Link
           href={`/chapters/${chapter.id}`}
+          scroll
+          onClick={() => {
+            if (typeof window !== 'undefined') window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+          }}
           className="flex items-center justify-center gap-1.5 bg-saffron-500 hover:bg-saffron-600 active:scale-95 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-all col-span-1"
         >
           <BookOpen className="w-3.5 h-3.5" />

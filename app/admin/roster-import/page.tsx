@@ -56,6 +56,79 @@ function parseCsv(text: string): ParsedPreview {
   return { headers, rows };
 }
 
+function toCsv(preview: ParsedPreview): string {
+  if (preview.headers.length === 0) return '';
+  const escapeCell = (value: string) => {
+    const normalized = value.replaceAll('"', '""');
+    return /[",\n]/.test(normalized) ? `"${normalized}"` : normalized;
+  };
+  const headerLine = preview.headers.map(escapeCell).join(',');
+  const rowLines = preview.rows.map((row) =>
+    preview.headers.map((header) => escapeCell(String(row[header] ?? ''))).join(',')
+  );
+  return [headerLine, ...rowLines].join('\n');
+}
+
+function normalizeRowsFromSheet(rows: Array<Record<string, unknown>>): ParsedPreview {
+  if (rows.length === 0) return { headers: [], rows: [] };
+  const headers = Array.from(
+    rows.reduce((set, row) => {
+      Object.keys(row).forEach((key) => {
+        const trimmed = key.trim();
+        if (trimmed) set.add(trimmed);
+      });
+      return set;
+    }, new Set<string>())
+  );
+  const normalizedRows = rows.map((row) => {
+    const entry: Record<string, string> = {};
+    headers.forEach((header) => {
+      const value = row[header];
+      entry[header] = value === null || value === undefined ? '' : String(value).trim();
+    });
+    return entry;
+  });
+  return { headers, rows: normalizedRows };
+}
+
+async function parseSpreadsheetFile(file: File): Promise<ParsedPreview> {
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+    const [{ read, utils }, buffer] = await Promise.all([
+      import('xlsx'),
+      file.arrayBuffer(),
+    ]);
+    const workbook = read(buffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return { headers: [], rows: [] };
+    const sheet = workbook.Sheets[sheetName];
+    const rows = utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+    return normalizeRowsFromSheet(rows);
+  }
+
+  const text = await file.text().catch(() => '');
+  if (lowerName.endsWith('.tsv')) {
+    const csvLike = text
+      .split(/\r?\n/)
+      .map((line) => line.replaceAll('\t', ','))
+      .join('\n');
+    return parseCsv(csvLike);
+  }
+  return parseCsv(text);
+}
+
+function downloadTemplate(entity: ImportEntity, template: string) {
+  const blob = new Blob([template], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = entity === 'students' ? 'vidyapath_students_template.csv' : 'vidyapath_teachers_template.csv';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function AdminRosterImportPage() {
   const router = useRouter();
   const [entity, setEntity] = useState<ImportEntity>('students');
@@ -64,6 +137,7 @@ export default function AdminRosterImportPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [emergencyOverride, setEmergencyOverride] = useState(false);
 
   const sampleTemplate = useMemo(() => (
     entity === 'students'
@@ -79,8 +153,9 @@ export default function AdminRosterImportPage() {
   async function onFileSelect(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    const text = await file.text().catch(() => '');
-    refreshPreview(text);
+    const parsed = await parseSpreadsheetFile(file).catch(() => ({ headers: [], rows: [] }));
+    setPreview(parsed);
+    setCsvText(toCsv(parsed));
   }
 
   async function runImport() {
@@ -96,7 +171,11 @@ export default function AdminRosterImportPage() {
       const response = await fetch('/api/admin/import/roster', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entity, rows }),
+        body: JSON.stringify({
+          entity,
+          rows,
+          emergencyOverride: entity === 'students' ? emergencyOverride : undefined,
+        }),
       });
       const payload = await response.json().catch(() => null);
       if (response.status === 401) {
@@ -148,8 +227,8 @@ export default function AdminRosterImportPage() {
               <option value="teachers">Teachers import</option>
             </select>
             <label className="rounded-xl border border-[#E8E4DC] px-3 py-2.5 text-sm">
-              Upload CSV
-              <input type="file" accept=".csv,text/csv" onChange={onFileSelect} className="mt-1 block w-full text-xs" />
+              Upload CSV/XLSX
+              <input type="file" accept=".csv,.tsv,.xlsx,.xls,text/csv" onChange={onFileSelect} className="mt-1 block w-full text-xs" />
             </label>
             <button
               type="button"
@@ -167,6 +246,22 @@ export default function AdminRosterImportPage() {
               {submitting ? 'Importing...' : 'Run Import'}
             </button>
           </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => downloadTemplate('students', 'name,rollNo,rollCode,classLevel,section,batch,pin,password\nArjun Nair,001,C12A001,12,A,2026,2244,2244')}
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+            >
+              Download Students CSV Template
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadTemplate('teachers', 'name,phone,staffCode,scopeClassLevel,scopeSubject,scopeSection,pin,password\nAnanya Rao,9001000001,PHY12,12,Physics,A,2468,2468')}
+              className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+            >
+              Download Teachers CSV Template
+            </button>
+          </div>
 
           <textarea
             value={csvText}
@@ -176,9 +271,20 @@ export default function AdminRosterImportPage() {
           />
 
           <p className="mt-2 text-xs text-[#7A7490]">
+            Supported files: CSV, TSV, XLSX, XLS.
             Supported columns for students: `name, rollNo, rollCode, classLevel, section, batch, pin, password`.
             Supported columns for teachers: `name, phone, staffCode, scopeClassLevel, scopeSubject, scopeSection, pin, password`.
           </p>
+          {entity === 'students' && (
+            <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-amber-800">
+              <input
+                type="checkbox"
+                checked={emergencyOverride}
+                onChange={(event) => setEmergencyOverride(event.target.checked)}
+              />
+              Emergency override (use only if class-teacher import is unavailable)
+            </label>
+          )}
         </div>
 
         <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm">

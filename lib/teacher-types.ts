@@ -16,6 +16,7 @@ export interface TeacherScope {
 
 export interface TeacherProfile {
   id: string;
+  schoolId?: string;
   phone: string;
   name: string;
   staffCode?: string;
@@ -43,6 +44,8 @@ export interface TeacherAnnouncement {
   title: string;
   body: string;
   createdAt: string;
+  deliveryScope?: 'class' | 'section' | 'batch' | 'chapter';
+  batch?: string;
 }
 
 export interface TeacherFormulaDrillItem {
@@ -96,6 +99,12 @@ export interface TeacherAssignmentPack {
   approvedByTeacherId?: string;
   approvedAt?: string;
   publishedAt?: string;
+  visibilityStatus?: 'open' | 'closed';
+  validFrom?: string;
+  validUntil?: string;
+  closedAt?: string;
+  reopenedCount?: number;
+  extendedCount?: number;
 }
 
 export interface TeacherSubmissionAnswer {
@@ -402,6 +411,11 @@ export interface StudentSession {
   rollCode: string;
   classLevel: 10 | 12;
   section?: string;
+  schoolId?: string;
+  schoolCode?: string;
+  batch?: string;
+  stream?: 'Science' | 'Commerce' | 'Humanities';
+  enrolledSubjects?: Subject[];
 }
 
 export interface SheetsIntegrationSettings {

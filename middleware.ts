@@ -5,9 +5,27 @@ import { csrfAllowedForMutation } from '@/lib/security/csrf';
 const ADMIN_SESSION_COOKIE = 'vp_admin_session';
 const TEACHER_SESSION_COOKIE = 'vp_teacher_session';
 const STUDENT_SESSION_COOKIE = 'vp_student_session';
+const DEVELOPER_SESSION_COOKIE = 'vp_developer_session';
+const PARENT_SESSION_COOKIE = 'vp_parent_session';
 const SUPABASE_ACCESS_COOKIE = 'vp_sb_access_token';
 const SUPABASE_REFRESH_COOKIE = 'vp_sb_refresh_token';
 const SUPABASE_ROLE_HINT_COOKIE = 'vp_role_hint';
+// AI API routes — require any authenticated session (student / teacher / admin / developer)
+const AUTH_REQUIRED_AI_API_PREFIXES = [
+  '/api/ai-tutor',
+  '/api/generate-quiz',
+  '/api/generate-flashcards',
+  '/api/revision-plan',
+  '/api/paper-evaluate',
+  '/api/image-solve',
+  '/api/chapter-pack',
+  '/api/chapter-drill',
+  '/api/chapter-diagnose',
+  '/api/chapter-remediate',
+  '/api/adaptive-test',
+  '/api/context-pack',
+];
+
 function resolveSessionSecret(): string {
   const explicit = (process.env.SESSION_SIGNING_SECRET || '').trim();
   if (explicit) return explicit;
@@ -20,13 +38,14 @@ function resolveSessionSecret(): string {
 }
 
 interface SessionPayload {
-  role: 'admin' | 'teacher' | 'student';
+  role: 'admin' | 'teacher' | 'student' | 'developer';
   teacherId?: string;
   studentId?: string;
   studentName?: string;
   rollCode?: string;
   classLevel?: number;
   section?: string;
+  username?: string;
   expiresAt: number;
 }
 
@@ -96,7 +115,7 @@ async function signBase64UrlPayload(payloadBase64Url: string, secret: string): P
 
 async function isValidSignedSessionToken(
   token: string | undefined,
-  expectedRole: 'admin' | 'teacher' | 'student'
+  expectedRole: 'admin' | 'teacher' | 'student' | 'developer'
 ): Promise<boolean> {
   if (!token) return false;
   const [encodedPayload, providedSignature] = token.split('.');
@@ -132,9 +151,13 @@ async function isValidSignedSessionToken(
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const singleEnvMode = process.env.SINGLE_ENV_MODE === '1';
   const isProtectedApiMutation =
     (pathname.startsWith('/api/admin') ||
       pathname.startsWith('/api/teacher') ||
+      pathname.startsWith('/api/student') ||
+      pathname.startsWith('/api/mock-exam') ||
+      pathname.startsWith('/api/parent') ||
       pathname.startsWith('/api/developer') ||
       pathname.startsWith('/api/integrations/sheets') ||
       pathname.startsWith('/api/exam/session')) &&
@@ -163,19 +186,37 @@ export async function middleware(request: NextRequest) {
   const adminToken = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
   const teacherToken = request.cookies.get(TEACHER_SESSION_COOKIE)?.value;
   const studentToken = request.cookies.get(STUDENT_SESSION_COOKIE)?.value;
+  const developerToken = request.cookies.get(DEVELOPER_SESSION_COOKIE)?.value;
+  const parentToken = request.cookies.get(PARENT_SESSION_COOKIE)?.value;
   const supabaseAccess = request.cookies.get(SUPABASE_ACCESS_COOKIE)?.value;
   const supabaseRefresh = request.cookies.get(SUPABASE_REFRESH_COOKIE)?.value;
   const supabaseRoleHint = parseSupabaseRoleHint(request.cookies.get(SUPABASE_ROLE_HINT_COOKIE)?.value);
   const hasSupabaseSession = hasValidSupabaseSession(supabaseAccess, supabaseRefresh);
-  const [legacyHasAdminSession, legacyHasTeacherSession, legacyHasStudentSession] = await Promise.all([
+  const [legacyHasAdminSession, legacyHasTeacherSession, legacyHasStudentSession, legacyHasDeveloperSession] = await Promise.all([
     isValidSignedSessionToken(adminToken, 'admin'),
     isValidSignedSessionToken(teacherToken, 'teacher'),
     isValidSignedSessionToken(studentToken, 'student'),
+    isValidSignedSessionToken(developerToken, 'developer'),
   ]);
-  const hasDeveloperSession = hasSupabaseSession && supabaseRoleHint === 'developer';
+  const hasDeveloperSession = legacyHasDeveloperSession || (hasSupabaseSession && supabaseRoleHint === 'developer');
   const hasAdminSession = legacyHasAdminSession || (hasSupabaseSession && (supabaseRoleHint === 'admin' || supabaseRoleHint === 'developer'));
   const hasTeacherSession = legacyHasTeacherSession || (hasSupabaseSession && supabaseRoleHint === 'teacher');
   const hasStudentSession = legacyHasStudentSession || (hasSupabaseSession && supabaseRoleHint === 'student');
+  const hasParentSession = !!parentToken;
+  const hasDeveloperLikeSession = hasDeveloperSession || (singleEnvMode && hasAdminSession);
+  const isAuthRequiredAiApi = AUTH_REQUIRED_AI_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  const hasAnySession = hasStudentSession || hasTeacherSession || hasAdminSession || hasDeveloperSession;
+
+  if (isAuthRequiredAiApi && !hasAnySession) {
+    return NextResponse.json(
+      {
+        ok: false,
+        errorCode: 'auth-required',
+        message: 'Please login to use AI features.',
+      },
+      { status: 401 }
+    );
+  }
 
   if (pathname.startsWith('/teacher/assignment/')) {
     const url = request.nextUrl.clone();
@@ -185,7 +226,9 @@ export async function middleware(request: NextRequest) {
 
   if (pathname === '/admin/login' && hasAdminSession) {
     const url = request.nextUrl.clone();
-    url.pathname = hasDeveloperSession ? '/developer' : '/admin';
+    const nextTarget = request.nextUrl.searchParams.get('next')?.trim() || '';
+    const shouldLandDeveloper = hasDeveloperSession || (singleEnvMode && nextTarget.startsWith('/developer'));
+    url.pathname = shouldLandDeveloper ? '/developer' : '/admin';
     return NextResponse.redirect(url);
   }
   if (pathname === '/teacher/login' && hasTeacherSession) {
@@ -198,16 +241,26 @@ export async function middleware(request: NextRequest) {
     url.pathname = '/dashboard';
     return NextResponse.redirect(url);
   }
+  if (pathname === '/parent/login' && hasParentSession) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/parent';
+    return NextResponse.redirect(url);
+  }
 
   if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
     if (!hasAdminSession) return redirectToLogin(request, '/admin/login');
   }
-  if (pathname.startsWith('/developer')) {
-    if (!hasDeveloperSession) {
+  if (pathname === '/developer/login' && hasDeveloperLikeSession) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/developer';
+    url.search = '';
+    return NextResponse.redirect(url);
+  }
+  if (pathname.startsWith('/developer') && pathname !== '/developer/login') {
+    if (!hasDeveloperLikeSession) {
       const url = request.nextUrl.clone();
-      url.pathname = '/admin/login';
+      url.pathname = '/developer/login';
       url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
-      url.searchParams.set('reason', 'developer-required');
       return NextResponse.redirect(url);
     }
   }
@@ -223,8 +276,26 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(url);
     }
   }
+  if (pathname.startsWith('/mock-exam')) {
+    if (!hasStudentSession) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/student/login';
+      url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+      url.searchParams.set('reason', 'auth-required');
+      return NextResponse.redirect(url);
+    }
+  }
+  if (pathname.startsWith('/parent') && pathname !== '/parent/login') {
+    if (!hasParentSession) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/parent/login';
+      url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+      url.searchParams.set('reason', 'auth-required');
+      return NextResponse.redirect(url);
+    }
+  }
   if (pathname.startsWith('/dashboard') || pathname.startsWith('/bookmarks')) {
-    if (!hasStudentSession && !hasAdminSession && !hasDeveloperSession) {
+    if (!hasStudentSession && !hasAdminSession && !hasDeveloperLikeSession) {
       const url = request.nextUrl.clone();
       url.pathname = '/student/login';
       url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
@@ -233,7 +304,7 @@ export async function middleware(request: NextRequest) {
     }
   }
   if (pathname.startsWith('/api-lab')) {
-    if (!hasAdminSession && !hasDeveloperSession) {
+    if (!hasAdminSession && !hasDeveloperLikeSession) {
       const url = request.nextUrl.clone();
       url.pathname = '/admin/login';
       url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
@@ -259,9 +330,11 @@ export const config = {
     '/admin/:path*',
     '/teacher/:path*',
     '/student/:path*',
+    '/parent/:path*',
     '/developer/:path*',
     '/dashboard/:path*',
     '/bookmarks/:path*',
+    '/mock-exam/:path*',
     '/api-lab/:path*',
     '/exam/assignment/:path*',
     '/helper/:path*',

@@ -34,6 +34,9 @@ export default function SiteFooter() {
           <Link href="/admin/login" className="text-amber-700 hover:text-amber-800 font-semibold">
             Admin
           </Link>
+          <Link href="/developer/login" className="text-violet-700 hover:text-violet-800 font-semibold">
+            Developer
+          </Link>
         </div>
       </div>
     </footer>

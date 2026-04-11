@@ -19,6 +19,11 @@ import {
   ShieldCheck,
   Wrench,
   LogOut,
+  Zap,
+  Upload,
+  BarChart2,
+  Search,
+  FlaskConical,
 } from 'lucide-react';
 import clsx from 'clsx';
 import CommandPalette from '@/components/CommandPalette';
@@ -26,96 +31,127 @@ import type { PlatformRole } from '@/lib/auth/roles';
 
 type ActiveRole = PlatformRole;
 
-interface SessionPayload {
+interface SessionState {
   role: ActiveRole;
   authenticated: boolean;
+  displayName?: string;
 }
 
+/* ── Role meta (badge colour + label) ─────────────────────────────────── */
+const ROLE_META: Record<Exclude<ActiveRole, 'anonymous'>, { label: string; chip: string }> = {
+  student:   { label: 'Student',   chip: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  teacher:   { label: 'Teacher',   chip: 'bg-indigo-50  text-indigo-700  border-indigo-200'  },
+  admin:     { label: 'Admin',     chip: 'bg-amber-50   text-amber-700   border-amber-200'   },
+  developer: { label: 'Developer', chip: 'bg-violet-50  text-violet-700  border-violet-200'  },
+};
+
+/* ── Nav links per role ───────────────────────────────────────────────── */
 function getNavLinks(role: ActiveRole) {
-  if (role === 'student') {
-    return [
-      { href: '/', label: 'Home', icon: Home },
-      { href: '/chapters', label: 'Chapters', icon: BookOpen },
-      { href: '/papers', label: 'Papers', icon: FileText },
-      { href: '/formulas', label: 'Formulas', icon: Calculator },
-      { href: '/equations', label: 'Equations', icon: Calculator },
-      { href: '/dashboard', label: 'Dashboard', icon: Target },
-      { href: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
-    ];
+  switch (role) {
+    case 'student':
+      return [
+        { href: '/',           label: 'Home',       icon: Home       },
+        { href: '/chapters',   label: 'Chapters',   icon: BookOpen   },
+        { href: '/dashboard',  label: 'Dashboard',  icon: Target     },
+        { href: '/papers',     label: 'Papers',     icon: FileText   },
+        { href: '/formulas',   label: 'Formulas',   icon: Calculator },
+        { href: '/equations',  label: 'Equations',  icon: FlaskConical },
+        { href: '/bookmarks',  label: 'Bookmarks',  icon: Bookmark   },
+      ];
+
+    case 'teacher':
+      return [
+        { href: '/',           label: 'Home',           icon: Home     },
+        { href: '/teacher',    label: 'Teacher Desk',   icon: Users    },
+        { href: '/chapters',   label: 'Chapters',       icon: BookOpen },
+        { href: '/formulas',   label: 'Formulas',       icon: Calculator },
+        { href: '/equations',  label: 'Equations',      icon: FlaskConical },
+        { href: '/papers',     label: 'Papers',         icon: FileText },
+      ];
+
+    case 'admin':
+      return [
+        { href: '/',                    label: 'Home',           icon: Home       },
+        { href: '/admin',               label: 'Admin Console',  icon: ShieldCheck },
+        { href: '/admin/roster-import', label: 'Roster Import',  icon: Upload     },
+        { href: '/chapters',            label: 'Chapters',       icon: BookOpen   },
+        { href: '/formulas',            label: 'Formulas',       icon: Calculator },
+      ];
+
+    case 'developer':
+      return [
+        { href: '/',                    label: 'Home',           icon: Home       },
+        { href: '/developer',           label: 'Dev Console',    icon: Wrench     },
+        { href: '/developer/schools',   label: 'Schools',        icon: GraduationCap },
+        { href: '/developer/usage',     label: 'Usage',          icon: BarChart2  },
+        { href: '/developer/audit',     label: 'Audit',          icon: ShieldCheck },
+        { href: '/api-lab',             label: 'API Lab',        icon: Terminal   },
+        { href: '/chapters',            label: 'Chapters',       icon: BookOpen   },
+      ];
+
+    default: // anonymous
+      return [
+        { href: '/',          label: 'Home',      icon: Home        },
+        { href: '/chapters',  label: 'Chapters',  icon: BookOpen    },
+        { href: '/formulas',  label: 'Formulas',  icon: Calculator  },
+        { href: '/equations', label: 'Equations', icon: FlaskConical },
+        { href: '/papers',    label: 'Papers',    icon: FileText    },
+        { href: '/career',    label: 'Career',    icon: Compass     },
+      ];
   }
-  if (role === 'teacher') {
-    return [
-      { href: '/', label: 'Home', icon: Home },
-      { href: '/teacher', label: 'Teacher Desk', icon: Users },
-      { href: '/teacher?tab=assignments', label: 'Assignments', icon: FileText },
-      { href: '/teacher?tab=results', label: 'Results', icon: Target },
-      { href: '/teacher?tab=question-builder', label: 'Question Builder', icon: BookOpen },
-    ];
-  }
-  if (role === 'admin') {
-    return [
-      { href: '/', label: 'Home', icon: Home },
-      { href: '/admin', label: 'Admin Console', icon: ShieldCheck },
-      { href: '/admin?tab=teachers', label: 'Teachers', icon: Users },
-      { href: '/admin?tab=students', label: 'Students', icon: GraduationCap },
-      { href: '/admin?tab=analytics', label: 'School Analytics', icon: Target },
-    ];
-  }
-  if (role === 'developer') {
-    return [
-      { href: '/', label: 'Home', icon: Home },
-      { href: '/developer', label: 'Developer Console', icon: Wrench },
-      { href: '/developer?tab=schools', label: 'Schools', icon: GraduationCap },
-      { href: '/developer?tab=usage', label: 'Platform Usage', icon: Target },
-      { href: '/developer?tab=audit', label: 'Audit', icon: ShieldCheck },
-      { href: '/api-lab', label: 'API Lab', icon: Terminal },
-    ];
-  }
-  return [
-    { href: '/', label: 'Home', icon: Home },
-    { href: '/chapters', label: 'Chapters', icon: BookOpen },
-    { href: '/papers', label: 'Papers', icon: FileText },
-    { href: '/career', label: 'Career', icon: Compass },
-  ];
 }
 
+/* ── Logout endpoints ─────────────────────────────────────────────────── */
+async function callLogout(role: ActiveRole) {
+  const urls: Partial<Record<ActiveRole, string>> = {
+    student:   '/api/student/session/logout',
+    teacher:   '/api/teacher/session/logout',
+    admin:     '/api/admin/session/logout',
+    developer: '/api/developer/session/logout',
+  };
+  const url = urls[role];
+  if (url) await fetch(url, { method: 'POST' }).catch(() => undefined);
+}
+
+/* ── Component ────────────────────────────────────────────────────────── */
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [session, setSession] = useState<SessionPayload>({ role: 'anonymous', authenticated: false });
+  const [session, setSession] = useState<SessionState>({ role: 'anonymous', authenticated: false });
   const [loggingOut, setLoggingOut] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const isExamRoute = pathname.startsWith('/exam/assignment/');
+  const isPortalRoute =
+    pathname.startsWith('/teacher') ||
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/developer');
   const navLinks = useMemo(() => getNavLinks(session.role), [session.role]);
+  const roleMeta = session.role !== 'anonymous' ? ROLE_META[session.role] : null;
 
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
     fetch('/api/auth/session', { signal: controller.signal, cache: 'no-store' })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => null);
-        if (!active || !payload || typeof payload.role !== 'string') return;
-        const role = payload.role as ActiveRole;
-        setSession({ role, authenticated: !!payload.authenticated && role !== 'anonymous' });
+      .then(async (res) => {
+        const payload = await res.json().catch(() => null);
+        const data = payload?.data ?? payload;
+        if (!active || !data || typeof data.role !== 'string') return;
+        const role = data.role as ActiveRole;
+        setSession({
+          role,
+          authenticated: !!data.authenticated && role !== 'anonymous',
+          displayName: typeof data.displayName === 'string' ? data.displayName : undefined,
+        });
       })
       .catch(() => undefined);
-    return () => {
-      active = false;
-      controller.abort();
-    };
+    return () => { active = false; controller.abort(); };
   }, [pathname]);
 
   async function logout() {
     if (session.role === 'anonymous') return;
     setLoggingOut(true);
     try {
-      if (session.role === 'student') {
-        await fetch('/api/student/session/logout', { method: 'POST' });
-      } else if (session.role === 'teacher') {
-        await fetch('/api/teacher/session/logout', { method: 'POST' });
-      } else {
-        await fetch('/api/admin/session/logout', { method: 'POST' });
-      }
+      await callLogout(session.role);
     } finally {
       setLoggingOut(false);
       setMobileOpen(false);
@@ -125,6 +161,10 @@ export default function Navbar() {
     }
   }
 
+  /* Portal routes — Sidebar handles navigation */
+  if (isPortalRoute) return null;
+
+  /* Exam mode — minimal nav */
   if (isExamRoute) {
     return (
       <nav className="sticky top-0 z-50 border-b border-[#E8E4DC] bg-white/95 backdrop-blur-md">
@@ -142,11 +182,33 @@ export default function Navbar() {
     );
   }
 
+  const NavLink = ({ href, label, icon: Icon, onClick }: { href: string; label: string; icon: React.ElementType; onClick?: () => void }) => {
+    const hrefPath = href.split('?')[0];
+    const isActive = hrefPath === '/' ? pathname === '/' : pathname.startsWith(hrefPath);
+    return (
+      <Link
+        href={href}
+        onClick={onClick}
+        className={clsx(
+          'flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all',
+          isActive
+            ? 'bg-saffron-50 text-saffron-700'
+            : 'text-[#4A4A6A] hover:bg-[#F7F5F0] hover:text-[#1C1C2E]'
+        )}
+      >
+        <Icon className="w-4 h-4 shrink-0" />
+        {label}
+      </Link>
+    );
+  };
+
   return (
     <nav className="sticky top-0 z-50 border-b border-[#E8E4DC] bg-white/95 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="h-16 flex items-center justify-between gap-4">
-          <Link href="/" className="flex items-center gap-2 group" onClick={() => setMobileOpen(false)}>
+
+          {/* Brand */}
+          <Link href="/" className="flex items-center gap-2 group shrink-0" onClick={() => setMobileOpen(false)}>
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-saffron-500 to-amber-500 text-white flex items-center justify-center shadow-sm">
               <GraduationCap className="w-5 h-5" />
             </div>
@@ -158,67 +220,60 @@ export default function Navbar() {
             </div>
           </Link>
 
-          <div className="hidden xl:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] bg-white p-1">
-            {navLinks.map(({ href, label, icon: Icon }) => {
-              const hrefPath = href.split('?')[0];
-              const isActive = hrefPath === '/' ? pathname === '/' : pathname.startsWith(hrefPath);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={clsx(
-                    'flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all',
-                    isActive
-                      ? 'bg-saffron-50 text-saffron-700'
-                      : 'text-[#4A4A6A] hover:bg-[#F7F5F0] hover:text-[#1C1C2E]'
-                  )}
-                >
-                  <Icon className="w-4 h-4" />
-                  {label}
-                </Link>
-              );
-            })}
+          {/* Desktop nav links */}
+          <div className="hidden xl:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] bg-white p-1 overflow-x-auto max-w-[60vw]">
+            {navLinks.map(({ href, label, icon }) => (
+              <NavLink key={href} href={href} label={label} icon={icon} />
+            ))}
           </div>
 
-          <div className="hidden md:flex items-center gap-2">
+          {/* Desktop right area */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
             <CommandPalette />
+
             {session.authenticated ? (
-              <button
-                onClick={logout}
-                disabled={loggingOut}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors disabled:opacity-60"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                {loggingOut ? 'Signing out...' : 'Logout'}
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Role + name badge */}
+                {roleMeta && (
+                  <span className={clsx('inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold', roleMeta.chip)}>
+                    {session.role === 'developer' && <Wrench className="w-3 h-3" />}
+                    {session.role === 'admin'     && <ShieldCheck className="w-3 h-3" />}
+                    {session.role === 'teacher'   && <Users className="w-3 h-3" />}
+                    {session.role === 'student'   && <GraduationCap className="w-3 h-3" />}
+                    {session.displayName ? session.displayName : roleMeta.label}
+                  </span>
+                )}
+                {/* AI access badge for non-students */}
+                {(session.role === 'teacher' || session.role === 'admin' || session.role === 'developer') && (
+                  <span className="inline-flex items-center gap-1 rounded-xl border border-saffron-200 bg-saffron-50 px-2 py-1.5 text-[11px] font-semibold text-saffron-700">
+                    <Zap className="w-3 h-3" />
+                    AI
+                  </span>
+                )}
+                <button
+                  onClick={logout}
+                  disabled={loggingOut}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors disabled:opacity-60"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  {loggingOut ? 'Signing out…' : 'Logout'}
+                </button>
+              </div>
             ) : (
-              <>
-                <Link
-                  href="/student/login"
-                  className="text-xs font-semibold px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
-                >
-                  Student Login
-                </Link>
-                <Link
-                  href="/teacher/login"
-                  className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
-                >
-                  Teacher Login
-                </Link>
-                <Link
-                  href="/admin/login"
-                  className="text-xs font-semibold px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
-                >
-                  Admin Login
-                </Link>
-              </>
+              <div className="flex items-center gap-1.5">
+                <Link href="/student/login"  className="text-xs font-semibold px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors">Student</Link>
+                <Link href="/teacher/login"  className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors">Teacher</Link>
+                <Link href="/admin/login"    className="text-xs font-semibold px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors">Admin</Link>
+                <Link href="/developer/login" className="text-xs font-semibold px-3 py-2 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors">Developer</Link>
+              </div>
             )}
           </div>
 
+          {/* Mobile right area */}
           <div className="md:hidden flex items-center gap-2">
             <CommandPalette />
             <button
-              onClick={() => setMobileOpen((open) => !open)}
+              onClick={() => setMobileOpen((o) => !o)}
               className="p-2 rounded-xl text-[#4A4A6A] hover:bg-gray-100 transition-colors"
               aria-label="Toggle navigation menu"
             >
@@ -228,58 +283,40 @@ export default function Navbar() {
         </div>
       </div>
 
+      {/* Mobile drawer */}
       {mobileOpen && (
         <div className="md:hidden border-t border-[#E8E4DC] bg-white">
           <div className="px-4 py-3 space-y-1">
-            {navLinks.map(({ href, label, icon: Icon }) => {
-              const hrefPath = href.split('?')[0];
-              const isActive = hrefPath === '/' ? pathname === '/' : pathname.startsWith(hrefPath);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  onClick={() => setMobileOpen(false)}
-                  className={clsx(
-                    'flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors',
-                    isActive ? 'bg-saffron-50 text-saffron-700' : 'text-[#4A4A6A] hover:bg-[#F7F5F0]'
-                  )}
-                >
-                  <Icon className="w-4 h-4" />
-                  {label}
-                </Link>
-              );
-            })}
+
+            {/* Role badge (mobile) */}
+            {session.authenticated && roleMeta && (
+              <div className={clsx('mb-2 inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold', roleMeta.chip)}>
+                {session.displayName ? session.displayName : roleMeta.label}
+                {(session.role === 'teacher' || session.role === 'admin' || session.role === 'developer') && (
+                  <span className="ml-1 inline-flex items-center gap-0.5 text-saffron-600"><Zap className="w-3 h-3" />AI</span>
+                )}
+              </div>
+            )}
+
+            {navLinks.map(({ href, label, icon }) => (
+              <NavLink key={href} href={href} label={label} icon={icon} onClick={() => setMobileOpen(false)} />
+            ))}
+
             {session.authenticated ? (
               <button
                 onClick={logout}
                 disabled={loggingOut}
-                className="w-full mt-2 text-sm font-semibold text-center px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 disabled:opacity-60"
+                className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm font-semibold px-3 py-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 disabled:opacity-60"
               >
-                {loggingOut ? 'Signing out...' : 'Logout'}
+                <LogOut className="w-4 h-4" />
+                {loggingOut ? 'Signing out…' : 'Logout'}
               </button>
             ) : (
-              <div className="pt-2 grid grid-cols-1 gap-2">
-                <Link
-                  href="/student/login"
-                  onClick={() => setMobileOpen(false)}
-                  className="text-sm font-semibold text-center px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700"
-                >
-                  Student Login
-                </Link>
-                <Link
-                  href="/teacher/login"
-                  onClick={() => setMobileOpen(false)}
-                  className="text-sm font-semibold text-center px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700"
-                >
-                  Teacher Login
-                </Link>
-                <Link
-                  href="/admin/login"
-                  onClick={() => setMobileOpen(false)}
-                  className="text-sm font-semibold text-center px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700"
-                >
-                  Admin Login
-                </Link>
+              <div className="pt-2 grid grid-cols-2 gap-2">
+                <Link href="/student/login"   onClick={() => setMobileOpen(false)} className="text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700">Student</Link>
+                <Link href="/teacher/login"   onClick={() => setMobileOpen(false)} className="text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700">Teacher</Link>
+                <Link href="/admin/login"     onClick={() => setMobileOpen(false)} className="text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700">Admin</Link>
+                <Link href="/developer/login" onClick={() => setMobileOpen(false)} className="text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-violet-200 bg-violet-50 text-violet-700">Developer</Link>
               </div>
             )}
           </div>

@@ -2,9 +2,11 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import {
   ADMIN_SESSION_COOKIE,
+  DEVELOPER_SESSION_COOKIE,
   STUDENT_SESSION_COOKIE,
   TEACHER_SESSION_COOKIE,
   parseAdminSession,
+  parseDeveloperSession,
   parseStudentSession,
   parseTeacherSession,
 } from '@/lib/auth/session';
@@ -18,6 +20,7 @@ import {
   SUPABASE_REFRESH_COOKIE,
 } from '@/lib/auth/supabase-auth';
 import { resolveRoleContextByAuthUserId, type PlatformRoleContext } from '@/lib/platform-rbac-db';
+import { deriveStudentStream, getStudentEnrolledSubjects } from '@/lib/school-management-db';
 
 export interface RequestAuthContext {
   role: Exclude<PlatformRole, 'anonymous'>;
@@ -79,9 +82,21 @@ async function resolveSupabaseContext(): Promise<RequestAuthContext | null> {
 
 function resolveLegacyContext(): RequestAuthContext | null {
   const cookieStore = cookies();
+  const developerToken = cookieStore.get(DEVELOPER_SESSION_COOKIE)?.value;
   const adminToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
   const teacherToken = cookieStore.get(TEACHER_SESSION_COOKIE)?.value;
   const studentToken = cookieStore.get(STUDENT_SESSION_COOKIE)?.value;
+
+  const developer = parseDeveloperSession(developerToken);
+  if (developer) {
+    return {
+      role: 'developer',
+      displayName: developer.username,
+      issuedAt: developer.issuedAt,
+      expiresAt: developer.expiresAt,
+      availableRoles: ['developer'],
+    };
+  }
 
   const admin = parseAdminSession(adminToken);
   if (admin) {
@@ -172,24 +187,51 @@ export async function getStudentSessionFromRequestCookies() {
   if (context?.profileId && context.role === 'student') {
     const token = cookies().get(STUDENT_SESSION_COOKIE)?.value;
     const parsed = parseStudentSession(token);
-    if (parsed) return parsed;
     const student = await getStudentById(context.profileId);
-    if (!student) return null;
+    const fallbackStudentId = parsed?.studentId || context.profileId;
+    const fallbackClassLevel = parsed?.classLevel === 10 || parsed?.classLevel === 12 ? parsed.classLevel : undefined;
+    if (!student && parsed) {
+      const enrolledSubjects = await getStudentEnrolledSubjects(parsed.studentId, parsed.schoolId);
+      const stream = deriveStudentStream(enrolledSubjects, parsed.classLevel);
+      return {
+        ...parsed,
+        enrolledSubjects,
+        stream,
+      };
+    }
+    if (!student) return parsed ?? null;
+    const enrolledSubjects = await getStudentEnrolledSubjects(student.id, student.schoolId);
+    const stream = deriveStudentStream(enrolledSubjects, student.classLevel);
     return {
-      studentId: student.id,
-      studentName: student.name,
-      rollCode: student.rollCode,
-      classLevel: student.classLevel,
-      section: student.section,
+      studentId: student.id || fallbackStudentId,
+      studentName: student.name || parsed?.studentName || 'Student',
+      rollCode: student.rollCode || parsed?.rollCode || '',
+      classLevel: student.classLevel || fallbackClassLevel || 12,
+      section: student.section || parsed?.section,
+      schoolId: student.schoolId || parsed?.schoolId,
+      schoolCode: context.schoolCode,
+      batch: student.batch,
+      enrolledSubjects,
+      stream,
       role: 'student' as const,
-      issuedAt: context.issuedAt || Date.now(),
-      expiresAt: context.expiresAt || Date.now() + 60 * 60 * 1000,
+      issuedAt: parsed?.issuedAt || context.issuedAt || Date.now(),
+      expiresAt: parsed?.expiresAt || context.expiresAt || Date.now() + 60 * 60 * 1000,
     };
   }
   const token = cookies().get(STUDENT_SESSION_COOKIE)?.value;
   const parsed = parseStudentSession(token);
   if (!parsed) return null;
-  return parsed;
+  const student = await getStudentById(parsed.studentId).catch(() => null);
+  if (!student) return parsed;
+  const enrolledSubjects = await getStudentEnrolledSubjects(student.id, student.schoolId);
+  const stream = deriveStudentStream(enrolledSubjects, student.classLevel);
+  return {
+    ...parsed,
+    schoolId: parsed.schoolId || student.schoolId,
+    batch: parsed.batch || student.batch,
+    enrolledSubjects,
+    stream,
+  };
 }
 
 export async function getDeveloperSessionFromRequestCookies(): Promise<{
@@ -198,12 +240,24 @@ export async function getDeveloperSessionFromRequestCookies(): Promise<{
   expiresAt?: number;
 } | null> {
   const context = await requireRequestRole(['developer']);
-  if (!context || context.role !== 'developer') return null;
-  return {
-    authUserId: context.authUserId,
-    issuedAt: context.issuedAt,
-    expiresAt: context.expiresAt,
-  };
+  if (context && context.role === 'developer') {
+    return {
+      authUserId: context.authUserId,
+      issuedAt: context.issuedAt,
+      expiresAt: context.expiresAt,
+    };
+  }
+  if (process.env.SINGLE_ENV_MODE === '1') {
+    const adminContext = await requireRequestRole(['admin']);
+    if (adminContext && adminContext.role === 'admin') {
+      return {
+        authUserId: adminContext.authUserId,
+        issuedAt: adminContext.issuedAt,
+        expiresAt: adminContext.expiresAt,
+      };
+    }
+  }
+  return null;
 }
 
 export function unauthorizedJson(message = 'Unauthorized', requestId = 'unauthorized'): NextResponse {

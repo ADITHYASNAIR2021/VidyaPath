@@ -1,5 +1,6 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { listClassSectionsForTeacher } from '@/lib/school-management-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,11 +9,14 @@ export async function GET(req: Request) {
   try {
     const session = await getTeacherSessionFromRequestCookies();
     if (!session) return unauthorizedJson('Teacher session required.', requestId);
+    const { managedSections, classAssignments } = await listClassSectionsForTeacher(session.teacher.id);
     return dataJson({
       requestId,
       data: {
         teacher: session.teacher,
         effectiveScopes: session.effectiveScopes,
+        managedSections,
+        classAssignments,
         sessionExpiry: Date.now() + 8 * 60 * 60 * 1000,
       },
     });

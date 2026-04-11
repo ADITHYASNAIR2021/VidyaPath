@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { buildTeacherAssignmentPackDraft, buildTeacherPackUrls, sanitizePackTitle, toAnswerKey } from '@/lib/teacher-assignment';
 import { getStudentSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
+import { ALL_CHAPTERS } from '@/lib/data';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import {
@@ -12,6 +13,7 @@ import {
   setQuizLink,
   upsertAssignmentPack,
 } from '@/lib/teacher-admin-db';
+import { getStudentEnrolledSubjects } from '@/lib/school-management-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
  
@@ -26,6 +28,67 @@ type TeacherAction =
 
 function safeClassLevel(value: unknown): 10 | 12 {
   return Number(value) === 10 ? 10 : 12;
+}
+
+function filterPublicConfigBySubjects(config: Record<string, unknown>, allowedSubjects: Set<string>) {
+  const chapterSubjectById = new Map(ALL_CHAPTERS.map((chapter) => [chapter.id, chapter.subject]));
+  const scopeFeed = config.scopeFeed && typeof config.scopeFeed === 'object'
+    ? (config.scopeFeed as Record<string, unknown>)
+    : null;
+  if (scopeFeed) {
+    const announcements = Array.isArray(scopeFeed.announcements) ? scopeFeed.announcements : [];
+    const assignmentPacks = Array.isArray(scopeFeed.assignmentPacks) ? scopeFeed.assignmentPacks : [];
+    const quizLinks = Array.isArray(scopeFeed.quizLinks) ? scopeFeed.quizLinks : [];
+    const importantTopics = Array.isArray(scopeFeed.importantTopics) ? scopeFeed.importantTopics : [];
+    scopeFeed.announcements = announcements.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const subject = typeof (entry as Record<string, unknown>).subject === 'string'
+        ? (entry as Record<string, unknown>).subject as string
+        : '';
+      return allowedSubjects.has(subject);
+    });
+    scopeFeed.assignmentPacks = assignmentPacks.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const subject = typeof (entry as Record<string, unknown>).subject === 'string'
+        ? (entry as Record<string, unknown>).subject as string
+        : '';
+      return allowedSubjects.has(subject);
+    });
+    scopeFeed.quizLinks = quizLinks.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const chapterId = typeof (entry as Record<string, unknown>).chapterId === 'string'
+        ? (entry as Record<string, unknown>).chapterId as string
+        : '';
+      const subject = chapterSubjectById.get(chapterId) || '';
+      return allowedSubjects.has(subject);
+    });
+    scopeFeed.importantTopics = importantTopics.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const chapterId = typeof (entry as Record<string, unknown>).chapterId === 'string'
+        ? (entry as Record<string, unknown>).chapterId as string
+        : '';
+      const subject = chapterSubjectById.get(chapterId) || '';
+      return allowedSubjects.has(subject);
+    });
+  }
+
+  const announcements = Array.isArray(config.announcements) ? config.announcements : [];
+  const scopedAnnouncements = scopeFeed && Array.isArray(scopeFeed.announcements)
+    ? scopeFeed.announcements
+    : [];
+  const allowedAnnouncementIds = new Set(
+    scopedAnnouncements
+      .map((entry) => (entry && typeof entry === 'object' ? (entry as Record<string, unknown>).id : undefined))
+      .filter((id): id is string => typeof id === 'string')
+  );
+  config.announcements = announcements.filter((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const id = (entry as Record<string, unknown>).id;
+    if (typeof id !== 'string') return false;
+    if (allowedAnnouncementIds.size > 0) return allowedAnnouncementIds.has(id);
+    return false;
+  });
+  return config;
 }
 
 export async function GET(req: Request) {
@@ -51,6 +114,30 @@ export async function GET(req: Request) {
         : undefined;
     const section = sectionFromQuery || sectionFromStudent;
     const config = await getPublicTeacherConfig({ chapterId, classLevel, subject, section });
+    if (studentSession?.studentId) {
+      const enrolledSubjects = await getStudentEnrolledSubjects(studentSession.studentId, studentSession.schoolId);
+      const allowedSubjects = new Set(enrolledSubjects);
+      if (allowedSubjects.size > 0) {
+        return dataJson({
+          requestId,
+          data: filterPublicConfigBySubjects(config as unknown as Record<string, unknown>, allowedSubjects),
+        });
+      }
+      return dataJson({
+        requestId,
+        data: {
+          ...config,
+          announcements: [],
+          scopeFeed: {
+            ...(config.scopeFeed || {}),
+            announcements: [],
+            assignmentPacks: [],
+            quizLinks: [],
+            importantTopics: [],
+          },
+        },
+      });
+    }
     return dataJson({ requestId, data: config });
   } catch (error) {
     console.error('[teacher:get] error', error);
@@ -153,12 +240,22 @@ export async function POST(req: Request) {
     if (action === 'add-announcement') {
       const title = String((body as Record<string, unknown>).title ?? '').trim();
       const message = String((body as Record<string, unknown>).body ?? '').trim();
+      const rawDeliveryScope = (body as Record<string, unknown>).deliveryScope;
+      const deliveryScope =
+        rawDeliveryScope === 'class' || rawDeliveryScope === 'section' || rawDeliveryScope === 'batch' || rawDeliveryScope === 'chapter'
+          ? rawDeliveryScope
+          : undefined;
+      const targetBatch = typeof (body as Record<string, unknown>).batch === 'string'
+        ? String((body as Record<string, unknown>).batch).trim() || undefined
+        : undefined;
       const config = await addAnnouncement({
         teacherId: session.teacher.id,
         title,
         body: message,
         chapterId: chapterId || undefined,
         section,
+        batch: targetBatch,
+        deliveryScope,
       });
       const committedAt = new Date().toISOString();
       await recordAuditEvent({

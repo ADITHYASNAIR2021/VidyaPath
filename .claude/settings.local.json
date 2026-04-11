@@ -10,7 +10,17 @@
       "Read(//d D:/**)",
       "Bash(dir dataset\\\\cbse_papers /b)",
       "Read(//c/Users/adith/**)",
-      "Read(//d//**)"
+      "Read(//d//**)",
+      "Bash(cat D:/VidyaPath/app/api/teacher/class-sections/[id]/enroll-subjects/route.ts)",
+      "Bash(npx tsc:*)",
+      "Bash(npx next:*)",
+      "Bash(npx --prefix \"D:/VidyaPath\" npm install web-push @types/web-push)",
+      "Bash(cmd /c \"npm install web-push @types/web-push --legacy-peer-deps 2>&1\")",
+      "Bash(cmd /c \"cd /d D:\\\\VidyaPath && npm list web-push 2>&1\")",
+      "Bash(cmd /c \"cd /d D:\\\\VidyaPath && npm install web-push @types/web-push 2>&1 | findstr /i \\\\\"added error web-push\\\\\"\")",
+      "Bash(cmd /c \"cd /d D:\\\\VidyaPath && npm install web-push @types/web-push 2>&1\")",
+      "Bash(wc -l /d/VidyaPath/app/*/page.tsx /d/VidyaPath/app/page.tsx /d/VidyaPath/app/chapters/\\\\[id\\\\]/page.tsx)",
+      "Bash(sort -k2)"
     ]
   }
 }

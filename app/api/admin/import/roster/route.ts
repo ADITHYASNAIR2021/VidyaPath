@@ -85,6 +85,7 @@ export async function POST(req: Request) {
     });
   }
   const body = bodyResult.value;
+  const emergencyOverride = body.emergencyOverride === true;
   const entity: ImportEntity | null = body.entity === 'students' || body.entity === 'teachers'
     ? body.entity
     : null;
@@ -106,6 +107,15 @@ export async function POST(req: Request) {
       errorCode: 'missing-school-scope',
       message: 'School scope missing for admin session.',
       status: 400,
+    });
+  }
+
+  if (entity === 'students' && adminSession.role === 'admin' && !emergencyOverride) {
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-owned-student-roster',
+      message: 'Student roster import is class-teacher owned. Use teacher class-section import, or set emergencyOverride=true.',
+      status: 403,
     });
   }
 
@@ -231,13 +241,14 @@ export async function POST(req: Request) {
     actorRole: adminSession.role,
     actorAuthUserId: adminSession.authUserId,
     schoolId,
-    metadata: {
-      entity,
-      totalRows: rows.length,
-      created: created.length,
-      failed: failed.length,
-      committedAt,
-    },
+      metadata: {
+        entity,
+        totalRows: rows.length,
+        created: created.length,
+        failed: failed.length,
+        emergencyOverride,
+        committedAt,
+      },
   });
 
   return dataJson({

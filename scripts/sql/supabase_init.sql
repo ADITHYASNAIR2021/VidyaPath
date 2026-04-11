@@ -1,4 +1,4 @@
--- VidyaPath consolidated Supabase setup
+﻿-- VidyaPath consolidated Supabase setup
 -- Run this once in Supabase SQL editor.
 -- Includes:
 -- 1) app_state key-value table (analytics/local state migration support)
@@ -126,6 +126,43 @@ create table if not exists public.teacher_scopes (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.class_sections (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  class_level int not null check (class_level in (10, 12)),
+  section text not null,
+  batch text,
+  class_teacher_id uuid references public.teacher_profiles(id) on delete set null,
+  notes text,
+  status text not null default 'active' check (status in ('active', 'inactive', 'archived')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.teacher_class_assignments (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  class_section_id uuid not null references public.class_sections(id) on delete cascade,
+  teacher_id uuid not null references public.teacher_profiles(id) on delete cascade,
+  role text not null check (role in ('class_teacher', 'subject_teacher')),
+  subject text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.student_subject_enrollments (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  student_id uuid not null,
+  class_section_id uuid references public.class_sections(id) on delete set null,
+  subject text not null,
+  assigned_by_teacher_id uuid references public.teacher_profiles(id) on delete set null,
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.teacher_activity (
   id bigserial primary key,
   teacher_id uuid references public.teacher_profiles(id) on delete set null,
@@ -147,6 +184,8 @@ create table if not exists public.teacher_announcements (
   chapter_id text,
   title text not null,
   body text not null,
+  batch text,
+  delivery_scope text not null default 'chapter' check (delivery_scope in ('class', 'section', 'batch', 'chapter')),
   is_active boolean not null default true,
   created_at timestamptz not null default now()
 );
@@ -187,6 +226,12 @@ create table if not exists public.teacher_assignment_packs (
   section text,
   chapter_id text not null,
   status text not null default 'draft' check (status in ('draft', 'review', 'published', 'archived')),
+  visibility_status text not null default 'open' check (visibility_status in ('open', 'closed')),
+  valid_from timestamptz not null default now(),
+  valid_until timestamptz,
+  closed_at timestamptz,
+  reopened_count int not null default 0,
+  extended_count int not null default 0,
   payload jsonb not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -292,6 +337,22 @@ alter table if exists public.teacher_submissions
   add column if not exists released_at timestamptz;
 alter table if exists public.teacher_assignment_packs
   add column if not exists status text not null default 'draft';
+alter table if exists public.teacher_assignment_packs
+  add column if not exists visibility_status text not null default 'open';
+alter table if exists public.teacher_assignment_packs
+  add column if not exists valid_from timestamptz not null default now();
+alter table if exists public.teacher_assignment_packs
+  add column if not exists valid_until timestamptz;
+alter table if exists public.teacher_assignment_packs
+  add column if not exists closed_at timestamptz;
+alter table if exists public.teacher_assignment_packs
+  add column if not exists reopened_count int not null default 0;
+alter table if exists public.teacher_assignment_packs
+  add column if not exists extended_count int not null default 0;
+alter table if exists public.teacher_announcements
+  add column if not exists batch text;
+alter table if exists public.teacher_announcements
+  add column if not exists delivery_scope text not null default 'chapter';
 alter table if exists public.teacher_profiles
   add column if not exists school_id uuid references public.schools(id) on delete set null;
 alter table if exists public.teacher_profiles
@@ -312,6 +373,16 @@ alter table if exists public.student_profiles
   add column if not exists batch text;
 alter table if exists public.student_profiles
   add column if not exists roll_no text;
+alter table if exists public.class_sections
+  add column if not exists notes text;
+alter table if exists public.class_sections
+  add column if not exists status text not null default 'active';
+alter table if exists public.class_sections
+  add column if not exists updated_at timestamptz not null default now();
+alter table if exists public.teacher_class_assignments
+  add column if not exists updated_at timestamptz not null default now();
+alter table if exists public.student_subject_enrollments
+  add column if not exists updated_at timestamptz not null default now();
 
 do $$
 begin
@@ -346,6 +417,56 @@ begin
   alter table public.teacher_assignment_packs
     add constraint teacher_assignment_packs_status_check
     check (status in ('draft', 'review', 'published', 'archived'));
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'teacher_assignment_packs_visibility_status_check'
+      and conrelid = 'public.teacher_assignment_packs'::regclass
+  ) then
+    alter table public.teacher_assignment_packs
+      drop constraint teacher_assignment_packs_visibility_status_check;
+  end if;
+exception
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  alter table public.teacher_assignment_packs
+    add constraint teacher_assignment_packs_visibility_status_check
+    check (visibility_status in ('open', 'closed'));
+exception
+  when duplicate_object then null;
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'teacher_announcements_delivery_scope_check'
+      and conrelid = 'public.teacher_announcements'::regclass
+  ) then
+    alter table public.teacher_announcements
+      drop constraint teacher_announcements_delivery_scope_check;
+  end if;
+exception
+  when undefined_table then null;
+end $$;
+
+do $$
+begin
+  alter table public.teacher_announcements
+    add constraint teacher_announcements_delivery_scope_check
+    check (delivery_scope in ('class', 'section', 'batch', 'chapter'));
 exception
   when duplicate_object then null;
   when undefined_table then null;
@@ -405,6 +526,24 @@ end $$;
 do $$
 begin
   if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'student_subject_enrollments'
+      and column_name = 'student_id'
+  ) then
+    begin
+      alter table public.student_subject_enrollments
+        add constraint student_subject_enrollments_student_id_fkey
+        foreign key (student_id) references public.student_profiles(id) on delete cascade;
+    exception
+      when duplicate_object then null;
+    end;
+  end if;
+end $$;
+
+do $$
+begin
+  if exists (
     select 1
     from pg_constraint
     where conname = 'student_profiles_roll_code_key'
@@ -454,11 +593,23 @@ create unique index if not exists teacher_profiles_school_phone_uniq on public.t
 create index if not exists teacher_scopes_teacher_idx on public.teacher_scopes (teacher_id, is_active);
 create index if not exists teacher_scopes_lookup_idx on public.teacher_scopes (class_level, subject, section, is_active);
 create index if not exists teacher_scopes_school_idx on public.teacher_scopes (school_id, class_level, subject, section, is_active);
+create index if not exists class_sections_school_idx on public.class_sections (school_id, class_level, section, coalesce(batch, ''), status);
+create unique index if not exists class_sections_school_unique on public.class_sections (school_id, class_level, section, coalesce(batch, ''));
+create index if not exists class_sections_class_teacher_idx on public.class_sections (class_teacher_id, updated_at desc);
+create index if not exists teacher_class_assignments_teacher_idx on public.teacher_class_assignments (teacher_id, role, is_active, updated_at desc);
+create index if not exists teacher_class_assignments_section_idx on public.teacher_class_assignments (class_section_id, role, is_active, updated_at desc);
+create unique index if not exists teacher_class_assignments_active_uniq on public.teacher_class_assignments (school_id, class_section_id, teacher_id, role, coalesce(subject, '')) where is_active = true;
+create unique index if not exists teacher_class_assignments_class_teacher_uniq on public.teacher_class_assignments (school_id, class_section_id) where role = 'class_teacher' and is_active = true;
+create index if not exists student_subject_enrollments_student_idx on public.student_subject_enrollments (student_id, status, subject);
+create index if not exists student_subject_enrollments_section_idx on public.student_subject_enrollments (class_section_id, status, subject);
+create index if not exists student_subject_enrollments_school_idx on public.student_subject_enrollments (school_id, subject, status);
+create unique index if not exists student_subject_enrollments_active_uniq on public.student_subject_enrollments (school_id, student_id, coalesce(class_section_id::text, ''), subject) where status = 'active';
 create index if not exists teacher_announcements_scope_idx on public.teacher_announcements (class_level, subject, section, is_active, created_at desc);
 create index if not exists teacher_quiz_links_chapter_idx on public.teacher_quiz_links (chapter_id, is_active, updated_at desc);
 create index if not exists teacher_topic_priority_chapter_idx on public.teacher_topic_priority (chapter_id, is_active, updated_at desc);
 create index if not exists teacher_assignment_packs_teacher_idx on public.teacher_assignment_packs (teacher_id, updated_at desc);
 create index if not exists teacher_assignment_packs_chapter_idx on public.teacher_assignment_packs (chapter_id, updated_at desc);
+create index if not exists teacher_assignment_packs_visibility_idx on public.teacher_assignment_packs (status, visibility_status, valid_from, valid_until, updated_at desc);
 create index if not exists teacher_submissions_pack_idx on public.teacher_submissions (pack_id, created_at desc);
 create index if not exists teacher_submissions_student_idx on public.teacher_submissions (pack_id, submission_code, created_at desc);
 create index if not exists student_profiles_roll_code_idx on public.student_profiles (roll_code);
@@ -647,6 +798,249 @@ begin
   end if;
 end $$;
 
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'class_sections_touch_updated_at'
+  ) then
+    create trigger class_sections_touch_updated_at
+      before update on public.class_sections
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'teacher_class_assignments_touch_updated_at'
+  ) then
+    create trigger teacher_class_assignments_touch_updated_at
+      before update on public.teacher_class_assignments
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'student_subject_enrollments_touch_updated_at'
+  ) then
+    create trigger student_subject_enrollments_touch_updated_at
+      before update on public.student_subject_enrollments
+      for each row execute function public.touch_updated_at();
+  end if;
+end $$;
+
+insert into public.student_subject_enrollments (
+  id,
+  school_id,
+  student_id,
+  class_section_id,
+  subject,
+  assigned_by_teacher_id,
+  status,
+  created_at,
+  updated_at
+)
+select
+  gen_random_uuid(),
+  s.school_id,
+  s.id,
+  null,
+  subj.subject,
+  null,
+  'active',
+  now(),
+  now()
+from public.student_profiles s
+cross join (
+  values
+    ('Physics'),
+    ('Chemistry'),
+    ('Biology'),
+    ('Math'),
+    ('Accountancy'),
+    ('Business Studies'),
+    ('Economics'),
+    ('English Core')
+) as subj(subject)
+left join public.student_subject_enrollments e
+  on e.school_id = s.school_id
+ and e.student_id = s.id
+ and e.subject = subj.subject
+ and e.status = 'active'
+where s.status = 'active'
+  and s.school_id is not null
+  and (
+    (s.class_level = 10 and subj.subject in ('Physics', 'Chemistry', 'Biology', 'Math', 'English Core'))
+    or
+    (s.class_level = 12 and subj.subject in ('Physics', 'Chemistry', 'Biology', 'Math', 'Accountancy', 'Business Studies', 'Economics', 'English Core'))
+  )
+  and e.id is null;
+
+-- ---------------------------------------------------------------------------
+-- 4) School operations: attendance, resources, events, timetable, announcements, push/read receipts
+-- ---------------------------------------------------------------------------
+create table if not exists public.attendance_records (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  teacher_id uuid not null references public.teacher_profiles(id) on delete cascade,
+  student_id uuid not null references public.student_profiles(id) on delete cascade,
+  class_level smallint not null check (class_level in (10, 12)),
+  section text not null,
+  date date not null,
+  status text not null check (status in ('present', 'absent', 'late', 'excused')),
+  marked_at timestamptz not null default now(),
+  unique(student_id, date)
+);
+
+create index if not exists attendance_records_school_date_idx
+  on public.attendance_records (school_id, date desc);
+create index if not exists attendance_records_teacher_idx
+  on public.attendance_records (teacher_id, date desc);
+create index if not exists attendance_records_class_section_idx
+  on public.attendance_records (school_id, class_level, section, date desc);
+
+create table if not exists public.class_resources (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  teacher_id uuid not null references public.teacher_profiles(id) on delete cascade,
+  title text not null,
+  description text,
+  type text not null check (type in ('pdf', 'link', 'video', 'image')),
+  url text not null,
+  subject text,
+  class_level smallint check (class_level in (10, 12)),
+  section text,
+  chapter_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists class_resources_school_created_idx
+  on public.class_resources (school_id, created_at desc);
+create index if not exists class_resources_chapter_idx
+  on public.class_resources (chapter_id, created_at desc);
+create index if not exists class_resources_class_subject_idx
+  on public.class_resources (school_id, class_level, subject, section, created_at desc);
+
+create table if not exists public.school_events (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  title text not null,
+  description text,
+  type text not null check (type in ('exam', 'assignment_due', 'holiday', 'meeting', 'other')),
+  event_date date not null,
+  class_level smallint check (class_level in (10, 12)),
+  section text,
+  created_by text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists school_events_school_date_idx
+  on public.school_events (school_id, event_date asc, created_at desc);
+create index if not exists school_events_scope_idx
+  on public.school_events (school_id, class_level, section, event_date asc);
+
+create table if not exists public.timetable_slots (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  class_level smallint not null check (class_level in (10, 12)),
+  section text not null,
+  day_of_week smallint not null check (day_of_week between 1 and 7),
+  period_no smallint not null check (period_no >= 1 and period_no <= 20),
+  subject text not null,
+  teacher_id uuid references public.teacher_profiles(id) on delete set null,
+  start_time time,
+  end_time time,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(school_id, class_level, section, day_of_week, period_no)
+);
+
+create index if not exists timetable_slots_school_scope_idx
+  on public.timetable_slots (school_id, class_level, section, day_of_week, period_no);
+
+create table if not exists public.school_announcements (
+  id uuid primary key default gen_random_uuid(),
+  school_id uuid not null references public.schools(id) on delete cascade,
+  title text not null,
+  body text not null,
+  audience text not null default 'all' check (audience in ('all', 'teachers', 'students', 'class10', 'class12')),
+  created_by_role text not null check (created_by_role in ('admin', 'developer')),
+  created_by_auth_user_id uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists school_announcements_school_created_idx
+  on public.school_announcements (school_id, created_at desc);
+
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  role text not null check (role in ('student', 'teacher', 'admin', 'developer')),
+  school_id uuid references public.schools(id) on delete set null,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists push_subscriptions_school_idx
+  on public.push_subscriptions (school_id, role, created_at desc);
+
+create table if not exists public.announcement_reads (
+  id uuid primary key default gen_random_uuid(),
+  announcement_id text not null,
+  student_id text not null,
+  school_id uuid references public.schools(id) on delete set null,
+  read_at timestamptz not null default now(),
+  unique(announcement_id, student_id)
+);
+
+create index if not exists announcement_reads_school_idx
+  on public.announcement_reads (school_id, read_at desc);
+create index if not exists announcement_reads_announcement_idx
+  on public.announcement_reads (announcement_id, read_at desc);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'class_resources_touch_updated_at'
+  ) then
+    create trigger class_resources_touch_updated_at
+      before update on public.class_resources
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'school_events_touch_updated_at'
+  ) then
+    create trigger school_events_touch_updated_at
+      before update on public.school_events
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'timetable_slots_touch_updated_at'
+  ) then
+    create trigger timetable_slots_touch_updated_at
+      before update on public.timetable_slots
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'school_announcements_touch_updated_at'
+  ) then
+    create trigger school_announcements_touch_updated_at
+      before update on public.school_announcements
+      for each row execute function public.touch_updated_at();
+  end if;
+end $$;
+
 -- Retention helper: invoke from scheduled job (pg_cron / external scheduler).
 create or replace function public.prune_operational_data()
 returns void as $$
@@ -656,5 +1050,141 @@ begin
   delete from public.audit_events where created_at < now() - interval '180 days';
   delete from public.exam_violations where occurred_at < now() - interval '180 days';
   delete from public.token_usage_events where created_at < now() - interval '365 days';
+  delete from public.announcement_reads where read_at < now() - interval '365 days';
 end;
 $$ language plpgsql;
+
+-- ---------------------------------------------------------------------------
+-- 5) Study enhancements + parent portal
+-- ---------------------------------------------------------------------------
+create table if not exists public.srs_cards (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.student_profiles(id) on delete cascade,
+  card_id text not null,
+  chapter_id text not null,
+  due timestamptz not null default now(),
+  stability double precision not null default 1,
+  difficulty double precision not null default 5,
+  elapsed_days int not null default 0,
+  scheduled_days int not null default 0,
+  reps int not null default 0,
+  lapses int not null default 0,
+  state text not null default 'new' check (state in ('new', 'learning', 'review', 'relearning')),
+  last_review timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(student_id, card_id)
+);
+
+create index if not exists srs_cards_student_due_idx
+  on public.srs_cards (student_id, due asc);
+create index if not exists srs_cards_chapter_idx
+  on public.srs_cards (chapter_id, due asc);
+
+create table if not exists public.student_streaks (
+  student_id uuid primary key references public.student_profiles(id) on delete cascade,
+  current_streak int not null default 0,
+  longest_streak int not null default 0,
+  last_active date,
+  total_study_days int not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.student_badges (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.student_profiles(id) on delete cascade,
+  badge_type text not null,
+  earned_at timestamptz not null default now(),
+  unique(student_id, badge_type)
+);
+
+create index if not exists student_badges_student_earned_idx
+  on public.student_badges (student_id, earned_at desc);
+
+create table if not exists public.chapter_notes (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.student_profiles(id) on delete cascade,
+  chapter_id text not null,
+  content text not null default '',
+  updated_at timestamptz not null default now(),
+  unique(student_id, chapter_id)
+);
+
+create index if not exists chapter_notes_student_updated_idx
+  on public.chapter_notes (student_id, updated_at desc);
+
+create table if not exists public.mock_exam_sessions (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.student_profiles(id) on delete cascade,
+  school_id uuid references public.schools(id) on delete set null,
+  class_level smallint not null check (class_level in (10, 12)),
+  subject text not null,
+  duration_minutes int not null default 60,
+  question_count int not null default 20,
+  status text not null default 'active' check (status in ('active', 'submitted')),
+  questions jsonb not null default '[]'::jsonb,
+  answers jsonb not null default '{}'::jsonb,
+  score numeric(8,2),
+  created_at timestamptz not null default now(),
+  submitted_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists mock_exam_sessions_student_created_idx
+  on public.mock_exam_sessions (student_id, created_at desc);
+create index if not exists mock_exam_sessions_school_status_idx
+  on public.mock_exam_sessions (school_id, status, created_at desc);
+
+create table if not exists public.parent_links (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.student_profiles(id) on delete cascade,
+  school_id uuid not null references public.schools(id) on delete cascade,
+  phone text not null,
+  pin_hash text not null,
+  name text,
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(student_id),
+  unique(phone, student_id)
+);
+
+create index if not exists parent_links_school_idx
+  on public.parent_links (school_id, status, updated_at desc);
+create index if not exists parent_links_phone_idx
+  on public.parent_links (phone, status);
+
+
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'srs_cards_touch_updated_at') then
+    create trigger srs_cards_touch_updated_at
+      before update on public.srs_cards
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (select 1 from pg_trigger where tgname = 'student_streaks_touch_updated_at') then
+    create trigger student_streaks_touch_updated_at
+      before update on public.student_streaks
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (select 1 from pg_trigger where tgname = 'chapter_notes_touch_updated_at') then
+    create trigger chapter_notes_touch_updated_at
+      before update on public.chapter_notes
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (select 1 from pg_trigger where tgname = 'mock_exam_sessions_touch_updated_at') then
+    create trigger mock_exam_sessions_touch_updated_at
+      before update on public.mock_exam_sessions
+      for each row execute function public.touch_updated_at();
+  end if;
+
+  if not exists (select 1 from pg_trigger where tgname = 'parent_links_touch_updated_at') then
+    create trigger parent_links_touch_updated_at
+      before update on public.parent_links
+      for each row execute function public.touch_updated_at();
+  end if;
+end $$;
+

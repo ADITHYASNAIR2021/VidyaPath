@@ -49,6 +49,7 @@ import {
   supabaseUpdate,
 } from '@/lib/supabase-rest';
 import { getTeacherStorageStatus } from '@/lib/persistence/teacher-storage';
+import { ensureDefaultEnrollmentsForStudent } from '@/lib/school-management-db';
 
 type RowId = string;
 
@@ -87,6 +88,8 @@ interface TeacherAnnouncementRow {
   chapter_id: string | null;
   title: string;
   body: string;
+  batch: string | null;
+  delivery_scope: 'class' | 'section' | 'batch' | 'chapter';
   is_active: boolean;
   created_at: string;
 }
@@ -137,6 +140,12 @@ interface TeacherAssignmentPackRow {
   section: string | null;
   chapter_id: string;
   status: TeacherPackStatus;
+  visibility_status?: 'open' | 'closed' | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  closed_at?: string | null;
+  reopened_count?: number | null;
+  extended_count?: number | null;
   payload: TeacherAssignmentPack;
   created_at: string;
   updated_at: string;
@@ -433,6 +442,7 @@ function toScope(row: TeacherScopeRow): TeacherScope | null {
 function toTeacherProfile(row: TeacherProfileRow, scopes: TeacherScope[]): TeacherProfile {
   return {
     id: row.id,
+    schoolId: row.school_id ?? undefined,
     phone: row.phone,
     name: row.name,
     staffCode: row.staff_code ?? undefined,
@@ -791,6 +801,11 @@ export async function createStudent(input: {
     role: 'student',
     schoolId,
     profileId: row.id,
+  });
+  await ensureDefaultEnrollmentsForStudent({
+    schoolId,
+    studentId: row.id,
+    classLevel: input.classLevel,
   });
   await logTeacherActivity({
     actorType: 'admin',
@@ -1169,6 +1184,8 @@ function toAnnouncement(row: TeacherAnnouncementRow): TeacherAnnouncement {
     title: row.title,
     body: row.body,
     createdAt: row.created_at,
+    deliveryScope: row.delivery_scope,
+    batch: row.batch ?? undefined,
   };
 }
 
@@ -1185,10 +1202,41 @@ function toAssignmentPack(row: TeacherAssignmentPackRow): TeacherAssignmentPack 
     longAnswers: Array.isArray(row.payload.longAnswers) ? row.payload.longAnswers : [],
     questionMeta: row.payload.questionMeta ?? {},
     feedbackHistory: Array.isArray(row.payload.feedbackHistory) ? row.payload.feedbackHistory : [],
+    visibilityStatus:
+      row.visibility_status === 'open' || row.visibility_status === 'closed'
+        ? row.visibility_status
+        : (row.payload.visibilityStatus === 'open' || row.payload.visibilityStatus === 'closed' ? row.payload.visibilityStatus : 'open'),
+    validFrom: row.valid_from ?? row.payload.validFrom ?? row.created_at,
+    validUntil: row.valid_until ?? row.payload.validUntil ?? row.payload.dueDate ?? undefined,
+    closedAt: row.closed_at ?? row.payload.closedAt ?? undefined,
+    reopenedCount: Number.isFinite(Number(row.reopened_count))
+      ? Number(row.reopened_count)
+      : Number.isFinite(Number(row.payload.reopenedCount))
+        ? Number(row.payload.reopenedCount)
+        : 0,
+    extendedCount: Number.isFinite(Number(row.extended_count))
+      ? Number(row.extended_count)
+      : Number.isFinite(Number(row.payload.extendedCount))
+        ? Number(row.payload.extendedCount)
+        : 0,
     status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function isPackOpenForStudents(pack: TeacherAssignmentPack, now = new Date()): boolean {
+  if (pack.status !== 'published') return false;
+  if ((pack.visibilityStatus || 'open') !== 'open') return false;
+  if (pack.validFrom) {
+    const validFromMs = Date.parse(pack.validFrom);
+    if (Number.isFinite(validFromMs) && validFromMs > now.getTime()) return false;
+  }
+  if (pack.validUntil) {
+    const validUntilMs = Date.parse(pack.validUntil);
+    if (Number.isFinite(validUntilMs) && validUntilMs < now.getTime()) return false;
+  }
+  return true;
 }
 
 function toWeeklyPlan(row: TeacherWeeklyPlanRow): TeacherWeeklyPlan | null {
@@ -1413,7 +1461,7 @@ export async function getPublicTeacherConfig(input?: {
     const assignmentFeedItems: TeacherScopeAssignmentPack[] = [];
     for (const row of scopedPackRows) {
       const pack = toAssignmentPack(row);
-      if (!pack || pack.status !== 'published') continue;
+      if (!pack || !isPackOpenForStudents(pack)) continue;
       assignmentFeedItems.push({
         chapterId: row.chapter_id,
         packId: pack.packId,
@@ -1869,7 +1917,7 @@ export async function setQuizLink(input: { teacherId: string; chapterId: string;
   return getPublicTeacherConfig({ chapterId: chapter.id, classLevel: chapter.classLevel as 10 | 12, subject: chapter.subject, section: scope.section ?? undefined });
 }
 
-export async function addAnnouncement(input: { teacherId: string; title: string; body: string; chapterId?: string; section?: string }): Promise<PublicTeacherConfig> {
+export async function addAnnouncement(input: { teacherId: string; title: string; body: string; chapterId?: string; section?: string; batch?: string; deliveryScope?: 'class' | 'section' | 'batch' | 'chapter' }): Promise<PublicTeacherConfig> {
   const title = sanitizeText(input.title, 140);
   const body = sanitizeText(input.body, 800);
   if (!title || !body) throw new Error('Announcement title and body are required.');
@@ -1884,6 +1932,9 @@ export async function addAnnouncement(input: { teacherId: string; title: string;
     : fallbackScope;
   if (!scope) throw new Error('Invalid scope for announcement.');
 
+  const resolvedDeliveryScope: 'class' | 'section' | 'batch' | 'chapter' =
+    input.deliveryScope ?? (chapter?.id ? 'chapter' : scope.section ? 'section' : 'class');
+
   await supabaseInsert<TeacherAnnouncementRow>(TABLES.announcements, {
     id: randomUUID(),
     teacher_id: input.teacherId,
@@ -1894,6 +1945,8 @@ export async function addAnnouncement(input: { teacherId: string; title: string;
     chapter_id: chapter?.id ?? null,
     title,
     body,
+    batch: input.batch ? sanitizeText(input.batch, 80) : null,
+    delivery_scope: resolvedDeliveryScope,
     is_active: true,
   });
   await logTeacherActivity({ actorType: 'teacher', teacherId: input.teacherId, action: 'add-announcement', chapterId: chapter?.id });
@@ -1931,6 +1984,14 @@ export async function upsertAssignmentPack(
     payload.status === 'review' || payload.status === 'published' || payload.status === 'archived' || payload.status === 'draft'
       ? payload.status
       : 'draft';
+  const visibilityStatus: 'open' | 'closed' =
+    payload.visibilityStatus === 'closed' ? 'closed' : 'open';
+  const validFrom = payload.validFrom ? sanitizeText(payload.validFrom, 60) : now;
+  const validUntil = payload.validUntil
+    ? sanitizeText(payload.validUntil, 60)
+    : (payload.dueDate ? sanitizeText(payload.dueDate, 60) : undefined);
+  const reopenedCount = Math.max(0, Number(payload.reopenedCount) || 0);
+  const extendedCount = Math.max(0, Number(payload.extendedCount) || 0);
   const packData: TeacherAssignmentPack = {
     ...payload,
     packId,
@@ -1944,6 +2005,12 @@ export async function upsertAssignmentPack(
     updatedAt: now,
     createdByKeyId: teacherId,
     status: nextStatus,
+    visibilityStatus,
+    validFrom,
+    validUntil,
+    closedAt: payload.closedAt ? sanitizeText(payload.closedAt, 60) : undefined,
+    reopenedCount,
+    extendedCount,
   };
   const existing = await supabaseSelect<TeacherAssignmentPackRow>(TABLES.assignmentPacks, {
     select: '*',
@@ -1953,7 +2020,21 @@ export async function upsertAssignmentPack(
   if (existing[0]) {
     await supabaseUpdate<TeacherAssignmentPackRow>(
       TABLES.assignmentPacks,
-      { payload: packData, status: packData.status, scope_id: scope.id, class_level: chapter.classLevel, subject: chapter.subject, section: scope.section ?? null, chapter_id: chapter.id },
+      {
+        payload: packData,
+        status: packData.status,
+        visibility_status: packData.visibilityStatus || 'open',
+        valid_from: packData.validFrom || now,
+        valid_until: packData.validUntil || null,
+        closed_at: packData.closedAt || null,
+        reopened_count: packData.reopenedCount || 0,
+        extended_count: packData.extendedCount || 0,
+        scope_id: scope.id,
+        class_level: chapter.classLevel,
+        subject: chapter.subject,
+        section: scope.section ?? null,
+        chapter_id: chapter.id,
+      },
       [{ column: 'id', value: packId }, { column: 'teacher_id', value: teacherId }]
     );
   } else {
@@ -1966,6 +2047,12 @@ export async function upsertAssignmentPack(
       section: scope.section ?? null,
       chapter_id: chapter.id,
       status: packData.status,
+      visibility_status: packData.visibilityStatus || 'open',
+      valid_from: packData.validFrom || now,
+      valid_until: packData.validUntil || null,
+      closed_at: packData.closedAt || null,
+      reopened_count: packData.reopenedCount || 0,
+      extended_count: packData.extendedCount || 0,
       payload: packData,
     });
   }
@@ -2041,6 +2128,12 @@ export async function updateAssignmentPackStatus(input: {
     TABLES.assignmentPacks,
     {
       status: input.status,
+      visibility_status: nextPayload.visibilityStatus || 'open',
+      valid_from: nextPayload.validFrom || nextPayload.createdAt,
+      valid_until: nextPayload.validUntil || null,
+      closed_at: nextPayload.closedAt || null,
+      reopened_count: nextPayload.reopenedCount || 0,
+      extended_count: nextPayload.extendedCount || 0,
       payload: nextPayload,
       updated_at: new Date().toISOString(),
     },
@@ -2058,6 +2151,78 @@ export async function updateAssignmentPackStatus(input: {
     action: actionMap[input.status],
     packId: input.packId,
     metadata: { approved: !!input.approved },
+  });
+  return getAssignmentPack(input.packId);
+}
+
+export async function updateAssignmentPackLifecycle(input: {
+  teacherId: string;
+  packId: string;
+  action: 'extend' | 'close' | 'reopen';
+  extendDays?: number;
+}): Promise<TeacherAssignmentPack | null> {
+  const pack = await getAssignmentPack(input.packId);
+  if (!pack) return null;
+  const canAccess = await canTeacherAccessAssignmentPack(input.teacherId, input.packId);
+  if (!canAccess) return null;
+
+  const now = new Date();
+  const next: TeacherAssignmentPack = {
+    ...pack,
+    updatedAt: now.toISOString(),
+    visibilityStatus: pack.visibilityStatus || 'open',
+    validFrom: pack.validFrom || pack.createdAt,
+    validUntil: pack.validUntil || pack.dueDate,
+    reopenedCount: Number(pack.reopenedCount || 0),
+    extendedCount: Number(pack.extendedCount || 0),
+  };
+
+  if (input.action === 'close') {
+    next.visibilityStatus = 'closed';
+    next.closedAt = now.toISOString();
+  }
+  if (input.action === 'reopen') {
+    next.visibilityStatus = 'open';
+    next.closedAt = undefined;
+    next.reopenedCount = Number(next.reopenedCount || 0) + 1;
+  }
+  if (input.action === 'extend') {
+    const extendDays = Math.max(1, Math.min(120, Number(input.extendDays) || 3));
+    const base = next.validUntil ? new Date(next.validUntil) : (next.dueDate ? new Date(next.dueDate) : now);
+    if (!Number.isNaN(base.getTime())) {
+      base.setDate(base.getDate() + extendDays);
+      next.validUntil = base.toISOString();
+      next.dueDate = next.validUntil;
+      next.extendedCount = Number(next.extendedCount || 0) + 1;
+      next.visibilityStatus = 'open';
+    }
+  }
+
+  await supabaseUpdate<TeacherAssignmentPackRow>(
+    TABLES.assignmentPacks,
+    {
+      payload: next,
+      visibility_status: next.visibilityStatus || 'open',
+      valid_from: next.validFrom || next.createdAt,
+      valid_until: next.validUntil || null,
+      closed_at: next.closedAt || null,
+      reopened_count: next.reopenedCount || 0,
+      extended_count: next.extendedCount || 0,
+      updated_at: now.toISOString(),
+    },
+    [{ column: 'id', value: sanitizeText(input.packId, 80) }, { column: 'teacher_id', value: input.teacherId }]
+  );
+
+  await logTeacherActivity({
+    actorType: 'teacher',
+    teacherId: input.teacherId,
+    action: input.action === 'extend' ? 'publish-assignment-pack' : input.action === 'close' ? 'archive-assignment-pack' : 'publish-assignment-pack',
+    packId: input.packId,
+    metadata: {
+      lifecycleAction: input.action,
+      extendDays: input.extendDays,
+      validUntil: next.validUntil,
+    },
   });
   return getAssignmentPack(input.packId);
 }

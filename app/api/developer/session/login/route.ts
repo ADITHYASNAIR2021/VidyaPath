@@ -1,0 +1,135 @@
+/**
+ * POST /api/developer/session/login
+ *
+ * Authenticates with DEVELOPER_USERNAME + DEVELOPER_PASSWORD env vars.
+ * Issues a vp_developer_session cookie (HMAC-signed, httpOnly).
+ */
+
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import {
+  attachDeveloperSessionCookie,
+  createDeveloperSessionToken,
+  isSessionSigningConfigured,
+} from '@/lib/auth/session';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { recordAuditEvent } from '@/lib/security/audit';
+
+export const dynamic = 'force-dynamic';
+
+function getDeveloperCredentials(): { username: string; password: string } | null {
+  const username = (process.env.DEVELOPER_USERNAME || '').trim();
+  const password = (process.env.DEVELOPER_PASSWORD || '').trim();
+  if (!username || !password) return null;
+  return { username, password };
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(
+    createHmac('sha256', 'vp-dev-compare').update(a).digest('hex'),
+    'utf8'
+  );
+  const bBuf = Buffer.from(
+    createHmac('sha256', 'vp-dev-compare').update(b).digest('hex'),
+    'utf8'
+  );
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
+export async function POST(req: Request) {
+  const requestId = getRequestId(req);
+
+  if (!isSessionSigningConfigured()) {
+    return errorJson({
+      requestId,
+      errorCode: 'session-signing-not-configured',
+      message: 'SESSION_SIGNING_SECRET is required for login sessions.',
+      status: 503,
+    });
+  }
+
+  const credentials = getDeveloperCredentials();
+  if (!credentials) {
+    return errorJson({
+      requestId,
+      errorCode: 'developer-access-not-configured',
+      message: 'Developer access is not configured. Set DEVELOPER_USERNAME and DEVELOPER_PASSWORD in environment.',
+      status: 503,
+    });
+  }
+
+  const ip = getClientIp(req);
+  const rateLimit = await checkRateLimit({
+    key: buildRateLimitKey('auth:developer-login', [ip]),
+    windowSeconds: 60,
+    maxRequests: 8,
+    blockSeconds: 180,
+  });
+  if (!rateLimit.allowed) {
+    return errorJson({
+      requestId,
+      errorCode: 'rate-limit-exceeded',
+      message: 'Too many login attempts. Try again later.',
+      hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
+      status: 429,
+    });
+  }
+
+  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 4 * 1024);
+  const body = bodyResult.ok ? bodyResult.value : {};
+  const username = typeof body.username === 'string' ? body.username.trim() : '';
+  const password = typeof body.password === 'string' ? body.password.trim() : '';
+
+  if (!username || !password) {
+    return errorJson({
+      requestId,
+      errorCode: 'missing-credentials',
+      message: 'Username and password are required.',
+      status: 400,
+    });
+  }
+
+  const usernameMatch = safeEqual(username, credentials.username);
+  const passwordMatch = safeEqual(password, credentials.password);
+
+  if (!usernameMatch || !passwordMatch) {
+    await recordAuditEvent({
+      requestId,
+      endpoint: '/api/developer/session/login',
+      action: 'developer-login-failed',
+      statusCode: 401,
+      actorRole: 'system',
+      metadata: { username },
+    });
+    return errorJson({
+      requestId,
+      errorCode: 'invalid-developer-credentials',
+      message: 'Invalid username or password.',
+      status: 401,
+    });
+  }
+
+  const token = createDeveloperSessionToken(credentials.username);
+  const response = dataJson({
+    requestId,
+    data: {
+      role: 'developer',
+      username: credentials.username,
+      sessionExpiry: Date.now() + 8 * 60 * 60 * 1000,
+    },
+  });
+  attachDeveloperSessionCookie(response, token);
+
+  await recordAuditEvent({
+    requestId,
+    endpoint: '/api/developer/session/login',
+    action: 'developer-login-success',
+    statusCode: 200,
+    actorRole: 'developer',
+    metadata: { username: credentials.username },
+  });
+
+  return response;
+}

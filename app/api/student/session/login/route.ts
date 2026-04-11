@@ -9,6 +9,7 @@ import {
 import { logServerEvent } from '@/lib/observability';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { recordStudentActivity } from '@/lib/study-enhancements-db';
 import { authenticateStudent, authenticateStudentByRollNo, getStudentById } from '@/lib/teacher-admin-db';
 
 const SESSION_EXPIRY_MS = 8 * 60 * 60 * 1000;
@@ -20,6 +21,7 @@ function buildSessionPayload(student: {
   classLevel: 10 | 12;
   section?: string;
   schoolId?: string;
+  batch?: string;
 }) {
   return {
     studentId: student.id,
@@ -28,6 +30,7 @@ function buildSessionPayload(student: {
     classLevel: student.classLevel,
     section: student.section,
     schoolId: student.schoolId,
+    batch: student.batch,
   };
 }
 
@@ -120,21 +123,24 @@ export async function POST(req: Request) {
     (classLevel === 10 || classLevel === 12) &&
     !!normalizedRollNo;
 
-  const buildSuccessResponse = (data: {
+  const buildSuccessResponse = async (data: {
     studentId: string;
     studentName: string;
     rollCode: string;
     classLevel: 10 | 12;
     section?: string;
     schoolId?: string;
+    batch?: string;
     auth: 'supabase' | 'legacy-roll' | 'legacy';
   }) => {
+    await recordStudentActivity(data.studentId, new Date()).catch(() => undefined);
     const response = dataJson({
       requestId,
       data: {
         ...data,
         role: 'student',
         schoolCode: schoolCode || undefined,
+        schoolId: data.schoolId,
         availableRoles: ['student'],
         sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
       },
@@ -147,6 +153,9 @@ export async function POST(req: Request) {
         rollCode: data.rollCode,
         classLevel: data.classLevel,
         section: data.section,
+        schoolId: data.schoolId,
+        schoolCode: schoolCode || undefined,
+        batch: data.batch,
       })
     );
     return response;
@@ -175,7 +184,7 @@ export async function POST(req: Request) {
             status: 404,
           });
         }
-        const response = buildSuccessResponse({
+        const response = await buildSuccessResponse({
           ...buildSessionPayload(student),
           auth: 'supabase',
         });
@@ -231,7 +240,7 @@ export async function POST(req: Request) {
       });
     }
     if (legacyByRoll.session) {
-      return buildSuccessResponse({
+      return await buildSuccessResponse({
         ...legacyByRoll.session,
         schoolId: undefined,
         auth: 'legacy-roll',
@@ -263,7 +272,7 @@ export async function POST(req: Request) {
       });
     }
     if (legacyByRoll.session) {
-      return buildSuccessResponse({
+      return await buildSuccessResponse({
         ...legacyByRoll.session,
         schoolId: undefined,
         auth: 'legacy-roll',
@@ -300,7 +309,7 @@ export async function POST(req: Request) {
             status: 404,
           });
         }
-        const response = buildSuccessResponse({
+        const response = await buildSuccessResponse({
           ...buildSessionPayload(student),
           auth: 'supabase',
         });
@@ -351,7 +360,7 @@ export async function POST(req: Request) {
     });
   }
 
-  return buildSuccessResponse({
+  return await buildSuccessResponse({
     ...session,
     schoolId: undefined,
     auth: 'legacy',

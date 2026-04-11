@@ -20,7 +20,9 @@ import Fuse from 'fuse.js';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { Subject, ClassLevel } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { fetchClientStudentSession } from '@/lib/client-student-session';
 import ChapterCard from '@/components/ChapterCard';
+import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
 import { useProgressStore } from '@/lib/store';
 
 const SUBJECTS: { label: string; value: Subject | 'All'; icon: React.ElementType }[] = [
@@ -76,12 +78,73 @@ function ChaptersContent() {
   const [selectedSubject, setSelectedSubject] = useState<Subject | 'All'>(
     SUBJECTS.find((s) => s.value === initialSubject) ? initialSubject : 'All'
   );
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [studentSession, setStudentSession] = useState<{
+    isStudent: boolean;
+    classLevel?: ClassLevel;
+    enrolledSubjects: Subject[];
+  }>({
+    isStudent: false,
+    enrolledSubjects: [],
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const trackedNoResultQueries = useRef(new Set<string>());
   const { studiedChapterIds } = useProgressStore();
+
+  useEffect(() => {
+    let active = true;
+    fetchClientStudentSession()
+      .then((session) => {
+        if (!active) return;
+        if (session?.studentId) {
+          const sessionClass = session.classLevel === 10 || session.classLevel === 12
+            ? session.classLevel
+            : undefined;
+          if (initialClass === 0 && sessionClass) {
+            setSelectedClass(sessionClass);
+          }
+          setStudentSession({
+            isStudent: true,
+            classLevel: sessionClass,
+            enrolledSubjects: session.enrolledSubjects,
+          });
+        } else {
+          setStudentSession({
+            isStudent: false,
+            enrolledSubjects: [],
+          });
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setStudentSession({
+          isStudent: false,
+          enrolledSubjects: [],
+        });
+      })
+      .finally(() => {
+        if (active) setSessionLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [initialClass]);
+
+  const enrolledSubjectSet = useMemo(() => {
+    if (!studentSession.isStudent) return null;
+    return new Set<Subject>(studentSession.enrolledSubjects);
+  }, [studentSession.enrolledSubjects, studentSession.isStudent]);
+
   const availableSubjects = useMemo(() => {
     const classScoped = ALL_CHAPTERS.filter((chapter) => (selectedClass === 0 ? chapter.classLevel !== 11 : chapter.classLevel === selectedClass));
     const subjectSet = new Set<Subject>(classScoped.map((chapter) => chapter.subject));
+    if (enrolledSubjectSet) {
+      for (const subject of Array.from(subjectSet)) {
+        if (!enrolledSubjectSet.has(subject)) {
+          subjectSet.delete(subject);
+        }
+      }
+    }
     if (selectedClass === 10) {
       for (const subject of Array.from(subjectSet)) {
         if (!CLASS10_ALLOWED_SUBJECTS.has(subject)) {
@@ -90,7 +153,7 @@ function ChaptersContent() {
       }
     }
     return SUBJECTS.filter((item) => item.value === 'All' || subjectSet.has(item.value as Subject));
-  }, [selectedClass]);
+  }, [enrolledSubjectSet, selectedClass]);
 
   useEffect(() => {
     if (selectedSubject === 'All') return;
@@ -142,6 +205,7 @@ function ChaptersContent() {
     const base = ALL_CHAPTERS.filter((ch) => {
       if (selectedClass !== 0 && ch.classLevel !== selectedClass) return false;
       if (selectedSubject !== 'All' && ch.subject !== selectedSubject) return false;
+      if (enrolledSubjectSet && !enrolledSubjectSet.has(ch.subject)) return false;
       return true;
     });
 
@@ -150,7 +214,7 @@ function ChaptersContent() {
 
     const filteredBySearch = base.filter((chapter) => searchOrder.has(chapter.id));
     return filteredBySearch.sort((a, b) => (searchOrder.get(a.id) ?? 9999) - (searchOrder.get(b.id) ?? 9999));
-  }, [selectedClass, selectedSubject, searchOrder, searchQuery]);
+  }, [enrolledSubjectSet, searchOrder, searchQuery, selectedClass, selectedSubject]);
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -186,6 +250,7 @@ function ChaptersContent() {
 
   return (
     <div className="min-h-screen">
+      <ScrollToTopOnMount />
       {/* Header */}
       <div className="bg-gradient-to-br from-navy-700 to-navy-800 text-white px-4 py-12">
         <div className="max-w-5xl mx-auto">
@@ -289,6 +354,11 @@ function ChaptersContent() {
               {selectedSubject !== 'All' ? ` - ${selectedSubject}` : ''}
               {searchQuery ? ` for "${searchQuery}"` : ''}
             </p>
+            {sessionLoaded && studentSession.isStudent && (
+              <p className="mb-4 text-xs font-semibold text-indigo-700">
+                Showing only your enrolled subjects: {studentSession.enrolledSubjects.join(', ') || 'None assigned yet'}.
+              </p>
+            )}
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filtered.map((chapter, i) => {
                 const pyqInsight = getPyqSearchInsight(chapter.id);

@@ -59,7 +59,7 @@ export default function DeveloperOnboardingPage() {
       const schoolsPayload = await schoolsRes.json().catch(() => null);
       const requestsPayload = await requestsRes.json().catch(() => null);
       if (schoolsRes.status === 401 || requestsRes.status === 401) {
-        router.replace('/admin/login?reason=developer-required');
+        router.replace('/developer/login');
         return;
       }
       if (!schoolsRes.ok || !requestsRes.ok) {

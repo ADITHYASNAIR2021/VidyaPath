@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { ShieldCheck } from 'lucide-react';
 
 export default function AdminLoginPage() {
@@ -62,7 +63,11 @@ export default function AdminLoginPage() {
         )}
         {reason === 'developer-required' && (
           <p className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-800">
-            Developer privileges are required for this page.
+            Developer login is at{' '}
+            <a href="/developer/login" className="font-semibold underline">
+              /developer/login
+            </a>
+            .
           </p>
         )}
         <input
@@ -100,6 +105,19 @@ export default function AdminLoginPage() {
           {loading ? 'Authorizing...' : 'Login'}
         </button>
         {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+        <div className="mt-4 rounded-xl border border-[#E8E4DC] bg-[#F9F7F1] px-3 py-2.5 text-xs text-[#6A6A84]">
+          <p className="font-semibold text-[#4A4560]">Looking for developer access?</p>
+          <p className="mt-1">
+            Use the dedicated login at{' '}
+            <Link href="/developer/login" className="font-semibold text-indigo-700 hover:text-indigo-800">
+              /developer/login
+            </Link>
+            .
+          </p>
+          <Link href="/affiliate-your-school" className="mt-2 inline-flex font-semibold text-indigo-700 hover:text-indigo-800">
+            View affiliate request form
+          </Link>
+        </div>
       </div>
     </div>
   );
