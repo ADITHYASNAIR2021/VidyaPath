@@ -26,65 +26,157 @@ function buildTeacherAIPrompt(
   difficulty: string,
   customContext: string
 ): { system: string; user: string } {
-  const topicList = topics.join(', ');
-  const ctxLine = customContext ? `\nTeacher's additional context: ${customContext}` : '';
+  const topicList = topics.slice(0, 10).join(', ');
+  const ctxLine = customContext ? `\nAdditional teacher instructions: ${customContext}` : '';
+  const diffLabel = difficulty === 'easy' ? 'foundation-level' : difficulty === 'hard' ? 'advanced HOTS-level' : difficulty === 'medium' ? 'standard CBSE-level' : 'mixed difficulty';
 
-  const common = `You are an expert CBSE curriculum designer helping a teacher create high-quality teaching materials.
-Chapter: ${chapterTitle} | Subject: ${subject} | Class: ${classLevel}
-Key Topics: ${topicList}${ctxLine}`;
+  const system = `You are a senior CBSE curriculum expert with 15+ years experience writing board exam papers and lesson materials for Class ${classLevel} ${subject}.
+STRICT RULES — follow exactly:
+1. Never use Markdown syntax. No asterisks (*), hashes (#), backticks, or underscores for formatting.
+2. Use plain text only. Use ALL CAPS for section headers.
+3. Use numbered lists (1. 2. 3.) and lettered sub-items (a. b. c.) for structure.
+4. Write clearly at Class ${classLevel} reading level aligned to NCERT syllabus.
+5. Be specific, accurate, and board-exam focused.`;
 
   if (type === 'worksheet') {
+    const mcqCount = Math.max(2, Math.round(questionCount * 0.4));
+    const shortCount = Math.max(2, Math.round(questionCount * 0.4));
+    const longCount = Math.max(1, questionCount - mcqCount - shortCount);
     return {
-      system: common,
-      user: `Create a ${difficulty} practice worksheet for the above chapter with exactly ${questionCount} questions.
-Use a mix of:
-- 1-mark recall questions (fill in the blank or very short answer)
-- 2-mark application questions
-- 3-mark concept questions
+      system,
+      user: `Create a ${diffLabel} CBSE practice worksheet for Class ${classLevel} ${subject}.
+Chapter: ${chapterTitle}
+Key Topics: ${topicList}${ctxLine}
 
-Format each question clearly as:
-Q1. [question text] (__ marks)
-...
+Use this exact structure — no markdown, plain text only:
 
-End with a brief "Key Formulas / Points to Remember" section.`,
+PRACTICE WORKSHEET
+Class ${classLevel} | ${subject} | ${chapterTitle}
+
+LEARNING OBJECTIVES
+Write 3 clear objectives starting with action verbs (Recall, Explain, Apply, Analyse).
+
+SECTION A — MULTIPLE CHOICE QUESTIONS (1 mark each)
+Write ${mcqCount} MCQs. Format each as:
+1. [Question text]
+   a) [Option]   b) [Option]   c) [Option]   d) [Option]
+
+SECTION B — SHORT ANSWER QUESTIONS (2-3 marks each)
+Write ${shortCount} questions. Number them continuing from Section A.
+
+SECTION C — LONG ANSWER QUESTIONS (5 marks each)
+Write ${longCount} questions. Number them continuing. Include sub-parts (a), (b), (c).
+
+ANSWER KEY
+Section A: 1-[letter] 2-[letter] ... (one line)
+Section B: Brief model answers, 2-3 sentences each.
+Section C: Key points for full marks (bullet points).
+
+KEY FORMULAS AND POINTS TO REMEMBER
+List 4-6 important formulas or facts from this chapter.`,
     };
   }
 
   if (type === 'lesson-plan') {
     return {
-      system: common,
-      user: `Create a detailed 45-minute lesson plan for the above chapter.
-Structure:
-1. Learning Objectives (3–4 bullet points)
-2. Prior Knowledge Required
-3. Lesson Flow:
-   - Opening / Hook (5 min)
-   - Core Explanation (20 min) — key concepts, diagrams to draw, examples
-   - Guided Practice (10 min) — 2–3 practice questions with expected answers
-   - Closure / Recap (5 min)
-   - Exit Ticket (5 min) — 1 quick assessment question
-4. Homework / Follow-up Assignment (2–3 questions)
-5. Differentiation Tips (for struggling vs advanced students)
-6. CBSE Board Exam Connection (marks weightage, important question types)`,
+      system,
+      user: `Create a structured 45-minute lesson plan for Class ${classLevel} ${subject}.
+Chapter: ${chapterTitle}
+Key Topics: ${topicList}${ctxLine}
+
+Use this exact structure — plain text, no markdown:
+
+LESSON PLAN
+Class ${classLevel} | ${subject} | ${chapterTitle}
+Duration: 45 minutes | Difficulty: ${diffLabel}
+
+LEARNING OBJECTIVES
+1. [Objective — start with action verb]
+2. [Objective]
+3. [Objective]
+
+PRIOR KNOWLEDGE REQUIRED
+List 2-3 concepts students should already know.
+
+MATERIALS AND RESOURCES
+Textbook pages, diagrams to draw on board, any equipment.
+
+LESSON FLOW
+
+HOOK AND WARM-UP (5 minutes)
+Describe an engaging opening activity, real-world connection, or question to spark curiosity. Be specific.
+
+DIRECT INSTRUCTION (15 minutes)
+Key concepts to explain, in what order. Include 1-2 specific examples or worked problems the teacher should demonstrate. Mention any important diagrams to draw.
+
+GUIDED PRACTICE (10 minutes)
+Write 2-3 practice questions with expected student answers. Teacher works through these with class.
+Q1. [Question] — Expected: [Answer]
+Q2. [Question] — Expected: [Answer]
+
+INDEPENDENT PRACTICE (10 minutes)
+Write 3-4 questions students solve individually. Vary difficulty.
+
+EXIT TICKET ASSESSMENT (5 minutes)
+One targeted question to gauge understanding. Include the answer.
+
+HOMEWORK ASSIGNMENT
+2-3 questions for home practice with page references from NCERT.
+
+DIFFERENTIATION TIPS
+For struggling students: [specific support strategy]
+For advanced students: [extension activity or challenge]
+
+CBSE BOARD EXAM RELEVANCE
+Marks weightage, common question types, frequently tested concepts from this chapter.`,
     };
   }
 
   // question-paper
+  const totalMarks = Math.max(20, questionCount);
+  const sec_a = Math.floor(totalMarks * 0.2);
+  const sec_b = Math.floor(totalMarks * 0.3);
+  const sec_c = Math.floor(totalMarks * 0.3);
+  const sec_d = totalMarks - sec_a - sec_b - sec_c;
   return {
-    system: common,
-    user: `Create a ${difficulty} CBSE-style question paper for the above chapter with exactly ${questionCount} marks total.
+    system,
+    user: `Create a ${diffLabel} CBSE-format question paper for Class ${classLevel} ${subject}.
+Chapter: ${chapterTitle}
+Key Topics: ${topicList}${ctxLine}
+Total Marks: ${totalMarks}
 
-Format:
-Section A – 1-mark questions (Very Short Answer)
-Section B – 2-mark questions (Short Answer I)
-Section C – 3-mark questions (Short Answer II)
-Section D – 5-mark questions (Long Answer) [only if questionCount >= 15]
+Use this exact structure — plain text, no markdown:
 
-Rules:
-- Label each question clearly (Q1, Q2...)
-- Include marks in brackets at end of each question e.g. [1 mark]
-- Ensure variety: recall, application, analysis
-- Final line: Total Marks: __`,
+QUESTION PAPER
+Class ${classLevel} | ${subject}
+Chapter: ${chapterTitle}
+Time Allowed: ${Math.round(totalMarks * 1.2)} minutes | Maximum Marks: ${totalMarks}
+
+General Instructions:
+1. All questions are compulsory.
+2. Write neat and legible answers.
+3. Internal choices are given where indicated.
+
+SECTION A — OBJECTIVE TYPE (${sec_a} marks)
+(1 mark each)
+Write ${sec_a} questions. MCQ format with 4 options, label options a) b) c) d).
+Number as Q1, Q2...
+
+SECTION B — SHORT ANSWER I (${sec_b} marks)
+(2 marks each — write in 30-50 words)
+Write ${Math.round(sec_b / 2)} questions. Number continuing from Section A.
+
+SECTION C — SHORT ANSWER II (${sec_c} marks)
+(3 marks each — write in 60-80 words)
+Write ${Math.round(sec_c / 3)} questions. Give one internal choice per question (OR).
+Number continuing from Section B.
+
+SECTION D — LONG ANSWER (${sec_d} marks)
+(5 marks each — write in 100-150 words)
+Write ${Math.round(sec_d / 5)} questions. Give one internal choice per question (OR). Include a diagram/case-study based question.
+Number continuing from Section C.
+
+Total Marks: ${totalMarks}`,
   };
 }
 

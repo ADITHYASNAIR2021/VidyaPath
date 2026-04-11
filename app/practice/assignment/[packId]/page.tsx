@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type { TeacherAssignmentPack } from '@/lib/teacher-types';
+import { CheckCircle2, Clock, Printer } from 'lucide-react';
 
 interface SubmissionResponse {
   submissionId: string;
@@ -61,6 +62,7 @@ export default function PracticeAssignmentPage() {
   const [shortAnswers, setShortAnswers] = useState<Record<string, string>>({});
   const [longAnswers, setLongAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
   const [latestAttempt, setLatestAttempt] = useState<StudentAttempt | null>(null);
 
@@ -70,11 +72,7 @@ export default function PracticeAssignmentPage() {
         const response = await fetch('/api/student/session/me', { cache: 'no-store' });
         const body = await response.json().catch(() => null);
         const data = unwrapApiPayload<StudentSessionPayload | null>(body);
-        if (!response.ok || !data) {
-          setStudentSession(null);
-          return;
-        }
-        setStudentSession(data);
+        setStudentSession(response.ok && data ? data : null);
       } catch {
         setStudentSession(null);
       }
@@ -94,7 +92,6 @@ export default function PracticeAssignmentPage() {
         }
         if (!response.ok || !data) {
           setError(extractApiError(body, 'Assignment pack not found.'));
-          setPack(null);
           return;
         }
         setPack(data);
@@ -104,6 +101,7 @@ export default function PracticeAssignmentPage() {
         setLoading(false);
       }
     }
+
     async function loadStudentAttempts() {
       if (!packId) return;
       try {
@@ -112,11 +110,16 @@ export default function PracticeAssignmentPage() {
         const data = unwrapApiPayload<Record<string, unknown> | null>(body);
         if (!response.ok || !data) return;
         const attempts = Array.isArray(data.attempts) ? (data.attempts as StudentAttempt[]) : [];
-        setLatestAttempt(attempts[0] ?? null);
+        if (attempts.length > 0) {
+          setLatestAttempt(attempts[0]);
+          // Already submitted before — lock the form
+          setSubmitted(true);
+        }
       } catch {
         // no-op
       }
     }
+
     void Promise.all([loadPack(), loadStudentSession(), loadStudentAttempts()]);
   }, [packId, router]);
 
@@ -128,9 +131,9 @@ export default function PracticeAssignmentPage() {
   }, [pack]);
 
   async function submit() {
-    if (!pack) return;
+    if (!pack || submitted || submitting) return;
     if (!studentSession?.studentId || !studentSession?.rollCode) {
-      setError('Student login required. Please login as student and retry.');
+      setError('Student login required. Please login and retry.');
       return;
     }
     setSubmitting(true);
@@ -154,172 +157,210 @@ export default function PracticeAssignmentPage() {
       const response = await fetch('/api/teacher/submission', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          packId: pack.packId,
-          answers,
-        }),
+        body: JSON.stringify({ packId: pack.packId, answers }),
       });
       const body = await response.json().catch(() => null);
       const data = unwrapApiPayload<SubmissionResponse | null>(body);
+
+      // 409 = already submitted (server-side duplicate guard)
+      if (response.status === 409) {
+        setSubmitted(true);
+        setError('');
+        setResult({ submissionId: '', status: 'pending_review', message: 'You have already submitted this assignment.' });
+        return;
+      }
+
       if (!response.ok || !data) {
         setError(extractApiError(body, 'Submission failed.'));
         return;
       }
+
       setResult(data);
-      const attemptsResponse = await fetch(`/api/student/submission-results?packId=${encodeURIComponent(pack.packId)}`, { cache: 'no-store' });
-      const attemptsBody = await attemptsResponse.json().catch(() => null);
+      setSubmitted(true); // Lock: no more submissions
+
+      // Refresh latest attempt
+      const attemptsRes = await fetch(`/api/student/submission-results?packId=${encodeURIComponent(pack.packId)}`, { cache: 'no-store' });
+      const attemptsBody = await attemptsRes.json().catch(() => null);
       const attemptsData = unwrapApiPayload<Record<string, unknown> | null>(attemptsBody);
-      if (attemptsResponse.ok && attemptsData && Array.isArray(attemptsData.attempts)) {
+      if (attemptsRes.ok && attemptsData && Array.isArray(attemptsData.attempts)) {
         setLatestAttempt((attemptsData.attempts as StudentAttempt[])[0] ?? null);
       }
     } catch {
-      setError('Submission failed.');
+      setError('Submission failed. Please check your connection.');
     } finally {
       setSubmitting(false);
     }
   }
 
   if (loading) {
-    return <div className="min-h-screen bg-[#FDFAF6] px-4 py-10 text-sm text-[#5F5A73]">Loading assignment pack...</div>;
+    return <div className="min-h-screen bg-[#FDFAF6] px-4 py-10 text-sm text-[#5F5A73]">Loading assignment…</div>;
   }
 
   if (!pack) {
-    return <div className="min-h-screen bg-[#FDFAF6] px-4 py-10 text-sm text-rose-700">{error || 'Assignment pack not found.'}</div>;
+    return <div className="min-h-screen bg-[#FDFAF6] px-4 py-10 text-sm text-rose-700">{error || 'Assignment not found.'}</div>;
   }
+
+  const totalQ = (pack.mcqs?.length ?? 0) + (pack.shortAnswers?.length ?? 0) + (pack.longAnswers?.length ?? 0);
 
   return (
     <div className="min-h-screen bg-[#FDFAF6] px-4 py-8">
       <div className="max-w-4xl mx-auto bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-5">
-        <div className="flex flex-wrap items-start justify-between gap-2">
+
+        {/* Header */}
+        <div className="flex flex-wrap items-start justify-between gap-2 mb-5">
           <div>
             <h1 className="font-fraunces text-2xl font-bold text-navy-700">{pack.title}</h1>
-            <p className="text-xs text-[#6A6A84] mt-1">
-              Class {pack.classLevel} {pack.subject} | {pack.mcqs.length} MCQs | {pack.shortAnswers.length} short answers | {pack.longAnswers.length} long answers | {pack.estimatedTimeMinutes} min
-            </p>
-            <p className="text-xs text-[#6A6A84] mt-0.5">Due date: {pack.dueDate || 'Not specified'}</p>
-          </div>
-          <div className="flex gap-2">
-            {!isPrintMode && (
-              <Link href={`${pack.printUrl}`} className="text-xs font-semibold border border-indigo-200 text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg">
-                Printable view
-              </Link>
-            )}
-            {isPrintMode && (
-              <button onClick={() => window.print()} className="text-xs font-semibold border border-emerald-200 text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg">
-                Print now
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-5 space-y-4">
-          {questionList.map((entry, idx) => (
-            <div key={entry.key} className="rounded-xl border border-[#E8E4DC] bg-[#FAF9F5] px-4 py-3">
-              <p className="text-sm font-semibold text-[#1F1F35]">
-                {idx + 1}. {entry.kind === 'mcq' ? entry.value.question : entry.value}
-              </p>
-
-              {entry.kind === 'mcq' && (
-                <div className="mt-2 space-y-1.5">
-                  {entry.value.options.map((option, optIdx) => (
-                    <label key={`${entry.key}-${optIdx}`} className="flex items-start gap-2 text-sm text-[#3D3B4D]">
-                      {!isPrintMode && (
-                        <input
-                          type="radio"
-                          name={entry.key}
-                          checked={mcqAnswers[entry.key] === optIdx}
-                          onChange={() => setMcqAnswers((prev) => ({ ...prev, [entry.key]: optIdx }))}
-                          className="mt-1"
-                        />
-                      )}
-                      <span>{String.fromCharCode(65 + optIdx)}. {option}</span>
-                    </label>
-                  ))}
-                </div>
+            <div className="flex items-center gap-3 mt-1 text-xs text-[#6A6A84]">
+              <span>Class {pack.classLevel} · {pack.subject}</span>
+              <span>{totalQ} questions</span>
+              {pack.estimatedTimeMinutes && (
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> {pack.estimatedTimeMinutes} min
+                </span>
               )}
-
-              {entry.kind === 'short' && !isPrintMode && (
-                <textarea
-                  value={shortAnswers[entry.key] ?? ''}
-                  onChange={(event) => setShortAnswers((prev) => ({ ...prev, [entry.key]: event.target.value }))}
-                  rows={3}
-                  placeholder="Write your answer"
-                  className="w-full mt-2 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2"
-                />
-              )}
-              {entry.kind === 'long' && !isPrintMode && (
-                <textarea
-                  value={longAnswers[entry.key] ?? ''}
-                  onChange={(event) => setLongAnswers((prev) => ({ ...prev, [entry.key]: event.target.value }))}
-                  rows={6}
-                  placeholder="Write a detailed board-style answer"
-                  className="w-full mt-2 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2"
-                />
-              )}
+              {pack.dueDate && <span>Due {new Date(pack.dueDate).toLocaleDateString()}</span>}
             </div>
-          ))}
+          </div>
+          {!isPrintMode && (
+            <Link
+              href={`/practice/assignment/${pack.packId}?print=1`}
+              className="flex items-center gap-1.5 text-xs font-semibold border border-gray-200 text-gray-600 bg-white px-3 py-1.5 rounded-lg hover:bg-gray-50"
+            >
+              <Printer className="w-3.5 h-3.5" /> Print
+            </Link>
+          )}
         </div>
 
-        {!isPrintMode && (
-        <div className="mt-5 rounded-xl border border-[#E8E4DC] bg-[#F9F8F4] px-4 py-3">
-          <p className="text-xs text-[#6A6A84] font-semibold">Student submission</p>
-          <div className="w-full mt-2 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 bg-white">
-            <p className="text-[#5F5A73]">
-              Name: <span className="font-semibold text-navy-700">{studentSession?.studentName || 'Not found'}</span>
+        {/* Already-submitted banner (loaded from previous attempt) */}
+        {submitted && !result && latestAttempt && (
+          <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm" role="status">
+            <p className="font-semibold text-emerald-800 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" /> Assignment Already Submitted
             </p>
-            <p className="text-[#5F5A73] mt-1">
-              Roll code: <span className="font-semibold text-navy-700">{studentSession?.rollCode || 'Not found'}</span>
+            <p className="text-emerald-700 mt-1">
+              Submitted on {new Date(latestAttempt.createdAt).toLocaleString()} · Status: <span className="font-semibold capitalize">{latestAttempt.status.replace('_', ' ')}</span>
             </p>
-          </div>
-          <Link
-            href={`/exam/assignment/${pack.packId}`}
-            className="mt-2 inline-flex text-xs font-semibold text-indigo-700 hover:text-indigo-800"
-          >
-            Start Proctored Exam Mode
-          </Link>
-          <div>
-            <Link
-              href={`/student/login?force=1&next=${encodeURIComponent(`/practice/assignment/${pack.packId}`)}`}
-              className="mt-2 inline-flex text-xs font-semibold text-emerald-700 hover:text-emerald-800"
-            >
-              Switch student login
-            </Link>
-          </div>
-          <button
-            disabled={submitting}
-            onClick={submit}
-              className="mt-3 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl disabled:opacity-50"
-            >
-              {submitting ? 'Submitting...' : 'Submit attempt'}
-            </button>
-          </div>
-        )}
-
-        {result && !isPrintMode && (
-          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm" role="status" aria-live="polite">
-            <p className="font-semibold text-emerald-800">{result.message || 'Submitted successfully.'}</p>
-            <p className="text-emerald-700 mt-1">Status: {result.status}</p>
-          </div>
-        )}
-
-        {latestAttempt && !isPrintMode && (
-          <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm">
-            <p className="font-semibold text-indigo-900">Latest result status: {latestAttempt.status}</p>
-            <p className="text-indigo-700 mt-1">Submitted: {new Date(latestAttempt.createdAt).toLocaleString()}</p>
             {latestAttempt.status === 'released' && latestAttempt.grading && (
-              <p className="text-indigo-700 mt-1">
-                Score: {latestAttempt.grading.totalScore}/{latestAttempt.grading.maxScore} ({latestAttempt.grading.percentage}%)
+              <p className="text-emerald-700 mt-1 font-semibold">
+                Score: {latestAttempt.grading.totalScore}/{latestAttempt.grading.maxScore} ({latestAttempt.grading.percentage.toFixed(1)}%)
               </p>
             )}
             {latestAttempt.status !== 'released' && (
-              <p className="text-indigo-700 mt-1">Marks will appear here after teacher grades and releases results.</p>
+              <p className="text-emerald-600 mt-1 text-xs">Your marks will appear here once the teacher grades and releases results.</p>
             )}
           </div>
         )}
 
-        {error && (
-          <div className="mt-4 text-sm text-rose-700" role="alert" aria-live="assertive">
-            {error}
+        {/* Questions */}
+        <div className="space-y-4">
+          {questionList.map((entry, idx) => {
+            const isLocked = submitted && !isPrintMode;
+            return (
+              <div key={entry.key} className="rounded-xl border border-[#E8E4DC] bg-[#FAF9F5] px-4 py-3">
+                <p className="text-sm font-semibold text-[#1F1F35]">
+                  {idx + 1}. {entry.kind === 'mcq' ? entry.value.question : entry.value}
+                </p>
+                {entry.kind === 'mcq' && (
+                  <div className="mt-2 space-y-1.5">
+                    {entry.value.options.map((option, optIdx) => (
+                      <label
+                        key={`${entry.key}-${optIdx}`}
+                        className={`flex items-start gap-2 text-sm text-[#3D3B4D] ${isLocked ? 'cursor-default opacity-70' : 'cursor-pointer'}`}
+                      >
+                        {!isPrintMode && (
+                          <input
+                            type="radio"
+                            name={entry.key}
+                            checked={mcqAnswers[entry.key] === optIdx}
+                            onChange={() => { if (!isLocked) setMcqAnswers((prev) => ({ ...prev, [entry.key]: optIdx })); }}
+                            disabled={isLocked}
+                            className="mt-1"
+                          />
+                        )}
+                        <span>{String.fromCharCode(65 + optIdx)}. {option}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {entry.kind === 'short' && !isPrintMode && (
+                  <textarea
+                    value={shortAnswers[entry.key] ?? ''}
+                    onChange={(e) => { if (!isLocked) setShortAnswers((prev) => ({ ...prev, [entry.key]: e.target.value })); }}
+                    rows={3}
+                    disabled={isLocked}
+                    placeholder={isLocked ? 'Submitted' : 'Write your answer…'}
+                    className="w-full mt-2 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2 disabled:bg-gray-50 disabled:text-gray-400"
+                  />
+                )}
+                {entry.kind === 'long' && !isPrintMode && (
+                  <textarea
+                    value={longAnswers[entry.key] ?? ''}
+                    onChange={(e) => { if (!isLocked) setLongAnswers((prev) => ({ ...prev, [entry.key]: e.target.value })); }}
+                    rows={6}
+                    disabled={isLocked}
+                    placeholder={isLocked ? 'Submitted' : 'Write a detailed board-style answer…'}
+                    className="w-full mt-2 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2 disabled:bg-gray-50 disabled:text-gray-400"
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Submit area */}
+        {!isPrintMode && (
+          <div className="mt-6">
+            {/* Student identity */}
+            {!submitted && (
+              <div className="mb-4 rounded-xl border border-[#E8E4DC] bg-[#F9F8F4] px-4 py-3 text-sm">
+                <p className="text-[#5F5A73]">
+                  Submitting as: <span className="font-semibold text-navy-700">{studentSession?.studentName || '—'}</span>
+                  <span className="ml-2 text-xs text-gray-400">({studentSession?.rollCode || 'not logged in'})</span>
+                </p>
+                <Link
+                  href={`/student/login?force=1&next=${encodeURIComponent(`/practice/assignment/${packId}`)}`}
+                  className="mt-1 inline-flex text-xs font-semibold text-amber-600 hover:text-amber-700"
+                >
+                  Switch student account
+                </Link>
+              </div>
+            )}
+
+            {/* Submitted success banner */}
+            {submitted && result && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm" role="status" aria-live="polite">
+                <p className="font-semibold text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" /> {result.message || 'Assignment submitted successfully.'}
+                </p>
+                <p className="text-emerald-700 mt-1 text-xs">Status: <span className="capitalize">{result.status.replace('_', ' ')}</span> · Your result will appear here once the teacher releases marks.</p>
+              </div>
+            )}
+
+            {/* Submit button — hidden once submitted */}
+            {!submitted && (
+              <button
+                disabled={submitting}
+                onClick={submit}
+                className="mt-2 w-full sm:w-auto text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl disabled:opacity-50 transition-colors"
+              >
+                {submitting ? 'Submitting…' : 'Submit Assignment'}
+              </button>
+            )}
+
+            {error && (
+              <div className="mt-3 text-sm text-rose-700" role="alert">
+                {error}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Released result */}
+        {!isPrintMode && latestAttempt?.status === 'released' && latestAttempt.grading && !result && (
+          <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm">
+            <p className="font-semibold text-indigo-900">
+              Score: {latestAttempt.grading.totalScore}/{latestAttempt.grading.maxScore} ({latestAttempt.grading.percentage.toFixed(1)}%)
+            </p>
           </div>
         )}
       </div>

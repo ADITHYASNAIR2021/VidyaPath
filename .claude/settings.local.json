@@ -20,7 +20,8 @@
       "Bash(cmd /c \"cd /d D:\\\\VidyaPath && npm install web-push @types/web-push 2>&1 | findstr /i \\\\\"added error web-push\\\\\"\")",
       "Bash(cmd /c \"cd /d D:\\\\VidyaPath && npm install web-push @types/web-push 2>&1\")",
       "Bash(wc -l /d/VidyaPath/app/*/page.tsx /d/VidyaPath/app/page.tsx /d/VidyaPath/app/chapters/\\\\[id\\\\]/page.tsx)",
-      "Bash(sort -k2)"
+      "Bash(sort -k2)",
+      "Bash(not exist:*)"
     ]
   }
 }

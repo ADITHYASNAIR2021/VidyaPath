@@ -8,9 +8,11 @@ import type {
   TeacherScope,
   TeacherStorageStatus,
 } from '@/lib/teacher-types';
+import type { MCQItem } from '@/lib/ai/validators';
 import {
   Package, Plus, RefreshCw, CheckCircle, Send, Archive,
   ChevronDown, ChevronUp, Calendar, Layers, Clock,
+  Edit2, Save, X as XIcon,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -34,6 +36,136 @@ const STATUS_LABELS: Record<string, { label: string; className: string }> = {
   archived:  { label: 'Archived',  className: 'bg-gray-50 text-gray-500 border-gray-200'          },
 };
 
+const OPTION_LABELS = ['A', 'B', 'C', 'D'];
+
+/* ── Difficulty slider helper ─────────────────────────────────────────── */
+function DifficultySliders({
+  easy, medium, hard,
+  onChange,
+}: {
+  easy: number; medium: number; hard: number;
+  onChange: (easy: number, medium: number, hard: number) => void;
+}) {
+  function handleEasy(v: number) {
+    const rem = 100 - v;
+    const total = medium + hard || 1;
+    const m = Math.round(rem * (medium / total));
+    onChange(v, m, rem - m);
+  }
+  function handleMedium(v: number) {
+    const rem = 100 - v;
+    const total = easy + hard || 1;
+    const e = Math.round(rem * (easy / total));
+    onChange(e, v, rem - e);
+  }
+  function handleHard(v: number) {
+    const rem = 100 - v;
+    const total = easy + medium || 1;
+    const e = Math.round(rem * (easy / total));
+    onChange(e, rem - e, v);
+  }
+
+  const bars = [
+    { label: 'Easy', value: easy, color: 'bg-emerald-400', handler: handleEasy },
+    { label: 'Medium', value: medium, color: 'bg-amber-400', handler: handleMedium },
+    { label: 'Hard', value: hard, color: 'bg-rose-400', handler: handleHard },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <label className="text-xs font-medium text-gray-600 block">Difficulty Mix</label>
+      {bars.map(({ label, value, color, handler }) => (
+        <div key={label} className="flex items-center gap-3">
+          <span className="w-14 text-xs font-medium text-gray-600">{label}</span>
+          <input
+            type="range" min={0} max={100} step={5} value={value}
+            onChange={(e) => handler(Number(e.target.value))}
+            className="flex-1 h-1.5 accent-amber-600"
+          />
+          <span className="w-8 text-right text-xs font-semibold text-gray-700">{value}%</span>
+          <div className={`w-3 h-3 rounded-full ${color}`} />
+        </div>
+      ))}
+      {/* Visual bar */}
+      <div className="h-2 rounded-full overflow-hidden flex w-full mt-1">
+        <div className="bg-emerald-400 transition-all" style={{ width: `${easy}%` }} />
+        <div className="bg-amber-400 transition-all" style={{ width: `${medium}%` }} />
+        <div className="bg-rose-400 transition-all" style={{ width: `${hard}%` }} />
+      </div>
+      <p className="text-[11px] text-gray-400">{easy}% Easy · {medium}% Medium · {hard}% Hard</p>
+    </div>
+  );
+}
+
+/* ── MCQ inline editor ────────────────────────────────────────────────── */
+function MCQEditor({
+  mcqs,
+  onChange,
+}: {
+  mcqs: MCQItem[];
+  onChange: (updated: MCQItem[]) => void;
+}) {
+  function updateQuestion(i: number, field: keyof MCQItem, value: string | number | string[]) {
+    const next = mcqs.map((q, idx) => idx === i ? { ...q, [field]: value } : q);
+    onChange(next);
+  }
+  function updateOption(qi: number, oi: number, val: string) {
+    const opts = [...mcqs[qi].options];
+    opts[oi] = val;
+    updateQuestion(qi, 'options', opts);
+  }
+
+  return (
+    <div className="space-y-4">
+      {mcqs.map((q, i) => (
+        <div key={i} className="rounded-xl border border-amber-200 bg-white p-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <span className="text-xs font-bold text-amber-700 mt-2">Q{i + 1}</span>
+            <textarea
+              rows={2}
+              value={q.question}
+              onChange={(e) => updateQuestion(i, 'question', e.target.value)}
+              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm resize-none"
+              placeholder="Question text…"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {(q.options ?? []).map((opt, j) => (
+              <div key={j} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateQuestion(i, 'answer', j)}
+                  className={clsx(
+                    'w-6 h-6 rounded-full border-2 flex-shrink-0 text-[10px] font-bold transition-colors',
+                    q.answer === j ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-gray-300 text-gray-500 hover:border-emerald-400'
+                  )}
+                >
+                  {OPTION_LABELS[j]}
+                </button>
+                <input
+                  value={opt}
+                  onChange={(e) => updateOption(i, j, e.target.value)}
+                  className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                  placeholder={`Option ${OPTION_LABELS[j]}`}
+                />
+              </div>
+            ))}
+          </div>
+          <div>
+            <input
+              value={q.explanation ?? ''}
+              onChange={(e) => updateQuestion(i, 'explanation', e.target.value)}
+              className="w-full rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5 text-xs text-gray-600"
+              placeholder="Explanation (optional)…"
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Main page ────────────────────────────────────────────────────────── */
 export default function TeacherAssignmentsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -48,13 +180,27 @@ export default function TeacherAssignmentsPage() {
   // Create form
   const [chapterId, setChapterId] = useState('');
   const [section, setSection] = useState('');
-  const [questionCount, setQuestionCount] = useState(12);
-  const [difficultyMix, setDifficultyMix] = useState('40% easy, 40% medium, 20% hard');
+  const [questionCount, setQuestionCount] = useState(5);
+  const [easyPct, setEasyPct] = useState(40);
+  const [mediumPct, setMediumPct] = useState(40);
+  const [hardPct, setHardPct] = useState(20);
   const [includeShortAnswers, setIncludeShortAnswers] = useState(true);
-  const [includeFormulaDrill, setIncludeFormulaDrill] = useState(true);
+  const [includeLongAnswers, setIncludeLongAnswers] = useState(false);
+  const [includeFormulaDrill, setIncludeFormulaDrill] = useState(false);
   const [dueDate, setDueDate] = useState('');
   const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+
+  // Preview / editing
+  const [showAllQuestionsFor, setShowAllQuestionsFor] = useState<string | null>(null);
+  const [editingPackId, setEditingPackId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Record<string, MCQItem[]>>({});
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Chapter filter
+  const [filterChapterId, setFilterChapterId] = useState('');
+
+  const difficultyMix = `${easyPct}% easy, ${mediumPct}% medium, ${hardPct}% hard`;
 
   const chapters = useMemo(() => {
     if (scopes.length === 0) return ALL_CHAPTERS;
@@ -73,6 +219,11 @@ export default function TeacherAssignmentsPage() {
         .filter(Boolean)
     ));
   }, [chapterId, scopes]);
+
+  const filteredPacks = useMemo(() => {
+    if (!filterChapterId) return packs;
+    return packs.filter((p) => p.chapterId === filterChapterId);
+  }, [packs, filterChapterId]);
 
   async function load() {
     setLoading(true);
@@ -113,7 +264,18 @@ export default function TeacherAssignmentsPage() {
       const res = await fetch('/api/teacher/assignment-pack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chapterId, classLevel: chapter.classLevel, subject: chapter.subject, questionCount, difficultyMix, includeShortAnswers, includeFormulaDrill, dueDate: dueDate || undefined, section: section || undefined }),
+        body: JSON.stringify({
+          chapterId,
+          classLevel: chapter.classLevel,
+          subject: chapter.subject,
+          questionCount,
+          difficultyMix,
+          includeShortAnswers,
+          includeLongAnswers,
+          includeFormulaDrill,
+          dueDate: dueDate || undefined,
+          section: section || undefined,
+        }),
       });
       const body = await res.json().catch(() => null);
       const data = unwrap<Record<string, unknown> | null>(body);
@@ -167,6 +329,33 @@ export default function TeacherAssignmentsPage() {
     }
   }
 
+  function startEditing(pack: TeacherAssignmentPack) {
+    setEditingPackId(pack.packId);
+    setEditDraft((prev) => ({ ...prev, [pack.packId]: (pack.mcqs ?? []).map((q) => ({ ...q })) }));
+  }
+
+  async function saveEdits(packId: string) {
+    const mcqs = editDraft[packId];
+    if (!mcqs) return;
+    setSavingEdit(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/teacher/assignment-pack/${encodeURIComponent(packId)}/edit-questions`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mcqs }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) { setError(apiError(body, 'Failed to save edits.')); return; }
+      setEditingPackId(null);
+      await load();
+    } catch {
+      setError('Failed to save edits.');
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-6 flex items-center justify-between">
@@ -192,17 +381,17 @@ export default function TeacherAssignmentsPage() {
 
       {error && <div className="mb-4 rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
-      {/* Create form */}
+      {/* ── Create form ─────────────────────────────────────────────────── */}
       {showCreate && (
-        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
-          <h2 className="font-semibold text-amber-800 mb-4">New Assignment Pack</h2>
+        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 space-y-5">
+          <h2 className="font-semibold text-amber-800">New Assignment Pack</h2>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Chapter</label>
               <select value={chapterId} onChange={(e) => setChapterId(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
                 <option value="">Select chapter…</option>
                 {chapters.map((ch) => (
-                  <option key={ch.id} value={ch.id}>{ch.classLevel === 10 ? 'Class 10' : 'Class 12'} — {ch.subject} — {ch.title}</option>
+                  <option key={ch.id} value={ch.id}>Class {ch.classLevel === 10 ? '10' : '12'} — {ch.subject} — {ch.title}</option>
                 ))}
               </select>
             </div>
@@ -215,34 +404,79 @@ export default function TeacherAssignmentsPage() {
               </div>
             )}
             <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">Question Count</label>
-              <input type="number" min={5} max={40} value={questionCount} onChange={(e) => setQuestionCount(Number(e.target.value))} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
+              <label className="text-xs font-medium text-gray-600 block mb-1">MCQ Count</label>
+              <input type="number" min={3} max={30} value={questionCount} onChange={(e) => setQuestionCount(Number(e.target.value))} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             </div>
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Due Date (optional)</label>
               <input type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             </div>
-            <div className="sm:col-span-2">
-              <label className="text-xs font-medium text-gray-600 block mb-1">Difficulty Mix</label>
-              <input type="text" value={difficultyMix} onChange={(e) => setDifficultyMix(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
-            </div>
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={includeShortAnswers} onChange={(e) => setIncludeShortAnswers(e.target.checked)} className="rounded" />
-                Short Answers
-              </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={includeFormulaDrill} onChange={(e) => setIncludeFormulaDrill(e.target.checked)} className="rounded" />
-                Formula Drill
-              </label>
-            </div>
           </div>
-          <div className="mt-4 flex gap-2">
+
+          {/* Difficulty sliders — 3c */}
+          <div className="rounded-xl border border-amber-100 bg-white p-4">
+            <DifficultySliders
+              easy={easyPct} medium={mediumPct} hard={hardPct}
+              onChange={(e, m, h) => { setEasyPct(e); setMediumPct(m); setHardPct(h); }}
+            />
+          </div>
+
+          {/* Question types — 3d */}
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-2">Additional Question Types</label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: 'short', label: 'Short Answer', state: includeShortAnswers, setter: setIncludeShortAnswers },
+                { key: 'long', label: 'Long Answer', state: includeLongAnswers, setter: setIncludeLongAnswers },
+                { key: 'formula', label: 'Formula Drill', state: includeFormulaDrill, setter: setIncludeFormulaDrill },
+              ].map(({ key, label, state, setter }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setter(!state)}
+                  className={clsx(
+                    'flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium transition-colors',
+                    state ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  )}
+                >
+                  {state ? <CheckCircle className="w-3.5 h-3.5" /> : <div className="w-3.5 h-3.5 rounded-full border-2 border-current" />}
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-gray-400">
+              {questionCount} MCQs
+              {includeShortAnswers ? ' + Short Answers' : ''}
+              {includeLongAnswers ? ' + Long Answers' : ''}
+              {includeFormulaDrill ? ' + Formula Drill' : ''}
+            </p>
+          </div>
+
+          <div className="flex gap-2">
             <button onClick={createPack} disabled={!chapterId || creating} className="px-4 py-2 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-50 transition-colors">
               {creating ? 'Creating…' : 'Create Pack'}
             </button>
             <button onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50">Cancel</button>
           </div>
+        </div>
+      )}
+
+      {/* ── Chapter filter ───────────────────────────────────────────────── */}
+      {packs.length > 0 && (
+        <div className="mb-4 flex items-center gap-3">
+          <label className="text-xs font-medium text-gray-500 shrink-0">Filter by chapter</label>
+          <select
+            value={filterChapterId}
+            onChange={(e) => setFilterChapterId(e.target.value)}
+            className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm flex-1 max-w-xs"
+          >
+            <option value="">All chapters ({packs.length})</option>
+            {Array.from(new Set(packs.map((p) => p.chapterId))).map((cid) => {
+              const ch = ALL_CHAPTERS.find((c) => c.id === cid);
+              const count = packs.filter((p) => p.chapterId === cid).length;
+              return <option key={cid} value={cid}>{ch ? ch.title : cid} ({count})</option>;
+            })}
+          </select>
         </div>
       )}
 
@@ -260,11 +494,17 @@ export default function TeacherAssignmentsPage() {
         </div>
       )}
 
+      {/* ── Pack list ─────────────────────────────────────────────────────── */}
       <div className="space-y-3">
-        {packs.map((pack) => {
+        {filteredPacks.map((pack) => {
           const chapter = ALL_CHAPTERS.find((c) => c.id === pack.chapterId);
           const status = STATUS_LABELS[pack.status] ?? { label: pack.status, className: 'bg-gray-50 text-gray-600 border-gray-200' };
           const isExpanded = expandedPackId === pack.packId;
+          const isEditing = editingPackId === pack.packId;
+          const showAll = showAllQuestionsFor === pack.packId;
+          const mcqs = pack.mcqs ?? [];
+          const displayMcqs = showAll ? mcqs : mcqs.slice(0, 3);
+
           return (
             <div key={pack.packId} className="rounded-2xl border border-[#E8E4DC] bg-white shadow-sm overflow-hidden">
               <div
@@ -290,14 +530,14 @@ export default function TeacherAssignmentsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">{pack.mcqs?.length ?? 0}Q</span>
+                  <span className="text-xs text-gray-400">{mcqs.length}Q</span>
                   {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                 </div>
               </div>
 
               {isExpanded && (
                 <div className="border-t border-[#E8E4DC] px-5 py-4 bg-gray-50 space-y-4">
-                  {/* Actions based on status */}
+                  {/* Actions */}
                   <div className="flex flex-wrap gap-2">
                     {pack.status === 'draft' && (
                       <>
@@ -315,6 +555,12 @@ export default function TeacherAssignmentsPage() {
                             <RefreshCw className="w-3.5 h-3.5" /> Regen
                           </button>
                         </div>
+                        {/* Edit button — 3b */}
+                        {!isEditing && (
+                          <button onClick={() => startEditing(pack)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700">
+                            <Edit2 className="w-3.5 h-3.5" /> Edit Questions
+                          </button>
+                        )}
                       </>
                     )}
                     {pack.status === 'review' && (
@@ -348,12 +594,40 @@ export default function TeacherAssignmentsPage() {
                     )}
                   </div>
 
-                  {/* MCQs preview */}
-                  {pack.mcqs?.length > 0 && (
+                  {/* ── Inline question editor — 3b ───────────────────── */}
+                  {isEditing && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-violet-700">Editing MCQs — click the lettered circle to change the correct answer</p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => saveEdits(pack.packId)}
+                            disabled={savingEdit}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50"
+                          >
+                            <Save className="w-3.5 h-3.5" /> {savingEdit ? 'Saving…' : 'Save'}
+                          </button>
+                          <button
+                            onClick={() => setEditingPackId(null)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium hover:bg-gray-50"
+                          >
+                            <XIcon className="w-3.5 h-3.5" /> Cancel
+                          </button>
+                        </div>
+                      </div>
+                      <MCQEditor
+                        mcqs={editDraft[pack.packId] ?? mcqs}
+                        onChange={(updated) => setEditDraft((prev) => ({ ...prev, [pack.packId]: updated }))}
+                      />
+                    </div>
+                  )}
+
+                  {/* ── MCQs preview — 3a (show all with toggle) ────────── */}
+                  {!isEditing && mcqs.length > 0 && (
                     <div>
-                      <p className="text-xs font-semibold text-gray-500 mb-2">MCQs ({pack.mcqs.length})</p>
+                      <p className="text-xs font-semibold text-gray-500 mb-2">MCQs ({mcqs.length})</p>
                       <div className="space-y-2">
-                        {pack.mcqs.slice(0, 3).map((q, i) => (
+                        {displayMcqs.map((q, i) => (
                           <div key={i} className="rounded-lg bg-white border border-gray-100 p-3 text-xs">
                             <p className="font-medium text-gray-700">Q{i + 1}. {q.question}</p>
                             <div className="mt-1 grid grid-cols-2 gap-1">
@@ -363,7 +637,15 @@ export default function TeacherAssignmentsPage() {
                             </div>
                           </div>
                         ))}
-                        {pack.mcqs.length > 3 && <p className="text-xs text-gray-400">+{pack.mcqs.length - 3} more questions</p>}
+                        {mcqs.length > 3 && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setShowAllQuestionsFor(showAll ? null : pack.packId); }}
+                            className="text-xs text-amber-600 hover:text-amber-700 font-semibold"
+                          >
+                            {showAll ? '▲ Show less' : `▼ Show ${mcqs.length - 3} more questions`}
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}

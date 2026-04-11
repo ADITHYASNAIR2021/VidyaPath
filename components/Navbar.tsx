@@ -221,14 +221,14 @@ export default function Navbar() {
           </Link>
 
           {/* Desktop nav links */}
-          <div className="hidden xl:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] bg-white p-1 overflow-x-auto max-w-[60vw]">
+          <div className="hidden lg:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] bg-white p-1 overflow-x-auto max-w-[60vw]">
             {navLinks.map(({ href, label, icon }) => (
               <NavLink key={href} href={href} label={label} icon={icon} />
             ))}
           </div>
 
           {/* Desktop right area */}
-          <div className="hidden md:flex items-center gap-2 shrink-0">
+          <div className="hidden lg:flex items-center gap-2 shrink-0">
             <CommandPalette />
 
             {session.authenticated ? (
@@ -270,7 +270,7 @@ export default function Navbar() {
           </div>
 
           {/* Mobile right area */}
-          <div className="md:hidden flex items-center gap-2">
+          <div className="lg:hidden flex items-center gap-2">
             <CommandPalette />
             <button
               onClick={() => setMobileOpen((o) => !o)}
@@ -285,7 +285,7 @@ export default function Navbar() {
 
       {/* Mobile drawer */}
       {mobileOpen && (
-        <div className="md:hidden border-t border-[#E8E4DC] bg-white">
+        <div className="lg:hidden border-t border-[#E8E4DC] bg-white">
           <div className="px-4 py-3 space-y-1">
 
             {/* Role badge (mobile) */}

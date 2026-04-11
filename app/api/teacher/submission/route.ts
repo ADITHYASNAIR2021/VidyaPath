@@ -110,6 +110,28 @@ export async function POST(req: Request) {
       });
     }
 
+    // Server-side duplicate guard: block re-submission for the same student + pack
+    const { supabaseSelect } = await import('@/lib/supabase-rest');
+    const existingRows = await supabaseSelect<{ id: string }>(
+      'teacher_submissions',
+      {
+        select: 'id',
+        filters: [
+          { column: 'pack_id', value: parsed.packId },
+          { column: 'submission_code', value: studentSession.rollCode.toUpperCase() },
+        ],
+        limit: 1,
+      }
+    ).catch(() => []);
+    if (existingRows.length > 0) {
+      return errorJson({
+        requestId,
+        errorCode: 'already-submitted',
+        message: 'You have already submitted this assignment.',
+        status: 409,
+      });
+    }
+
     const result = evaluateTeacherAssignmentSubmission(pack, parsed.answers);
     const { submission, duplicate } = await addSubmission({
       packId: parsed.packId,

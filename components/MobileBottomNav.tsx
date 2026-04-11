@@ -73,7 +73,7 @@ function getNavItems(role: Role): NavItem[] {
 export default function MobileBottomNav() {
   const pathname = usePathname();
   const [role, setRole] = useState<Role>('anonymous');
-  const isExamRoute = pathname.startsWith('/exam/assignment/');
+  const isExamRoute = pathname.startsWith('/exam/');
 
   useEffect(() => {
     let active = true;

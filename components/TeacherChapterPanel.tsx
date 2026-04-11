@@ -224,18 +224,12 @@ export default function TeacherChapterPanel({ chapterId, classLevel, subject, se
                   {pack.teacherName ? ` | ${pack.teacherName}` : ''}
                 </p>
                 {pack.portion && <p className="text-[11px] text-emerald-700 mt-0.5">Portion: {pack.portion}</p>}
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2">
                   <a
                     href={pack.shareUrl || `/practice/assignment/${pack.packId}`}
-                    className="inline-flex items-center gap-1 rounded-lg bg-white border border-emerald-200 text-emerald-800 text-xs font-semibold px-2.5 py-1.5 hover:bg-emerald-100"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 hover:bg-emerald-800"
                   >
-                    Open Assignment
-                  </a>
-                  <a
-                    href={`/exam/assignment/${pack.packId}`}
-                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-700 text-white text-xs font-semibold px-2.5 py-1.5 hover:bg-emerald-800"
-                  >
-                    Exam Mode
+                    Start Assignment
                   </a>
                 </div>
               </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { TeacherQuestionBankItem, TeacherScope } from '@/lib/teacher-types';
 import { HelpCircle, Plus, Trash2, RefreshCw } from 'lucide-react';
@@ -16,8 +16,10 @@ type QuestionKind = 'mcq' | 'short' | 'long';
 
 export default function QuestionBankPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const preselectedChapter = searchParams.get('chapter') ?? '';
   const [scopes, setScopes] = useState<TeacherScope[]>([]);
-  const [chapterId, setChapterId] = useState('');
+  const [chapterId, setChapterId] = useState(preselectedChapter);
   const [items, setItems] = useState<TeacherQuestionBankItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -62,7 +64,10 @@ export default function QuestionBankPage() {
   }
 
   useEffect(() => { void loadSession(); }, []);
-  useEffect(() => { if (!chapterId && chapters.length > 0) setChapterId(chapters[0].id); }, [chapters]);
+  useEffect(() => {
+    // Only auto-select first chapter if not already set via query param
+    if (!chapterId && chapters.length > 0) setChapterId(chapters[0].id);
+  }, [chapters]);
   useEffect(() => { void loadItems(chapterId); }, [chapterId]);
 
   async function createQuestion() {

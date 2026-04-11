@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ALL_CHAPTERS } from '@/lib/data';
+import type { TeacherScope } from '@/lib/teacher-types';
 import { Megaphone, Plus, RefreshCw, Users, BookOpen, School, Layers } from 'lucide-react';
 
 function unwrap<T>(payload: unknown): T {
@@ -16,6 +18,7 @@ interface Announcement {
   createdAt: string;
   deliveryScope?: string;
   batch?: string;
+  chapterId?: string;
 }
 
 interface SchoolAnnouncement {
@@ -40,13 +43,22 @@ export default function TeacherAnnouncementsPage() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [schoolAnnouncements, setSchoolAnnouncements] = useState<SchoolAnnouncement[]>([]);
   const [readCounts, setReadCounts] = useState<Record<string, number>>({});
+  const [scopes, setScopes] = useState<TeacherScope[]>([]);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [scope, setScope] = useState<'class' | 'section' | 'batch' | 'chapter'>('chapter');
   const [batch, setBatch] = useState('');
+  const [chapterId, setChapterId] = useState('');
   const [sending, setSending] = useState(false);
   const [showForm, setShowForm] = useState(false);
+
+  // Chapters filtered to teacher's active scopes
+  const chapters = scopes.length === 0
+    ? ALL_CHAPTERS
+    : ALL_CHAPTERS.filter((ch) =>
+        scopes.some((s) => s.isActive && s.classLevel === ch.classLevel && s.subject === ch.subject)
+      );
 
   async function load() {
     setLoading(true);
@@ -58,16 +70,19 @@ export default function TeacherAnnouncementsPage() {
         fetch('/api/teacher/school-announcements?limit=6', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+      const sessionData = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await sessionRes.json().catch(() => null));
+      setScopes(Array.isArray(sessionData?.effectiveScopes) ? sessionData.effectiveScopes : []);
+
       const cfgBody = await configRes.json().catch(() => null);
       const cfg = unwrap<{ announcements?: Announcement[] } | null>(cfgBody);
       if (!configRes.ok || !cfg) { setError('Failed to load.'); return; }
       const list = cfg.announcements ?? [];
       setAnnouncements(list);
+
       const schoolBody = await schoolRes.json().catch(() => null);
       const schoolData = unwrap<{ announcements?: SchoolAnnouncement[] } | null>(schoolBody);
       setSchoolAnnouncements(Array.isArray(schoolData?.announcements) ? schoolData.announcements.slice(0, 4) : []);
 
-      // Load read counts
       const ids = list.map((a) => a.id).filter(Boolean);
       if (ids.length > 0) {
         const rc = await fetch(`/api/teacher/announcement-reads?announcementIds=${ids.join(',')}`, { cache: 'no-store' });
@@ -86,19 +101,25 @@ export default function TeacherAnnouncementsPage() {
 
   async function send() {
     if (!title.trim() || !body.trim()) return;
+    if (scope === 'chapter' && !chapterId) { setError('Select a chapter for chapter-focused announcements.'); return; }
     setSending(true);
     setError('');
     try {
       const res = await fetch('/api/teacher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'add-announcement', title: title.trim(), body: body.trim(), deliveryScope: scope, batch: batch.trim() || undefined }),
+        body: JSON.stringify({
+          action: 'add-announcement',
+          title: title.trim(),
+          body: body.trim(),
+          deliveryScope: scope,
+          batch: batch.trim() || undefined,
+          chapterId: scope === 'chapter' ? chapterId : undefined,
+        }),
       });
       const resBody = await res.json().catch(() => null);
       if (!res.ok) { setError(resBody?.message ?? 'Failed to send announcement.'); return; }
-      setTitle('');
-      setBody('');
-      setBatch('');
+      setTitle(''); setBody(''); setBatch(''); setChapterId('');
       setShowForm(false);
       await load();
     } catch {
@@ -115,7 +136,7 @@ export default function TeacherAnnouncementsPage() {
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <Megaphone className="w-6 h-6 text-amber-600" /> Announcements
           </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Send notices to your class, section, or batch.</p>
+          <p className="text-sm text-gray-500 mt-0.5">Send notices to your class, section, batch, or specific chapter.</p>
         </div>
         <button
           onClick={() => setShowForm((s) => !s)}
@@ -153,12 +174,33 @@ export default function TeacherAnnouncementsPage() {
               ))}
             </div>
           </div>
+
+          {/* Chapter selector — shown only when scope === 'chapter' */}
+          {scope === 'chapter' && (
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Select Chapter</label>
+              <select
+                value={chapterId}
+                onChange={(e) => setChapterId(e.target.value)}
+                className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+              >
+                <option value="">— Choose a chapter —</option>
+                {chapters.map((ch) => (
+                  <option key={ch.id} value={ch.id}>
+                    Class {ch.classLevel} · {ch.subject} · {ch.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {scope === 'batch' && (
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Batch / Section Name</label>
               <input value={batch} onChange={(e) => setBatch(e.target.value)} placeholder="e.g. Batch A" className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             </div>
           )}
+
           <div className="flex gap-2">
             <button onClick={send} disabled={!title.trim() || !body.trim() || sending} className="px-4 py-2 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-50 transition-colors">
               {sending ? 'Sending…' : 'Send Announcement'}
@@ -197,26 +239,34 @@ export default function TeacherAnnouncementsPage() {
       )}
 
       <div className="space-y-3">
-        {announcements.map((ann) => (
-          <div key={ann.id} className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-gray-900">{ann.title}</h3>
-                <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{ann.body}</p>
+        {announcements.map((ann) => {
+          const chapter = ann.chapterId ? ALL_CHAPTERS.find((c) => c.id === ann.chapterId) : null;
+          return (
+            <div key={ann.id} className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-gray-900">{ann.title}</h3>
+                  <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{ann.body}</p>
+                </div>
+                {readCounts[ann.id] != null && (
+                  <span className="flex-shrink-0 flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full">
+                    <Users className="w-3 h-3" /> {readCounts[ann.id]} read
+                  </span>
+                )}
               </div>
-              {readCounts[ann.id] != null && (
-                <span className="flex-shrink-0 flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full">
-                  <Users className="w-3 h-3" /> {readCounts[ann.id]} read
-                </span>
-              )}
+              <div className="mt-3 flex items-center flex-wrap gap-2 text-xs text-gray-400">
+                {ann.deliveryScope && <span className="px-2 py-0.5 bg-gray-100 rounded-full capitalize">{ann.deliveryScope}</span>}
+                {chapter && (
+                  <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-100 rounded-full flex items-center gap-1">
+                    <BookOpen className="w-3 h-3" /> {chapter.title}
+                  </span>
+                )}
+                {ann.batch && <span className="px-2 py-0.5 bg-gray-100 rounded-full">{ann.batch}</span>}
+                <span>{new Date(ann.createdAt).toLocaleString()}</span>
+              </div>
             </div>
-            <div className="mt-3 flex items-center gap-3 text-xs text-gray-400">
-              {ann.deliveryScope && <span className="px-2 py-0.5 bg-gray-100 rounded-full capitalize">{ann.deliveryScope}</span>}
-              {ann.batch && <span className="px-2 py-0.5 bg-gray-100 rounded-full">{ann.batch}</span>}
-              <span>{new Date(ann.createdAt).toLocaleString()}</span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

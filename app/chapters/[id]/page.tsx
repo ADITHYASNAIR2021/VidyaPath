@@ -43,6 +43,7 @@ import ImageQuestionSolver from '@/components/ImageQuestionSolver';
 import AnalyticsTracker from '@/components/AnalyticsTracker';
 import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
 import StudentSubjectGate from '@/components/StudentSubjectGate';
+import TeacherQuestionBankLink from '@/components/TeacherQuestionBankLink';
 
 // Generate static params for all chapters
 export function generateStaticParams() {
@@ -236,6 +237,7 @@ export default function ChapterDetailPage({
             <TextToSpeechButton textToRead={`Chapter ${chapter.chapterNumber}, ${chapter.title}. The key topics are: ${chapter.topics.join('. ')}`} />
             <BookmarkButton chapterId={chapter.id} />
             <StudiedButton chapterId={chapter.id} />
+            <TeacherQuestionBankLink chapterId={chapter.id} />
           </div>
           </div>
         </div>
