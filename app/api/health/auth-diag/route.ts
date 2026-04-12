@@ -1,29 +1,36 @@
 /**
  * GET /api/health/auth-diag
  *
- * Diagnostic endpoint for debugging teacher/student login issues.
- * Shows Supabase connectivity, table access, data presence, and PIN hash format.
- * Requires the admin bootstrap key as ?key=<ADMIN_PORTAL_KEY> to prevent public exposure.
- *
- * Usage: http://localhost:3000/api/health/auth-diag?key=8136859455
+ * Restricted diagnostics for authentication troubleshooting.
+ * - Production access: authenticated admin/developer session only.
+ * - Non-production fallback: x-admin-diag-key header can be used.
+ * - Admins are automatically scoped to their school.
  */
 
+import { getAdminSessionFromRequestCookies } from '@/lib/auth/guards';
 import { isSupabaseServiceConfigured, supabaseSelect } from '@/lib/supabase-rest';
 
 export const dynamic = 'force-dynamic';
 
-function isAuthorized(req: Request): boolean {
-  const url = new URL(req.url);
-  const provided = url.searchParams.get('key')?.trim() ?? '';
-  const configured =
+function getConfiguredDiagKey(): string {
+  return (
     process.env.ADMIN_PORTAL_KEY?.trim() ||
     process.env.TEACHER_PORTAL_KEY?.trim() ||
-    process.env.SESSION_SIGNING_SECRET?.trim();
+    process.env.SESSION_SIGNING_SECRET?.trim() ||
+    ''
+  );
+}
+
+function isAuthorizedByHeader(req: Request): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  const configured = getConfiguredDiagKey();
+  const provided = req.headers.get('x-admin-diag-key')?.trim() || '';
   return !!configured && provided === configured;
 }
 
 interface TeacherRow {
   id: string;
+  school_id: string | null;
   phone: string;
   staff_code: string | null;
   name: string;
@@ -34,6 +41,7 @@ interface TeacherRow {
 
 interface StudentRow {
   id: string;
+  school_id: string | null;
   roll_code: string;
   roll_no: string | null;
   name: string;
@@ -44,45 +52,84 @@ interface StudentRow {
 }
 
 function describePinHash(hash: string | null | undefined): string {
-  if (!hash) return 'NULL / empty — PIN check skipped (any PIN accepted for students; teachers would fail)';
+  if (!hash) return 'NULL/empty';
   if (hash.startsWith('scrypt:')) {
     const parts = hash.split(':');
     if (parts.length === 3 && parts[1].length === 32 && parts[2].length === 64) {
-      return 'OK — valid scrypt:salt:hash format';
+      return 'OK';
     }
-    return `MALFORMED scrypt — got ${parts.length} parts, salt len=${parts[1]?.length}, hash len=${parts[2]?.length}`;
+    return `MALFORMED scrypt (${parts.length} parts)`;
   }
-  return `PLAIN TEXT or unknown format ("${hash.slice(0, 16)}...") — verifyPin will always return false`;
+  return 'PLAIN-TEXT/UNKNOWN';
+}
+
+function maskPhone(value: string): string {
+  const raw = value.replace(/[^\d]/g, '');
+  if (raw.length <= 4) return `***${raw}`;
+  return `${'*'.repeat(Math.max(0, raw.length - 4))}${raw.slice(-4)}`;
 }
 
 export async function GET(req: Request) {
-  if (!isAuthorized(req)) {
-    return Response.json({ error: 'Provide ?key=<ADMIN_PORTAL_KEY> to access this endpoint.' }, { status: 401 });
+  const adminSession = await getAdminSessionFromRequestCookies();
+  const headerAuthorized = isAuthorizedByHeader(req);
+  if (!adminSession && !headerAuthorized) {
+    return Response.json(
+      {
+        ok: false,
+        errorCode: 'unauthorized',
+        message: 'Admin/developer login required. In non-production, you may use x-admin-diag-key header.',
+      },
+      { status: 401 }
+    );
+  }
+
+  const url = new URL(req.url);
+  const querySchoolId = url.searchParams.get('schoolId')?.trim() || '';
+  const schoolId =
+    adminSession?.role === 'admin'
+      ? (adminSession.schoolId || '')
+      : (querySchoolId || adminSession?.schoolId || '');
+
+  if (adminSession?.role === 'admin' && !schoolId) {
+    return Response.json(
+      {
+        ok: false,
+        errorCode: 'missing-school-scope',
+        message: 'School scope is required for admin diagnostics.',
+      },
+      { status: 400 }
+    );
   }
 
   const result: Record<string, unknown> = {
+    ok: true,
     timestamp: new Date().toISOString(),
+    authMode: adminSession ? 'session' : 'non-prod-header',
+    role: adminSession?.role || 'diagnostic',
+    schoolScope: schoolId || null,
     supabaseConfigured: isSupabaseServiceConfigured(),
   };
 
   if (!isSupabaseServiceConfigured()) {
-    result.error = 'Supabase is not configured. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local';
+    result.error = 'Supabase is not configured. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.';
     return Response.json(result, { status: 200 });
   }
 
-  // --- Teachers ---
+  const schoolFilter = schoolId ? [{ column: 'school_id', value: schoolId }] : [];
+
   try {
     const teachers = await supabaseSelect<TeacherRow>('teacher_profiles', {
-      select: 'id,phone,staff_code,name,status,pin_hash,auth_email',
-      filters: [{ column: 'status', value: 'active' }],
-      limit: 20,
+      select: 'id,school_id,phone,staff_code,name,status,pin_hash,auth_email',
+      filters: [{ column: 'status', value: 'active' }, ...schoolFilter],
+      limit: 50,
     });
     result.teacherTableAccessible = true;
     result.activeTeacherCount = teachers.length;
     result.teachers = teachers.map((t) => ({
       id: t.id,
+      schoolId: t.school_id,
       name: t.name,
-      phone: t.phone,
+      phoneMasked: maskPhone(t.phone),
       staffCode: t.staff_code,
       status: t.status,
       hasAuthEmail: !!t.auth_email,
@@ -94,17 +141,17 @@ export async function GET(req: Request) {
     result.teacherTableError = err instanceof Error ? err.message : String(err);
   }
 
-  // --- Students ---
   try {
     const students = await supabaseSelect<StudentRow>('student_profiles', {
-      select: 'id,roll_code,roll_no,name,status,class_level,pin_hash,auth_email',
-      filters: [{ column: 'status', value: 'active' }],
-      limit: 20,
+      select: 'id,school_id,roll_code,roll_no,name,status,class_level,pin_hash,auth_email',
+      filters: [{ column: 'status', value: 'active' }, ...schoolFilter],
+      limit: 50,
     });
     result.studentTableAccessible = true;
     result.activeStudentCount = students.length;
     result.students = students.map((s) => ({
       id: s.id,
+      schoolId: s.school_id,
       name: s.name,
       rollCode: s.roll_code,
       rollNo: s.roll_no,
@@ -119,11 +166,14 @@ export async function GET(req: Request) {
     result.studentTableError = err instanceof Error ? err.message : String(err);
   }
 
-  // --- Schools ---
   try {
     const schools = await supabaseSelect<{ id: string; school_name: string; school_code: string; status: string }>(
       'schools',
-      { select: 'id,school_name,school_code,status', limit: 20 }
+      {
+        select: 'id,school_name,school_code,status',
+        filters: schoolId ? [{ column: 'id', value: schoolId }] : undefined,
+        limit: 20,
+      }
     );
     result.schoolTableAccessible = true;
     result.schools = schools.map((s) => ({
@@ -138,9 +188,9 @@ export async function GET(req: Request) {
   }
 
   result.loginInstructions = {
-    teacher: 'POST /api/teacher/session/login with { "identifier": "<phone or staff_code>", "password": "<pin>" }',
-    student: 'POST /api/student/session/login with { "roll": "<roll_code or roll_no>", "password": "<pin>" }',
-    note: 'If pinHashStatus shows PLAIN TEXT, run: npm run fix:pin-hashes (or reset PINs through admin portal)',
+    teacher: 'POST /api/teacher/session/login with { schoolCode, identifier, password }',
+    student: 'POST /api/student/session/login with { schoolCode, classLevel, rollNo, password }',
+    parent: 'POST /api/parent/session/login with { phone, pin, schoolId? }',
   };
 
   return Response.json(result, { status: 200 });

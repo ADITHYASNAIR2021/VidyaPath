@@ -153,14 +153,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const singleEnvMode = process.env.SINGLE_ENV_MODE === '1';
   const isProtectedApiMutation =
-    (pathname.startsWith('/api/admin') ||
-      pathname.startsWith('/api/teacher') ||
-      pathname.startsWith('/api/student') ||
-      pathname.startsWith('/api/mock-exam') ||
-      pathname.startsWith('/api/parent') ||
-      pathname.startsWith('/api/developer') ||
-      pathname.startsWith('/api/integrations/sheets') ||
-      pathname.startsWith('/api/exam/session')) &&
+    pathname.startsWith('/api/') &&
     !['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase());
   if (isProtectedApiMutation && !csrfAllowedForMutation(request)) {
     return NextResponse.json(

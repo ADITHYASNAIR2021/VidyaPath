@@ -113,7 +113,13 @@ export async function GET(req: Request) {
         ? studentSession.section
         : undefined;
     const section = sectionFromQuery || sectionFromStudent;
-    const config = await getPublicTeacherConfig({ chapterId, classLevel, subject, section });
+    const config = await getPublicTeacherConfig({
+      chapterId,
+      classLevel,
+      subject,
+      section,
+      schoolId: studentSession?.schoolId,
+    });
     if (studentSession?.studentId) {
       const enrolledSubjects = await getStudentEnrolledSubjects(studentSession.studentId, studentSession.schoolId);
       const allowedSubjects = new Set(enrolledSubjects);

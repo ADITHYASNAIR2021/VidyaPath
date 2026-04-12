@@ -5,6 +5,7 @@ type RowId = string;
 
 const TABLES = {
   students: 'student_profiles',
+  teachers: 'teacher_profiles',
   attendance: 'attendance_records',
   resources: 'class_resources',
   events: 'school_events',
@@ -103,12 +104,18 @@ interface SchoolAnnouncementRow {
 interface AssignmentPackRow {
   id: RowId;
   teacher_id: RowId;
+  school_id?: RowId | null;
   chapter_id: string;
   class_level: number;
   subject: string;
   section: string | null;
   status: 'draft' | 'review' | 'published' | 'archived';
   payload: Record<string, unknown> | null;
+}
+
+interface TeacherSchoolLookupRow {
+  id: RowId;
+  school_id: RowId | null;
 }
 
 interface SubmissionRow {
@@ -844,6 +851,7 @@ export async function listTeacherGradebook(teacherId: string): Promise<{
 export async function listStudentGrades(input: {
   studentId: string;
   rollCode?: string;
+  schoolId?: string;
 }): Promise<Array<{
   submissionId: string;
   packId: string;
@@ -859,6 +867,7 @@ export async function listStudentGrades(input: {
   if (!isSupabaseServiceConfigured()) return [];
   const studentId = sanitizeId(input.studentId);
   const rollCode = input.rollCode ? sanitizeText(input.rollCode, 80).toUpperCase() : '';
+  const schoolId = input.schoolId ? sanitizeId(input.schoolId) : '';
   const byStudent = await supabaseSelect<SubmissionRow>(TABLES.submissions, {
     select: '*',
     filters: [{ column: 'student_id', value: studentId }],
@@ -882,14 +891,38 @@ export async function listStudentGrades(input: {
   if (scopedSubmissions.length === 0) return [];
   const packIds = [...new Set(scopedSubmissions.map((row) => row.pack_id))];
   const packs = await supabaseSelect<AssignmentPackRow>(TABLES.assignmentPacks, {
-    select: 'id,chapter_id,class_level,subject,section,status,payload',
+    select: 'id,teacher_id,school_id,chapter_id,class_level,subject,section,status,payload',
     limit: 10000,
   }).catch(() => []);
   const packMap = new Map(packs.filter((row) => packIds.includes(row.id)).map((row) => [row.id, row]));
+  const teacherSchoolMap = new Map<string, string>();
+  if (schoolId) {
+    const teacherIdsToResolve = [...new Set(
+      [...packMap.values()]
+        .filter((row) => !row.school_id && row.teacher_id)
+        .map((row) => row.teacher_id)
+    )];
+    if (teacherIdsToResolve.length > 0) {
+      const teacherIdSet = new Set(teacherIdsToResolve);
+      const teacherRows = await supabaseSelect<TeacherSchoolLookupRow>(TABLES.teachers, {
+        select: 'id,school_id',
+        limit: 10000,
+      }).catch(() => []);
+      for (const teacherRow of teacherRows) {
+        if (teacherIdSet.has(teacherRow.id) && teacherRow.school_id) {
+          teacherSchoolMap.set(teacherRow.id, teacherRow.school_id);
+        }
+      }
+    }
+  }
   return scopedSubmissions
     .map((row) => {
       const pack = packMap.get(row.pack_id);
       if (!pack) return null;
+      if (schoolId) {
+        const packSchoolId = pack.school_id || teacherSchoolMap.get(pack.teacher_id) || '';
+        if (!packSchoolId || packSchoolId !== schoolId) return null;
+      }
       const score = parseGradePercent(row);
       if (score === null) return null;
       return {

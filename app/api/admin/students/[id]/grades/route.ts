@@ -40,6 +40,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const grades = await listStudentGrades({
       studentId: student.id,
       rollCode: student.rollCode,
+      schoolId: student.schoolId,
     });
     return dataJson({
       requestId,

@@ -1,5 +1,5 @@
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
-import { getAssignmentPack, getExamSession, recordExamHeartbeat } from '@/lib/teacher-admin-db';
+import { getAssignmentPack, getAssignmentPackSchoolId, getExamSession, recordExamHeartbeat } from '@/lib/teacher-admin-db';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
@@ -97,6 +97,15 @@ export async function POST(req: Request) {
         errorCode: 'assignment-pack-not-found',
         message: 'Assignment pack not found.',
         status: 404,
+      });
+    }
+    const packSchoolId = await getAssignmentPackSchoolId(pack.packId);
+    if (!studentSession.schoolId || !packSchoolId || packSchoolId !== studentSession.schoolId) {
+      return errorJson({
+        requestId,
+        errorCode: 'school-mismatch',
+        message: 'This assignment is not available for your school.',
+        status: 403,
       });
     }
     if (pack.classLevel !== studentSession.classLevel) {

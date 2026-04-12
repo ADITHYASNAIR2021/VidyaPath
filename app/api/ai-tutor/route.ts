@@ -111,7 +111,7 @@ function fallbackError(error: unknown, requestId?: string): NextResponse {
     return errorJson({
       requestId: requestId || 'unknown',
       errorCode: 'ai-provider-not-configured',
-      message: 'AI tutor not configured. Set GEMINI_API_KEY (primary) or GROQ_API_KEY (backup).',
+      message: 'AI tutor not configured. Set NVIDIA_API_KEY (recommended) or GEMINI_API_KEY/GROQ_API_KEY.',
       status: 503,
     });
   }

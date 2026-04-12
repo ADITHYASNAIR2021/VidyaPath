@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ContextSnippet, ContextTask } from '@/lib/ai/context-retriever';
+import { getTaskChatModelCandidates, type LlmProvider, type LlmModelConfig } from '@/lib/ai/model-routing';
+import { callNvidiaChatCompletion, isUsableNvidiaApiKey } from '@/lib/ai/nvidia-client';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -9,13 +11,13 @@ export interface ChatMessage {
 interface CachedResponse {
   expiresAt: number;
   text: string;
-  provider: 'gemini' | 'groq';
+  provider: LlmProvider;
   model: string;
 }
 
 export interface GenerationResult {
   text: string;
-  provider: 'gemini' | 'groq';
+  provider: LlmProvider;
   model: string;
   cacheHit: boolean;
 }
@@ -71,6 +73,30 @@ function now(): number {
   return Date.now();
 }
 
+function parseNumeric(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function resolveTemperature(candidate: LlmModelConfig, requestValue: number | undefined): number {
+  if (typeof requestValue === 'number' && Number.isFinite(requestValue)) return requestValue;
+  const configured = parseNumeric(candidate.defaultParams?.temperature);
+  return configured ?? 0.2;
+}
+
+function resolveTopP(candidate: LlmModelConfig): number {
+  const configured = parseNumeric(candidate.defaultParams?.top_p) ?? parseNumeric(candidate.defaultParams?.topP);
+  return configured ?? 0.9;
+}
+
+function resolveMaxTokens(candidate: LlmModelConfig, requestValue: number | undefined): number {
+  if (typeof requestValue === 'number' && Number.isFinite(requestValue)) return requestValue;
+  const configured =
+    parseNumeric(candidate.defaultParams?.max_tokens) ??
+    parseNumeric(candidate.defaultParams?.maxOutputTokens);
+  return configured ?? 1600;
+}
+
 function buildContextSection(snippets: ContextSnippet[]): string {
   if (snippets.length === 0) return 'No retrieved paper context available for this request.';
   return snippets
@@ -120,7 +146,8 @@ async function callGemini(
   userPrompt: string,
   messages: ChatMessage[] | undefined,
   temperature: number,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  topP: number
 ): Promise<string> {
   const contents =
     messages && messages.length > 0
@@ -141,7 +168,7 @@ async function callGemini(
         generationConfig: {
           temperature,
           maxOutputTokens,
-          topP: 0.9,
+          topP,
         },
       }),
     }
@@ -171,7 +198,8 @@ async function callGroq(
   userPrompt: string,
   messages: ChatMessage[] | undefined,
   temperature: number,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  topP: number
 ): Promise<string> {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -181,14 +209,15 @@ async function callGroq(
     },
     body: JSON.stringify({
       model,
-      messages: messages && messages.length > 0
-        ? [{ role: 'system', content: fullSystemPrompt }, ...messages.slice(-12)]
-        : [
-            { role: 'system', content: fullSystemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
+      messages:
+        messages && messages.length > 0
+          ? [{ role: 'system', content: fullSystemPrompt }, ...messages.slice(-12)]
+          : [
+              { role: 'system', content: fullSystemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
       temperature,
-      top_p: 0.9,
+      top_p: topP,
       max_tokens: maxOutputTokens,
       stream: false,
     }),
@@ -313,8 +342,6 @@ async function runGeneration(options: GenerateTextOptions): Promise<GenerationRe
     }
   }
 
-  const temperature = options.temperature ?? 0.2;
-  const maxOutputTokens = options.maxOutputTokens ?? 1600;
   const contextBlock = buildContextSection(options.contextSnippets);
   const citationBlock = options.includeCitations
     ? `Citation format requirement:
@@ -331,66 +358,121 @@ ${citationBlock}`;
 
   const geminiKey = process.env.GEMINI_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
+  const nvidiaKey = process.env.NVIDIA_API_KEY;
   const errors: string[] = [];
+  const missingProviderNotice = new Set<LlmProvider>();
+  const candidates = getTaskChatModelCandidates(options.task);
 
-  if (isUsableGeminiApiKey(geminiKey)) {
-    const geminiModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
-    for (const model of geminiModels) {
-      try {
+  if (candidates.length === 0) {
+    throw new Error(`No chat model configured for task ${options.task}.`);
+  }
+
+  for (const candidate of candidates) {
+    const temperature = resolveTemperature(candidate, options.temperature);
+    const maxOutputTokens = resolveMaxTokens(candidate, options.maxOutputTokens);
+    const topP = resolveTopP(candidate);
+    try {
+      if (candidate.provider === 'nvidia') {
+        if (!isUsableNvidiaApiKey(nvidiaKey)) {
+          if (!missingProviderNotice.has('nvidia')) {
+            missingProviderNotice.add('nvidia');
+            errors.push('NVIDIA_API_KEY missing or invalid.');
+          }
+          continue;
+        }
+        const text = await callNvidiaChatCompletion({
+          apiKey: nvidiaKey,
+          model: candidate.model,
+          systemPrompt: fullSystemPrompt,
+          userPrompt: options.userPrompt,
+          messages: options.messages
+            ? options.messages.map((message) => ({
+                role: message.role,
+                content: message.content,
+              }))
+            : undefined,
+          temperature,
+          maxOutputTokens,
+          topP,
+          extraBody: candidate.defaultParams,
+        });
+        if (cacheEnabled) {
+          RESPONSE_CACHE.set(cacheKey, {
+            text,
+            provider: 'nvidia',
+            model: candidate.model,
+            expiresAt: now() + CACHE_TTL_MS,
+          });
+        }
+        return { text, provider: 'nvidia', model: candidate.model, cacheHit: false };
+      }
+
+      if (candidate.provider === 'gemini') {
+        if (!isUsableGeminiApiKey(geminiKey)) {
+          if (!missingProviderNotice.has('gemini')) {
+            missingProviderNotice.add('gemini');
+            errors.push('GEMINI_API_KEY missing or invalid.');
+          }
+          continue;
+        }
         const text = await callGemini(
           geminiKey,
-          model,
+          candidate.model,
           fullSystemPrompt,
           options.userPrompt,
           options.messages,
           temperature,
-          maxOutputTokens
+          maxOutputTokens,
+          topP
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, {
             text,
             provider: 'gemini',
-            model,
+            model: candidate.model,
             expiresAt: now() + CACHE_TTL_MS,
           });
         }
-        return { text, provider: 'gemini', model, cacheHit: false };
-      } catch (error) {
-        errors.push(String(error));
+        return { text, provider: 'gemini', model: candidate.model, cacheHit: false };
       }
-    }
-  }
 
-  if (isUsableGroqApiKey(groqKey)) {
-    const groqModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
-    for (const model of groqModels) {
-      try {
+      if (candidate.provider === 'groq') {
+        if (!isUsableGroqApiKey(groqKey)) {
+          if (!missingProviderNotice.has('groq')) {
+            missingProviderNotice.add('groq');
+            errors.push('GROQ_API_KEY missing or invalid.');
+          }
+          continue;
+        }
         const text = await callGroq(
           groqKey,
-          model,
+          candidate.model,
           fullSystemPrompt,
           options.userPrompt,
           options.messages,
           temperature,
-          maxOutputTokens
+          maxOutputTokens,
+          topP
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, {
             text,
             provider: 'groq',
-            model,
+            model: candidate.model,
             expiresAt: now() + CACHE_TTL_MS,
           });
         }
-        return { text, provider: 'groq', model, cacheHit: false };
-      } catch (error) {
-        errors.push(String(error));
+        return { text, provider: 'groq', model: candidate.model, cacheHit: false };
       }
+    } catch (error) {
+      errors.push(String(error));
     }
   }
 
   throw new Error(
-    `No model could generate a response. Ensure GEMINI_API_KEY (primary) or GROQ_API_KEY (backup) is configured. Details: ${errors.slice(0, 3).join(' | ')}`
+    `No model could generate a response. Configure NVIDIA_API_KEY (recommended), GEMINI_API_KEY, or GROQ_API_KEY. Details: ${errors
+      .slice(0, 5)
+      .join(' | ')}`
   );
 }
 

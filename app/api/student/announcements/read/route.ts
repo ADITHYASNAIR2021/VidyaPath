@@ -14,6 +14,7 @@
  */
 import { NextRequest } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { supabaseInsert, supabaseSelect } from '@/lib/supabase-rest';
@@ -35,7 +36,9 @@ export async function POST(req: NextRequest) {
       return errorJson({ requestId, errorCode: 'missing-announcement-id', message: 'announcementId is required.', status: 400 });
     }
 
-    const studentId = context?.profileId || context?.authUserId || '';
+    const studentSession = await getStudentSessionFromRequestCookies();
+    const studentId = context?.profileId || studentSession?.studentId || context?.authUserId || '';
+    const schoolId = context?.schoolId || studentSession?.schoolId || null;
     if (!studentId) {
       return errorJson({ requestId, errorCode: 'no-profile', message: 'Student profile not found.', status: 403 });
     }
@@ -61,7 +64,7 @@ export async function POST(req: NextRequest) {
     await supabaseInsert(READS_TABLE, {
       announcement_id: announcementId,
       student_id: studentId,
-      school_id: context?.schoolId || null,
+      school_id: schoolId,
       read_at: new Date().toISOString(),
     });
 

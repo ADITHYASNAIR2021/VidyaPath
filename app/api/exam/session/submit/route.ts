@@ -9,6 +9,7 @@ import {
   addSubmission,
   completeExamSession,
   getAssignmentPack,
+  getAssignmentPackSchoolId,
   getExamSession,
 } from '@/lib/teacher-admin-db';
 import { evaluateTeacherAssignmentSubmission } from '@/lib/teacher-assignment';
@@ -121,6 +122,15 @@ export async function POST(req: Request) {
         errorCode: 'assignment-pack-not-found',
         message: 'Assignment pack not found.',
         status: 404,
+      });
+    }
+    const packSchoolId = await getAssignmentPackSchoolId(pack.packId);
+    if (!studentSession.schoolId || !packSchoolId || packSchoolId !== studentSession.schoolId) {
+      return errorJson({
+        requestId,
+        errorCode: 'school-mismatch',
+        message: 'This assignment is not available for your school.',
+        status: 403,
       });
     }
     if (pack.classLevel !== studentSession.classLevel) {

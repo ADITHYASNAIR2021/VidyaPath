@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { getPYQData } from '@/lib/pyq';
 import { getChapterById } from '@/lib/data';
+import { isUsableNvidiaApiKey, rerankWithNvidia } from '@/lib/ai/nvidia-client';
 
 export type ContextTask =
   | 'chat'
@@ -28,6 +29,11 @@ interface ContextChunk {
   chapterId?: string | null;
   year?: number;
   paperType?: PaperType;
+}
+
+interface RerankIndexCandidate {
+  index: number;
+  score?: number;
 }
 
 interface ChapterIndexPayload {
@@ -73,6 +79,7 @@ const DATASET_ROOT = path.join(process.cwd(), 'dataset', 'cbse_papers');
 const INDEX_SCRIPT = path.join(process.cwd(), 'scripts', 'build_context_index.py');
 const CACHE_TTL_MS = 45_000;
 const EMBEDDING_DIM = 192;
+const DEFAULT_NVIDIA_RERANK_MODEL = 'nvidia/llama-nemotron-rerank-1b-v2';
 
 let cacheLoadedAt = 0;
 let cachedChunks: ContextChunk[] = [];
@@ -322,6 +329,86 @@ function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: 
   return score;
 }
 
+function shouldUseNvidiaRerank(query: ContextQuery): boolean {
+  if (process.env.AI_ENABLE_NVIDIA_RERANK !== '1') return false;
+  if (!query.query || !query.query.trim()) return false;
+  return isUsableNvidiaApiKey(process.env.NVIDIA_API_KEY);
+}
+
+function coerceRerankCandidates(value: unknown): RerankIndexCandidate[] {
+  if (!Array.isArray(value)) return [];
+  const out: RerankIndexCandidate[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const indexCandidates = [record.index, record.passage_index, record.passage_idx, record.idx];
+    let idx = Number.NaN;
+    for (const candidate of indexCandidates) {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed)) {
+        idx = parsed;
+        break;
+      }
+    }
+    if (!Number.isFinite(idx)) continue;
+    const score = Number(record.score ?? record.relevance_score ?? record.relevanceScore);
+    out.push({
+      index: Math.max(0, Math.floor(idx)),
+      score: Number.isFinite(score) ? score : undefined,
+    });
+  }
+  return out;
+}
+
+function extractRerankOrder(payload: unknown, passageCount: number): number[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const record = payload as Record<string, unknown>;
+  const candidates = [
+    coerceRerankCandidates(record.rankings),
+    coerceRerankCandidates(record.results),
+    coerceRerankCandidates(record.data),
+  ].find((items) => items.length > 0) ?? [];
+  const seen = new Set<number>();
+  const order: number[] = [];
+  for (const item of candidates) {
+    if (item.index < 0 || item.index >= passageCount) continue;
+    if (seen.has(item.index)) continue;
+    seen.add(item.index);
+    order.push(item.index);
+  }
+  return order;
+}
+
+async function rerankContextSnippets(query: ContextQuery, snippets: ContextSnippet[]): Promise<ContextSnippet[]> {
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!isUsableNvidiaApiKey(apiKey)) return snippets;
+  const model = (process.env.AI_RERANK_MODEL || DEFAULT_NVIDIA_RERANK_MODEL).trim() || DEFAULT_NVIDIA_RERANK_MODEL;
+  const queryText = query.query?.trim() || '';
+  if (!queryText || snippets.length < 2) return snippets;
+
+  const payload = await rerankWithNvidia({
+    apiKey,
+    model,
+    query: queryText,
+    passages: snippets.map((snippet) => snippet.text),
+  });
+  const order = extractRerankOrder(payload, snippets.length);
+  if (order.length === 0) return snippets;
+
+  const used = new Set<number>();
+  const reranked: ContextSnippet[] = [];
+  for (const idx of order) {
+    if (idx < 0 || idx >= snippets.length) continue;
+    used.add(idx);
+    reranked.push(snippets[idx]);
+  }
+  for (let idx = 0; idx < snippets.length; idx++) {
+    if (used.has(idx)) continue;
+    reranked.push(snippets[idx]);
+  }
+  return reranked;
+}
+
 function buildContextHash(snippets: ContextSnippet[]): string {
   const digest = createHash('sha1');
   for (const snippet of snippets) {
@@ -520,10 +607,13 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
   }
 
   const clipped = snippets.slice(0, topK);
+  const reranked = shouldUseNvidiaRerank(query)
+    ? await rerankContextSnippets(query, clipped).catch(() => clipped)
+    : clipped;
 
   return {
-    snippets: clipped,
-    contextHash: buildContextHash(clipped),
+    snippets: reranked,
+    contextHash: buildContextHash(reranked),
     usedOnDemandFallback,
   };
 }

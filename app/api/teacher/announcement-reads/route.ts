@@ -5,6 +5,7 @@
  */
 import { NextRequest } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { supabaseSelect } from '@/lib/supabase-rest';
 
@@ -23,6 +24,27 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const announcementId = searchParams.get('announcementId')?.trim() || '';
     const announcementIdsRaw = searchParams.get('announcementIds')?.trim() || '';
+    const requestedSchoolId = searchParams.get('schoolId')?.trim() || '';
+
+    const teacherSession = context?.role === 'teacher'
+      ? await getTeacherSessionFromRequestCookies()
+      : null;
+    const adminSession =
+      context?.role === 'admin' || context?.role === 'developer'
+        ? await getAdminSessionFromRequestCookies()
+        : null;
+    const scopedSchoolId =
+      context?.role === 'teacher'
+        ? (teacherSession?.teacher.schoolId || '')
+        : (adminSession?.schoolId || requestedSchoolId);
+    if (!scopedSchoolId) {
+      return errorJson({
+        requestId,
+        errorCode: 'missing-school-scope',
+        message: 'schoolId scope is required for read receipt analytics.',
+        status: 400,
+      });
+    }
 
     const ids = announcementId
       ? [announcementId]
@@ -40,7 +62,7 @@ export async function GET(req: NextRequest) {
       for (const id of ids) {
         const rows = await supabaseSelect<{ student_id: string }>(READS_TABLE, {
           select: 'student_id',
-          filters: [{ column: 'announcement_id', value: id }],
+          filters: [{ column: 'announcement_id', value: id }, { column: 'school_id', value: scopedSchoolId }],
           limit: 500,
         });
         readCounts[id] = rows.length;

@@ -280,6 +280,12 @@ function sanitizeText(value: string, max = 240): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+function normalizeOptionalId(value: string | null | undefined, max = 80): string | null {
+  if (typeof value !== 'string') return null;
+  const clean = sanitizeText(value, max);
+  return clean || null;
+}
+
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/[^\d]/g, '').trim();
   if (digits.length >= 10) return digits.slice(-10);
@@ -520,6 +526,11 @@ async function getTeacherProfileRow(teacherId: string): Promise<TeacherProfileRo
     limit: 1,
   }).catch(() => []);
   return rows[0] ?? null;
+}
+
+async function getTeacherSchoolId(teacherId: string): Promise<string | null> {
+  const row = await getTeacherProfileRow(teacherId);
+  return normalizeOptionalId(row?.school_id ?? null);
 }
 
 export async function logTeacherActivity(input: {
@@ -1354,9 +1365,43 @@ export async function getPublicTeacherConfig(input?: {
   classLevel?: 10 | 12;
   subject?: string;
   section?: string;
+  schoolId?: string;
 }): Promise<PublicTeacherConfig> {
   const storageStatus = await getTeacherStorageStatus();
   if (!isSupabaseServiceConfigured()) {
+    return {
+      updatedAt: new Date().toISOString(),
+      importantTopics: {},
+      quizLinks: {},
+      announcements: [],
+      weeklyPlans: [],
+      scopeFeed: { quizLinks: [], importantTopics: [], announcements: [], assignmentPacks: [] },
+      storageStatus,
+    };
+  }
+  const scopedSchoolId = sanitizeText(input?.schoolId || '', 80);
+  if (!scopedSchoolId) {
+    return {
+      updatedAt: new Date().toISOString(),
+      importantTopics: {},
+      quizLinks: {},
+      announcements: [],
+      weeklyPlans: [],
+      scopeFeed: { quizLinks: [], importantTopics: [], announcements: [], assignmentPacks: [] },
+      storageStatus,
+    };
+  }
+  const schoolTeacherRows = await supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
+    select: 'id,school_id,name,status',
+    filters: [{ column: 'school_id', value: scopedSchoolId }, { column: 'status', value: 'active' }],
+    limit: 2500,
+  }).catch(() => []);
+  const allowedTeacherIds = new Set(
+    schoolTeacherRows
+      .map((row) => sanitizeText(row.id, 80))
+      .filter((id) => id.length > 0)
+  );
+  if (allowedTeacherIds.size === 0) {
     return {
       updatedAt: new Date().toISOString(),
       importantTopics: {},
@@ -1430,10 +1475,15 @@ export async function getPublicTeacherConfig(input?: {
     }).catch(() => []),
   ]);
 
-  const scopedTopicRows = topicRows.filter((row) => sectionVisible(row.section, requestedSection));
-  const scopedQuizRows = quizRows.filter((row) => sectionVisible(row.section, requestedSection));
-  const scopedAnnouncementRows = announcementRows.filter((row) => sectionVisible(row.section, requestedSection));
-  const scopedPackRows = assignmentRows.filter((row) => sectionVisible(row.section, requestedSection));
+  const schoolTopicRows = topicRows.filter((row) => allowedTeacherIds.has(sanitizeText(row.teacher_id, 80)));
+  const schoolQuizRows = quizRows.filter((row) => allowedTeacherIds.has(sanitizeText(row.teacher_id, 80)));
+  const schoolAnnouncementRows = announcementRows.filter((row) => allowedTeacherIds.has(sanitizeText(row.teacher_id, 80)));
+  const schoolPackRows = assignmentRows.filter((row) => allowedTeacherIds.has(sanitizeText(row.teacher_id, 80)));
+
+  const scopedTopicRows = schoolTopicRows.filter((row) => sectionVisible(row.section, requestedSection));
+  const scopedQuizRows = schoolQuizRows.filter((row) => sectionVisible(row.section, requestedSection));
+  const scopedAnnouncementRows = schoolAnnouncementRows.filter((row) => sectionVisible(row.section, requestedSection));
+  const scopedPackRows = schoolPackRows.filter((row) => sectionVisible(row.section, requestedSection));
 
   const sortedTopicRows = sortByLatestThenSpecificity(
     scopedTopicRows.map((row) => ({
@@ -1505,12 +1555,8 @@ export async function getPublicTeacherConfig(input?: {
   };
 
   if (scopedPackRows.length > 0) {
-    const teacherRows = await supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
-      select: '*',
-      limit: 1000,
-    }).catch(() => []);
     const teacherNameById = new Map<string, string>();
-    for (const row of teacherRows) {
+    for (const row of schoolTeacherRows) {
       const id = sanitizeText(row.id, 80);
       if (!id) continue;
       teacherNameById.set(id, sanitizeText(row.name, 120) || 'Teacher');
@@ -1937,7 +1983,14 @@ export async function setImportantTopics(input: { teacherId: string; chapterId: 
     });
   }
   await logTeacherActivity({ actorType: 'teacher', teacherId: input.teacherId, action: 'set-important-topics', chapterId: chapter.id, metadata: { topicCount: topics.length } });
-  return getPublicTeacherConfig({ chapterId: chapter.id, classLevel: chapter.classLevel as 10 | 12, subject: chapter.subject, section: scope.section ?? undefined });
+  const schoolId = await getTeacherSchoolId(input.teacherId);
+  return getPublicTeacherConfig({
+    chapterId: chapter.id,
+    classLevel: chapter.classLevel as 10 | 12,
+    subject: chapter.subject,
+    section: scope.section ?? undefined,
+    schoolId: schoolId ?? undefined,
+  });
 }
 
 export async function setQuizLink(input: { teacherId: string; chapterId: string; url: string; section?: TeacherSectionCode }): Promise<PublicTeacherConfig> {
@@ -1972,7 +2025,14 @@ export async function setQuizLink(input: { teacherId: string; chapterId: string;
     });
   }
   await logTeacherActivity({ actorType: 'teacher', teacherId: input.teacherId, action: 'set-quiz-link', chapterId: chapter.id, metadata: { hasLink: !!url } });
-  return getPublicTeacherConfig({ chapterId: chapter.id, classLevel: chapter.classLevel as 10 | 12, subject: chapter.subject, section: scope.section ?? undefined });
+  const schoolId = await getTeacherSchoolId(input.teacherId);
+  return getPublicTeacherConfig({
+    chapterId: chapter.id,
+    classLevel: chapter.classLevel as 10 | 12,
+    subject: chapter.subject,
+    section: scope.section ?? undefined,
+    schoolId: schoolId ?? undefined,
+  });
 }
 
 export async function addAnnouncement(input: { teacherId: string; title: string; body: string; chapterId?: string; section?: string; batch?: string; deliveryScope?: 'class' | 'section' | 'batch' | 'chapter' }): Promise<PublicTeacherConfig> {
@@ -2008,7 +2068,13 @@ export async function addAnnouncement(input: { teacherId: string; title: string;
     is_active: true,
   });
   await logTeacherActivity({ actorType: 'teacher', teacherId: input.teacherId, action: 'add-announcement', chapterId: chapter?.id });
-  return getPublicTeacherConfig({ chapterId: chapter?.id, classLevel: (chapter?.classLevel ?? scope.classLevel) as 10 | 12, subject: chapter?.subject ?? scope.subject, section: scope.section ?? undefined });
+  return getPublicTeacherConfig({
+    chapterId: chapter?.id,
+    classLevel: (chapter?.classLevel ?? scope.classLevel) as 10 | 12,
+    subject: chapter?.subject ?? scope.subject,
+    section: scope.section ?? undefined,
+    schoolId: teacherSession.teacher.schoolId,
+  });
 }
 
 export async function removeAnnouncement(input: { teacherId: string; id: string }): Promise<PublicTeacherConfig> {
@@ -2020,11 +2086,13 @@ export async function removeAnnouncement(input: { teacherId: string; id: string 
   );
   const row = rows[0];
   await logTeacherActivity({ actorType: 'teacher', teacherId: input.teacherId, action: 'remove-announcement', metadata: { announcementId } });
+  const schoolId = await getTeacherSchoolId(input.teacherId);
   return getPublicTeacherConfig({
     chapterId: row?.chapter_id ?? undefined,
     classLevel: (row?.class_level === 10 ? 10 : 12) as 10 | 12,
     subject: row?.subject ?? '',
     section: row?.section ?? undefined,
+    schoolId: schoolId ?? undefined,
   });
 }
 
@@ -2139,11 +2207,27 @@ export async function getTeacherPackOwnerId(packId: string): Promise<string | nu
   return row?.teacher_id ?? null;
 }
 
+export async function getAssignmentPackSchoolId(packId: string): Promise<string | null> {
+  const row = await getAssignmentPackRowById(packId);
+  if (!row) return null;
+  return getTeacherSchoolId(row.teacher_id);
+}
+
 export async function canTeacherAccessAssignmentPack(teacherId: string, packId: string): Promise<boolean> {
+  const cleanTeacherId = sanitizeText(teacherId, 80);
+  if (!cleanTeacherId) return false;
   const row = await getAssignmentPackRowById(packId);
   if (!row) return false;
-  if (row.teacher_id === teacherId) return true;
-  return !!(await resolveTeacherScopeForChapter(teacherId, row.chapter_id, row.section ?? undefined));
+  const [requesterSchoolId, ownerSchoolId] = await Promise.all([
+    getTeacherSchoolId(cleanTeacherId),
+    getTeacherSchoolId(row.teacher_id),
+  ]);
+  if (ownerSchoolId && requesterSchoolId && ownerSchoolId !== requesterSchoolId) return false;
+  if (ownerSchoolId && !requesterSchoolId) return false;
+  if (!ownerSchoolId && requesterSchoolId && row.teacher_id !== cleanTeacherId) return false;
+  if (row.teacher_id === cleanTeacherId) return true;
+  if (!ownerSchoolId || !requesterSchoolId) return false;
+  return !!(await resolveTeacherScopeForChapter(cleanTeacherId, row.chapter_id, row.section ?? undefined));
 }
 
 export async function updateAssignmentPackStatus(input: {

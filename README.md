@@ -18,6 +18,8 @@ Current scope:
 - `docs/FUNCTION_USAGE_GUIDE.md`
 - Deep engineering map (UI -> API -> service -> storage):
 - `docs/FUNCTION_TO_FUNCTION_MAPPING.md`
+- AI model registry + task routing:
+- `docs/AI_MODEL_ROUTING.md`
 - Operator runbook: `docs/OPERATOR_RUNBOOK.md`
 - Release UAT matrix: `docs/release/UAT_MATRIX.md`
 - Rollback rehearsal: `docs/release/ROLLBACK_REHEARSAL.md`
@@ -40,8 +42,8 @@ Current scope:
 - Chapter-aware VidyaAI tutor (`/api/ai-tutor`) with strict syllabus scope control.
 - Off-topic guardrail using `OFFTOPIC:` sentinel handling.
 - Provider fallback chain:
-- Groq primary (`llama-3.3-70b-versatile`, then `llama-3.1-8b-instant` on 429).
-- Gemini fallback when Groq is unavailable or fails.
+- Task-routed model aliases (see `docs/AI_MODEL_ROUTING.md`) with NVIDIA-first defaults.
+- Gemini and Groq remain active fallbacks when NVIDIA is unavailable or fails.
 - Styled AI response rendering with:
 - markdown-like formatting, equation heuristics, and KaTeX support.
 - AI-generated chapter flashcards (`/api/generate-flashcards`) with PYQ context injection.
@@ -178,6 +180,7 @@ Context troubleshooting quick checks:
 Create `.env.local` in project root:
 
 ```env
+NVIDIA_API_KEY=your_nvidia_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
 # Optional (only if Python is installed in a non-standard path):
@@ -190,8 +193,8 @@ GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
 Notes:
-- Either key can power AI routes; both are recommended for fallback resilience.
-- If both keys are missing/invalid, AI routes return fallback or configuration errors depending on endpoint logic.
+- NVIDIA + Gemini + Groq can be used together; task routing and alias mapping are documented in `docs/AI_MODEL_ROUTING.md`.
+- If all provider keys are missing/invalid, AI routes return fallback or configuration errors depending on endpoint logic.
 - Teacher/admin writes are Supabase-first with production fail-fast behavior. If storage is misconfigured in production, APIs return actionable `503` errors.
 - Free DB comparison + setup rationale: `docs/FREE_DB_OPTIONS.md`.
 

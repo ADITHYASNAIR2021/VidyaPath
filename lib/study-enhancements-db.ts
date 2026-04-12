@@ -699,7 +699,11 @@ export async function getStudentCertificateSummary(input: {
   longestStreak: number;
   badges: string[];
 }> {
-  const grades = await listStudentGrades({ studentId: input.studentId, rollCode: input.rollCode });
+  const grades = await listStudentGrades({
+    studentId: input.studentId,
+    rollCode: input.rollCode,
+    schoolId: input.schoolId,
+  });
   const attendance = await getStudentAttendanceSummary({ studentId: input.studentId, schoolId: input.schoolId, days: 180 });
   const streak = await getStudentStreakData(input.studentId);
   const badges = await listStudentBadges(input.studentId);

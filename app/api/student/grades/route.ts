@@ -12,6 +12,7 @@ export async function GET(req: Request) {
     const grades = await listStudentGrades({
       studentId: studentSession.studentId,
       rollCode: studentSession.rollCode,
+      schoolId: studentSession.schoolId,
     });
     return dataJson({
       requestId,
@@ -27,4 +28,3 @@ export async function GET(req: Request) {
     });
   }
 }
-

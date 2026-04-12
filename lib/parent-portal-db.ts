@@ -100,34 +100,51 @@ export async function createOrUpdateParentLink(input: {
 export async function authenticateParent(input: {
   phone: string;
   pin: string;
+  schoolId?: string;
+  studentId?: string;
 }): Promise<{
   parentId: string;
   studentId: string;
   schoolId: string;
   phone: string;
   parentName?: string;
-} | null> {
+} | { ambiguous: true } | null> {
   if (!isSupabaseServiceConfigured()) return null;
   const phone = normalizePhone(input.phone);
+  const schoolId = input.schoolId ? sanitizeId(input.schoolId) : '';
+  const studentId = input.studentId ? sanitizeId(input.studentId) : '';
   if (!phone || !input.pin) return null;
+
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
+    { column: 'phone', value: phone },
+    { column: 'status', value: 'active' },
+  ];
+  if (schoolId) filters.push({ column: 'school_id', value: schoolId });
+  if (studentId) filters.push({ column: 'student_id', value: studentId });
 
   const rows = await supabaseSelect<ParentLinkRow>(TABLE, {
     select: '*',
-    filters: [{ column: 'phone', value: phone }, { column: 'status', value: 'active' }],
+    filters,
     limit: 20,
   }).catch(() => []);
 
+  const matches: ParentLinkRow[] = [];
   for (const row of rows) {
     if (!verifyPin(input.pin, row.pin_hash)) continue;
-    return {
-      parentId: row.id,
-      studentId: row.student_id,
-      schoolId: row.school_id,
-      phone: row.phone,
-      parentName: row.name ?? undefined,
-    };
+    matches.push(row);
   }
-  return null;
+  if (matches.length === 0) return null;
+  if (matches.length > 1) {
+    return { ambiguous: true };
+  }
+  const match = matches[0];
+  return {
+    parentId: match.id,
+    studentId: match.student_id,
+    schoolId: match.school_id,
+    phone: match.phone,
+    parentName: match.name ?? undefined,
+  };
 }
 
 export async function getParentDashboard(input: {
@@ -183,7 +200,7 @@ export async function getParentDashboard(input: {
 
   const [attendance, grades, events, resources, announcementsAll] = await Promise.all([
     getStudentAttendanceSummary({ studentId: student.id, schoolId: student.schoolId, days: 180 }),
-    listStudentGrades({ studentId: student.id, rollCode: student.rollCode }),
+    listStudentGrades({ studentId: student.id, rollCode: student.rollCode, schoolId: student.schoolId }),
     listSchoolEvents({
       schoolId: student.schoolId,
       classLevel: student.classLevel,

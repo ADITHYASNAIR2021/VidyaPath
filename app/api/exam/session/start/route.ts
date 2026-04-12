@@ -1,9 +1,10 @@
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
-import { getAssignmentPack, startExamSession } from '@/lib/teacher-admin-db';
+import { getAssignmentPack, getAssignmentPackSchoolId, startExamSession } from '@/lib/teacher-admin-db';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { studentCanAccessChapter } from '@/lib/school-management-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +52,15 @@ export async function POST(req: Request) {
         status: 404,
       });
     }
+    const packSchoolId = await getAssignmentPackSchoolId(pack.packId);
+    if (!studentSession.schoolId || !packSchoolId || packSchoolId !== studentSession.schoolId) {
+      return errorJson({
+        requestId,
+        errorCode: 'school-mismatch',
+        message: 'This assignment is not available for your school.',
+        status: 403,
+      });
+    }
     if (pack.classLevel !== studentSession.classLevel) {
       return errorJson({
         requestId,
@@ -72,6 +82,19 @@ export async function POST(req: Request) {
         requestId,
         errorCode: 'missing-student-section',
         message: 'Student section is missing for this restricted assignment.',
+        status: 403,
+      });
+    }
+    const allowedByEnrollment = await studentCanAccessChapter({
+      studentId: studentSession.studentId,
+      chapterId: pack.chapterId,
+      schoolId: studentSession.schoolId,
+    });
+    if (!allowedByEnrollment) {
+      return errorJson({
+        requestId,
+        errorCode: 'subject-enrollment-required',
+        message: 'This assignment is not available for your enrolled subjects.',
         status: 403,
       });
     }

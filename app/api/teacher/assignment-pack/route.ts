@@ -6,6 +6,7 @@ import { logServerEvent } from '@/lib/observability';
 import {
   canTeacherAccessAssignmentPack,
   getAssignmentPack,
+  getAssignmentPackSchoolId,
   upsertAssignmentPack,
 } from '@/lib/teacher-admin-db';
 import { studentCanAccessChapter } from '@/lib/school-management-db';
@@ -91,6 +92,15 @@ export async function GET(req: Request) {
           errorCode: 'unauthorized',
           message: 'Student login required.',
           status: 401,
+        });
+      }
+      const packSchoolId = await getAssignmentPackSchoolId(pack.packId);
+      if (!studentSession.schoolId || !packSchoolId || packSchoolId !== studentSession.schoolId) {
+        return errorJson({
+          requestId,
+          errorCode: 'school-mismatch',
+          message: 'This assignment is not available for your school.',
+          status: 403,
         });
       }
       if (pack.classLevel !== studentSession.classLevel) {
