@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { getPYQData } from '@/lib/pyq';
@@ -470,7 +470,7 @@ async function appendChunkToCache(chunk: ContextChunk): Promise<void> {
   }
 }
 
-function runOnDemandExtraction(relativePath: string): string {
+async function runOnDemandExtraction(relativePath: string): Promise<string> {
   const baseArgs = [
     INDEX_SCRIPT,
     '--single-file',
@@ -493,16 +493,25 @@ function runOnDemandExtraction(relativePath: string): string {
   }
 
   for (const candidate of candidates) {
-    const result = spawnSync(candidate.cmd, candidate.args, {
-      encoding: 'utf-8',
-      timeout: 10_000,
-    });
-    if (result.status !== 0) {
-      continue;
-    }
-
     try {
-      const parsed = JSON.parse(result.stdout || '{}') as { text?: string };
+      const text = await new Promise<string>((resolve, reject) => {
+        const proc = spawn(candidate.cmd, candidate.args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        let stderr = '';
+        const timer = setTimeout(() => {
+          proc.kill('SIGKILL');
+          reject(new Error('timeout'));
+        }, 10_000);
+        proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf-8'); });
+        proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf-8'); });
+        proc.on('close', (code) => {
+          clearTimeout(timer);
+          if (code !== 0) { reject(new Error(`exit ${code}: ${stderr.slice(0, 200)}`)); return; }
+          resolve(stdout);
+        });
+        proc.on('error', (err) => { clearTimeout(timer); reject(err); });
+      });
+      const parsed = JSON.parse(text || '{}') as { text?: string };
       return typeof parsed.text === 'string' ? parsed.text.trim() : '';
     } catch {
       continue;
@@ -515,7 +524,7 @@ async function getOnDemandSnippet(query: ContextQuery): Promise<ContextSnippet |
   const sourcePath = selectFallbackSource(query);
   if (!sourcePath) return null;
 
-  const extracted = runOnDemandExtraction(sourcePath);
+  const extracted = await runOnDemandExtraction(sourcePath);
   const chapter = query.chapterId ? getChapterById(query.chapterId) : undefined;
   const fallbackText =
     extracted ||

@@ -244,6 +244,7 @@ export async function POST(req: Request) {
         ? String((body as Record<string, unknown>).difficultyMix).trim()
         : '40% easy, 40% medium, 20% hard',
       includeShortAnswers: (body as Record<string, unknown>).includeShortAnswers !== false,
+      includeLongAnswers: (body as Record<string, unknown>).includeLongAnswers !== false,
       includeFormulaDrill: (body as Record<string, unknown>).includeFormulaDrill !== false,
       dueDate: typeof (body as Record<string, unknown>).dueDate === 'string'
         ? String((body as Record<string, unknown>).dueDate).trim()

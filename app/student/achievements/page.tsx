@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface Badge {
   badgeType: string;
@@ -22,6 +23,7 @@ function unwrap<T>(payload: unknown): T | null {
 }
 
 export default function StudentAchievementsPage() {
+  const router = useRouter();
   const [streak, setStreak] = useState<StreakData | null>(null);
   const [badges, setBadges] = useState<Badge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,8 +35,11 @@ export default function StudentAchievementsPage() {
       setLoading(true);
       setError('');
       try {
+        const sessionRes = await fetch('/api/student/session/me', { cache: 'no-store' });
+        if (!sessionRes.ok) { router.replace('/student/login'); return; }
         const res = await fetch('/api/student/streaks', { cache: 'no-store' });
         const body = await res.json().catch(() => null);
+        if (res.status === 401) { router.replace('/student/login'); return; }
         const data = unwrap<{ streak?: StreakData; badges?: Badge[] } | null>(body);
         if (!res.ok) {
           if (active) setError((body && typeof body === 'object' && 'message' in body ? String((body as Record<string, unknown>).message) : 'Failed to load achievements.'));
@@ -51,6 +56,7 @@ export default function StudentAchievementsPage() {
     }
     void load();
     return () => { active = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

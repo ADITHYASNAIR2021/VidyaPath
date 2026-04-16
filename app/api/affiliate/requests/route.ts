@@ -3,12 +3,28 @@ import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
 import { createAffiliateRequest } from '@/lib/onboarding-db';
 import { logServerEvent } from '@/lib/observability';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   const endpoint = '/api/affiliate/requests';
+  const ip = getClientIp(req);
+  const rateLimit = await checkRateLimit({
+    key: buildRateLimitKey('affiliate:request', [ip]),
+    windowSeconds: 3600,
+    maxRequests: 5,
+    blockSeconds: 3600,
+  });
+  if (!rateLimit.allowed) {
+    return errorJson({
+      requestId,
+      errorCode: 'rate-limit-exceeded',
+      message: 'Too many requests. Please try again later.',
+      status: 429,
+    });
+  }
   const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
   if (!bodyResult.ok) {
     return errorJson({

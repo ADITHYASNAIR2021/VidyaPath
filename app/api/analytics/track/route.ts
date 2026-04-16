@@ -1,6 +1,7 @@
 import { trackAiQuestion, trackChapterView, trackSearchNoResult } from '@/lib/analytics-store';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 interface TrackPayload {
   eventName?: string;
@@ -11,6 +12,17 @@ interface TrackPayload {
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
+    const ip = getClientIp(req);
+    const rateLimit = await checkRateLimit({
+      key: buildRateLimitKey('analytics:track', [ip]),
+      windowSeconds: 60,
+      maxRequests: 60,
+      blockSeconds: 120,
+    });
+    if (!rateLimit.allowed) {
+      return dataJson({ requestId, data: { ok: true } }); // silent drop — don't expose rate limit to trackers
+    }
+
     const bodyResult = await parseJsonBodyWithLimit<TrackPayload>(req, 8 * 1024);
     if (!bodyResult.ok) {
       return errorJson({

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { TeacherProfile, TeacherScope } from '@/lib/teacher-types';
 import { Users, Plus, RefreshCw, KeyRound, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
 function unwrap<T>(payload: unknown): T {
@@ -108,6 +109,7 @@ export default function AdminTeachersPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
+      <BackButton href="/admin" label="Dashboard" />
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">

@@ -10,6 +10,7 @@ import type {
 import type { MCQItem } from '@/lib/ai/validators';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { PenSquare, RefreshCw, CheckCircle, Send, ChevronDown, ChevronUp, Star, Eye } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
 function unwrap<T>(payload: unknown): T {
@@ -56,14 +57,20 @@ function SubmissionPanel({
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoadingDetail(true);
-    fetch(`/api/teacher/submission/${encodeURIComponent(attempt.submissionId)}`, { cache: 'no-store' })
+    setDetail(null);
+    fetch(`/api/teacher/submission/${encodeURIComponent(attempt.submissionId)}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
       .then(async (res) => {
         const body = await res.json().catch(() => null);
         if (res.ok) setDetail(unwrap<SubmissionDetail>(body));
       })
-      .catch(() => undefined)
+      .catch((err) => { if (err?.name !== 'AbortError') console.error(err); })
       .finally(() => setLoadingDetail(false));
+    return () => controller.abort();
   }, [attempt.submissionId]);
 
   const answerMap = useMemo(() => {
@@ -361,6 +368,7 @@ export default function GradingDeskPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
+      <BackButton href="/teacher" label="Dashboard" />
       <div className="mb-6">
         <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
           <PenSquare className="w-6 h-6 text-amber-600" /> Grading Desk

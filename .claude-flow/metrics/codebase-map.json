@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-04-16T16:46:10.645Z",
+  "projectRoot": "D:\\VidyaPath",
+  "structure": {
+    "hasPackageJson": true,
+    "hasTsConfig": true,
+    "hasClaudeConfig": true,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1776357970645
+}

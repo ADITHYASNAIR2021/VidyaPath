@@ -22,9 +22,23 @@ export default function AffiliateYourSchoolPage() {
   const [success, setSuccess] = useState('');
 
   async function submitRequest() {
-    setSubmitting(true);
     setError('');
     setSuccess('');
+    const required: Array<[string, string]> = [
+      [form.schoolName.trim(), 'School name is required.'],
+      [form.state.trim(), 'State is required.'],
+      [form.city.trim(), 'City is required.'],
+      [form.contactName.trim(), 'Contact name is required.'],
+      [form.contactPhone.trim(), 'Contact phone is required.'],
+    ];
+    for (const [val, msg] of required) {
+      if (!val) { setError(msg); return; }
+    }
+    if (form.contactPhone.trim().replace(/\D/g, '').length < 10) {
+      setError('Contact phone must be at least 10 digits.');
+      return;
+    }
+    setSubmitting(true);
     try {
       const response = await fetch('/api/affiliate/requests', {
         method: 'POST',

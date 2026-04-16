@@ -6,6 +6,7 @@ import {
   parseAdminSession,
   parseDeveloperSession,
 } from '@/lib/auth/session';
+import { getAdminSessionFromRequestCookies } from '@/lib/auth/guards';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = cookies();
@@ -18,7 +19,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // No session = login page; middleware already enforces auth on protected routes
   if (!adminSession && !devSession) return <>{children}</>;
 
-  const displayName = devSession ? devSession.username : 'Admin';
+  let displayName: string | undefined;
+  try {
+    const fullSession = await getAdminSessionFromRequestCookies();
+    displayName = fullSession?.displayName ?? (devSession ? devSession.username : undefined);
+  } catch {
+    displayName = devSession ? devSession.username : undefined;
+  }
 
   return (
     <div className="flex min-h-screen bg-[#FDFAF6]">

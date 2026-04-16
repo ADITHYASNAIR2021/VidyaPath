@@ -9,6 +9,7 @@ interface SubmissionRow {
   id: string;
   student_id: string | null;
   created_at: string;
+  status: string | null;
 }
 
 function startOfDay(date: Date): Date {
@@ -36,7 +37,7 @@ export async function GET(req: Request) {
     const sevenDaysAgo = new Date(today);
     sevenDaysAgo.setDate(today.getDate() - 6);
     const submissions = await supabaseSelect<SubmissionRow>('teacher_submissions', {
-      select: 'id,student_id,created_at',
+      select: 'id,student_id,created_at,status',
       filters: [{ column: 'created_at', op: 'gte', value: sevenDaysAgo.toISOString() }],
       orderBy: 'created_at',
       ascending: false,
@@ -59,12 +60,17 @@ export async function GET(req: Request) {
       activeStudents: students.size,
     }));
 
-    const completionBase = Math.max(overview.totalTeachers, 1);
+    // Real funnel counts from actual submission statuses in the 7-day window
+    const funnelSubmitted = submissions.length;
+    const funnelGraded = submissions.filter(
+      (s) => s.status === 'graded' || s.status === 'released'
+    ).length;
+    const funnelReleased = submissions.filter((s) => s.status === 'released').length;
     const assignmentCompletionFunnel = {
-      assigned: overview.assignmentCompletionsThisWeek + completionBase,
-      submitted: overview.assignmentCompletionsThisWeek,
-      reviewed: Math.max(0, Math.round(overview.assignmentCompletionsThisWeek * 0.72)),
-      released: Math.max(0, Math.round(overview.assignmentCompletionsThisWeek * 0.55)),
+      assigned: overview.assignmentCompletionsThisWeek,
+      submitted: funnelSubmitted,
+      reviewed: funnelGraded,
+      released: funnelReleased,
     };
 
     return dataJson({

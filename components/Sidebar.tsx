@@ -28,11 +28,13 @@ const TEACHER_NAV: NavItem[] = [
   { href: '/teacher/grading',       label: 'Grading Desk',   icon: PenSquare },
   { href: '/teacher/students',      label: 'Students',       icon: Users },
   { href: '/teacher/question-bank', label: 'Question Bank',  icon: HelpCircle },
-  { href: '/teacher/ai-tools',      label: 'AI Tools',       icon: Wand2 },
-  { href: '/teacher/resources',     label: 'Resources',      icon: BookMarked },
-  { href: '/teacher/attendance',    label: 'Attendance',     icon: ClipboardCheck },
-  { href: '/teacher/gradebook',     label: 'Gradebook',      icon: ScrollText },
-  { href: '/teacher/calendar',      label: 'Calendar',       icon: CalendarDays },
+  { href: '/teacher/ai-tools',         label: 'AI Tools',        icon: Wand2 },
+  { href: '/teacher/chapter-toolkit', label: 'Chapter Toolkit', icon: BookOpen },
+  { href: '/teacher/weekly-plans',    label: 'Weekly Plans',    icon: CalendarDays },
+  { href: '/teacher/resources',       label: 'Resources',       icon: BookMarked },
+  { href: '/teacher/attendance',      label: 'Attendance',      icon: ClipboardCheck },
+  { href: '/teacher/gradebook',       label: 'Gradebook',       icon: ScrollText },
+  { href: '/teacher/calendar',        label: 'Calendar',        icon: CalendarDays },
 ];
 
 const STUDENT_NAV: NavItem[] = [
@@ -48,6 +50,7 @@ const STUDENT_NAV: NavItem[] = [
   { href: '/student/resources', label: 'Resources',     icon: BookMarked },
   { href: '/student/calendar',  label: 'Calendar',      icon: CalendarDays },
   { href: '/student/achievements', label: 'Achievements', icon: Activity },
+  { href: '/student/notes',        label: 'My Notes',      icon: PenSquare },
 ];
 
 const ADMIN_NAV: NavItem[] = [

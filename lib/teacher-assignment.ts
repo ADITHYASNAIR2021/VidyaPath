@@ -26,6 +26,7 @@ export interface TeacherAssignmentPackRequest {
   questionCount: number;
   difficultyMix: string;
   includeShortAnswers: boolean;
+  includeLongAnswers?: boolean;
   includeFormulaDrill: boolean;
   dueDate?: string;
 }
@@ -286,11 +287,12 @@ export async function buildTeacherAssignmentPackDraft(
   const questionCount = clampQuestionCount(request.questionCount);
   const difficultyMix = normalizeDifficultyMix(request.difficultyMix);
   const includeShortAnswers = request.includeShortAnswers === true;
+  const includeLongAnswers = request.includeLongAnswers !== false; // default true for backward-compat
   const includeFormulaDrill = request.includeFormulaDrill === true;
 
   const fallbackMcqs = buildFallbackMcqs(chapter.id, questionCount);
   const fallbackShortAnswers = buildFallbackShortAnswers(chapter.id, includeShortAnswers);
-  const fallbackLongAnswers = buildFallbackLongAnswers(chapter.id);
+  const fallbackLongAnswers = includeLongAnswers ? buildFallbackLongAnswers(chapter.id) : [];
   const fallbackFormulaDrill = buildFallbackFormulaDrill(chapter.id, includeFormulaDrill);
   const fallbackMistakes = buildFallbackCommonMistakes(chapter.id);
   const fallbackEstimatedTime = Math.max(

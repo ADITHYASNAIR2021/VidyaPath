@@ -14,6 +14,7 @@ import {
   ChevronDown, ChevronUp, Calendar, Layers, Clock,
   Edit2, Save, X as XIcon,
 } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
 function unwrap<T>(payload: unknown): T {
@@ -252,7 +253,12 @@ export default function TeacherAssignmentsPage() {
 
   useEffect(() => { void load(); }, []);
   useEffect(() => {
-    if (sectionOptions.length > 0 && !section) setSection(sectionOptions[0]);
+    if (sectionOptions.length === 0) {
+      setSection('');
+    } else if (!sectionOptions.includes(section)) {
+      setSection(sectionOptions[0]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionOptions]);
 
   async function createPack() {
@@ -358,6 +364,7 @@ export default function TeacherAssignmentsPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
+      <BackButton href="/teacher" label="Dashboard" />
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">

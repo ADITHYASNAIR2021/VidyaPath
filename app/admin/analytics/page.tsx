@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BarChart2, RefreshCw, TrendingUp, Users } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
 interface AnalyticsPayload {
@@ -75,6 +76,7 @@ export default function AdminAnalyticsPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-6">
+      <BackButton href="/admin" label="Dashboard" />
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">

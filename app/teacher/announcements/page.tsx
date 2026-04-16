@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { TeacherScope } from '@/lib/teacher-types';
-import { Megaphone, Plus, RefreshCw, Users, BookOpen, School, Layers } from 'lucide-react';
+import { Megaphone, Plus, RefreshCw, Users, BookOpen, School, Layers, Trash2 } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 
 function unwrap<T>(payload: unknown): T {
   if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) return (payload as { data: T }).data;
@@ -52,6 +53,7 @@ export default function TeacherAnnouncementsPage() {
   const [chapterId, setChapterId] = useState('');
   const [sending, setSending] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Chapters filtered to teacher's active scopes
   const chapters = scopes.length === 0
@@ -99,6 +101,26 @@ export default function TeacherAnnouncementsPage() {
 
   useEffect(() => { void load(); }, []);
 
+  async function removeAnnouncement(id: string) {
+    if (!confirm('Delete this announcement? This cannot be undone.')) return;
+    setDeletingId(id);
+    setError('');
+    try {
+      const res = await fetch('/api/teacher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove-announcement', announcementId: id }),
+      });
+      const resBody = await res.json().catch(() => null);
+      if (!res.ok) { setError(resBody?.message ?? 'Failed to delete announcement.'); return; }
+      setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    } catch {
+      setError('Failed to delete announcement.');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   async function send() {
     if (!title.trim() || !body.trim()) return;
     if (scope === 'chapter' && !chapterId) { setError('Select a chapter for chapter-focused announcements.'); return; }
@@ -131,6 +153,7 @@ export default function TeacherAnnouncementsPage() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
+      <BackButton href="/teacher" label="Dashboard" />
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
@@ -248,11 +271,22 @@ export default function TeacherAnnouncementsPage() {
                   <h3 className="font-semibold text-gray-900">{ann.title}</h3>
                   <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{ann.body}</p>
                 </div>
-                {readCounts[ann.id] != null && (
-                  <span className="flex-shrink-0 flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full">
-                    <Users className="w-3 h-3" /> {readCounts[ann.id]} read
-                  </span>
-                )}
+                <div className="flex-shrink-0 flex items-center gap-2">
+                  {readCounts[ann.id] != null && (
+                    <span className="flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full">
+                      <Users className="w-3 h-3" /> {readCounts[ann.id]} read
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeAnnouncement(ann.id)}
+                    disabled={deletingId === ann.id}
+                    title="Delete announcement"
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-40 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <div className="mt-3 flex items-center flex-wrap gap-2 text-xs text-gray-400">
                 {ann.deliveryScope && <span className="px-2 py-0.5 bg-gray-100 rounded-full capitalize">{ann.deliveryScope}</span>}

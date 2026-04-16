@@ -1,7 +1,8 @@
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 interface ImageSolveRequest {
   imageBase64?: string;
@@ -24,6 +25,22 @@ export async function POST(req: Request) {
   try {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
+
+    const limit = await checkRateLimit({
+      key: buildRateLimitKey('ai:image-solve', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      windowSeconds: 60,
+      maxRequests: 8,
+      blockSeconds: 120,
+    });
+    if (!limit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many requests. Please try again later.',
+        hint: `Retry after ${limit.retryAfterSeconds}s`,
+        status: 429,
+      });
+    }
 
     const bodyResult = await parseJsonBodyWithLimit<ImageSolveRequest>(req, 8 * 1024 * 1024);
     if (!bodyResult.ok) {

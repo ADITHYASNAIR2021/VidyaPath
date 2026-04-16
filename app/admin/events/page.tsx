@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Activity, ChevronLeft, ChevronRight, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
 type EventType = 'exam' | 'assignment_due' | 'holiday' | 'meeting' | 'other';
@@ -188,6 +189,7 @@ export default function AdminEventsPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-6">
+      <BackButton href="/admin" label="Dashboard" />
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">

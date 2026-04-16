@@ -13,6 +13,7 @@ import {
   Shield,
   Users,
 } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 
 interface SchoolProfile {
   id: string;
@@ -198,6 +199,7 @@ export default function AdminSettingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl p-6 space-y-5">
+      <BackButton href="/admin" label="Dashboard" />
       <div>
         <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
           <Settings className="h-6 w-6 text-indigo-600" />

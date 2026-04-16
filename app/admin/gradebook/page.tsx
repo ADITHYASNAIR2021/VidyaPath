@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, GraduationCap, RefreshCw, Search } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import type { StudentProfile } from '@/lib/teacher-types';
 
 interface StudentGradeRecord {
@@ -111,6 +112,7 @@ export default function AdminGradebookPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-6">
+      <BackButton href="/admin" label="Dashboard" />
       <div className="mb-6">
         <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
           <BookOpen className="h-6 w-6 text-indigo-600" />

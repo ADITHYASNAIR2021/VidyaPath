@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import {
   attachAdminSessionCookie,
   clearAllRoleSessionCookies,
@@ -18,8 +19,15 @@ import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 function isValidAdminKey(key: string): boolean {
   const configured = process.env.ADMIN_PORTAL_KEY?.trim() || process.env.TEACHER_PORTAL_KEY?.trim();
-  if (!configured) return false;
-  return key.trim() === configured;
+  if (!configured || !key.trim()) return false;
+  try {
+    const a = Buffer.from(key.trim());
+    const b = Buffer.from(configured);
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 function isBootstrapKeyFlowEnabled(): boolean {
@@ -56,16 +64,13 @@ export async function POST(req: Request) {
   }
 
   const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 12 * 1024);
-  const url = new URL(req.url);
-  const keyFromQuery = url.searchParams.get('key')?.trim() ?? '';
   const body = bodyResult.ok ? bodyResult.value : null;
-  const keyFromBody = typeof body?.key === 'string' ? body.key.trim() : '';
+  const key = typeof body?.key === 'string' ? body.key.trim() : '';
   const schoolCode = typeof body?.schoolCode === 'string'
     ? body.schoolCode.trim()
     : (process.env.DEFAULT_SCHOOL_CODE || '').trim();
   const identifier = typeof body?.identifier === 'string' ? body.identifier.trim() : '';
   const password = typeof body?.password === 'string' ? body.password.trim() : '';
-  const key = keyFromQuery || keyFromBody;
 
   if (schoolCode && identifier && password) {
     const scopedRateLimit = await checkRateLimit({

@@ -12,7 +12,7 @@ interface Grade {
   classLevel: number;
   section: string;
   score: number;
-  status: 'results_released' | 'graded' | 'submitted' | 'pending_review';
+  status: 'released' | 'graded' | 'submitted' | 'pending_review';
   releasedAt: string;
   createdAt: string;
 }
@@ -37,7 +37,7 @@ function subjectBadgeClass(subject: string): string {
 
 function statusBadge(status: Grade['status']): { label: string; cls: string } {
   switch (status) {
-    case 'results_released': return { label: 'Released', cls: 'bg-green-100 text-green-800' };
+    case 'released':          return { label: 'Released', cls: 'bg-green-100 text-green-800' };
     case 'graded':           return { label: 'Graded',   cls: 'bg-amber-100 text-amber-800' };
     case 'submitted':        return { label: 'Submitted', cls: 'bg-blue-100 text-blue-800' };
     case 'pending_review':   return { label: 'Pending',  cls: 'bg-gray-100 text-gray-600' };
@@ -90,7 +90,7 @@ export default function StudentGradesPage() {
   );
 
   const releasedGrades = useMemo(
-    () => grades.filter((g) => g.status === 'results_released'),
+    () => grades.filter((g) => g.status === 'released'),
     [grades]
   );
 
@@ -187,7 +187,7 @@ export default function StudentGradesPage() {
               <div className="mt-4 flex flex-col gap-3">
                 {filtered.map((grade) => {
                   const status = statusBadge(grade.status);
-                  const scoreVisible = grade.status === 'results_released';
+                  const scoreVisible = grade.status === 'released';
                   return (
                     <div
                       key={grade.submissionId}

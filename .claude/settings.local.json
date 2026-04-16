@@ -21,7 +21,29 @@
       "Bash(cmd /c \"cd /d D:\\\\VidyaPath && npm install web-push @types/web-push 2>&1\")",
       "Bash(wc -l /d/VidyaPath/app/*/page.tsx /d/VidyaPath/app/page.tsx /d/VidyaPath/app/chapters/\\\\[id\\\\]/page.tsx)",
       "Bash(sort -k2)",
-      "Bash(not exist:*)"
+      "Bash(not exist:*)",
+      "Bash(claude --version)",
+      "Bash(claude plugin:*)",
+      "Bash(find D:/VidyaPath/app/teacher -name \"page.tsx\" -exec grep -l \"ChevronLeft\\\\|ArrowLeft\\\\|back\\\\|Back\" {} \\\\;)",
+      "Bash(find D:/VidyaPath/app/admin -name \"page.tsx\" -exec grep -l \"ChevronLeft\\\\|ArrowLeft\\\\|back\\\\|Back\" {} \\\\;)",
+      "Bash(find D:/VidyaPath/app/developer -name \"page.tsx\" -exec grep -l \"ChevronLeft\\\\|ArrowLeft\\\\|back\\\\|Back\" {} \\\\;)",
+      "Bash(grep -rn \"BackButton\" /d/VidyaPath/app/teacher/*/page.tsx /d/VidyaPath/app/admin/*/page.tsx /d/VidyaPath/app/developer/*/page.tsx)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.ts$|\\\\.tsx$\")",
+      "WebSearch",
+      "Bash(exist \"D:\\\\VidyaPath\\\\CLAUDE.md\" echo EXISTS)",
+      "Bash(npm --version)",
+      "Bash(npx ruflo@latest --version)",
+      "Bash(npx claude-flow@v3alpha --version)",
+      "Bash(ruflo --version)",
+      "Bash(claude-flow --version)",
+      "Bash(claude mcp:*)",
+      "Bash(claude-flow init:*)",
+      "Bash(claude-flow doctor:*)",
+      "Bash(claude-flow memory:*)",
+      "Bash(claude-flow daemon:*)",
+      "Bash(claude-flow hooks:*)"
     ]
   }
 }

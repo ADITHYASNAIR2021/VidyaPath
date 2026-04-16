@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-04-16T16:53:29.237Z",
+  "mode": "local",
+  "checks": {
+    "envFilesProtected": false,
+    "gitIgnoreExists": true,
+    "noHardcodedSecrets": true
+  },
+  "riskLevel": "low",
+  "recommendations": [],
+  "note": "Install Claude Code CLI for AI-powered security analysis"
+}

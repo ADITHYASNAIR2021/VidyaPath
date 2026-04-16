@@ -8,6 +8,7 @@ import {
   Wand2, Copy, Check, RefreshCw, Sparkles, Download, Printer,
   History, ChevronDown, ChevronUp, Send,
 } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
 function unwrap<T>(payload: unknown): T {
@@ -35,25 +36,53 @@ interface HistoryEntry {
   toolType: ToolId;
   chapterTitle: string;
   subject: string;
+  difficulty?: string;
   result: string;
   generatedAt: string;
 }
 
 const HISTORY_KEY = 'vidyapath_ai_tools_history';
-const MAX_HISTORY = 8;
+const MAX_HISTORY = 10;
 
-function loadHistory(): HistoryEntry[] {
+function loadLocalHistory(): HistoryEntry[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     return raw ? (JSON.parse(raw) as HistoryEntry[]) : [];
   } catch { return []; }
 }
 
-function saveHistory(entry: HistoryEntry) {
+function saveLocalHistory(entry: HistoryEntry) {
   try {
-    const existing = loadHistory().filter((e) => e.id !== entry.id);
+    const existing = loadLocalHistory().filter((e) => e.id !== entry.id);
     localStorage.setItem(HISTORY_KEY, JSON.stringify([entry, ...existing].slice(0, MAX_HISTORY)));
   } catch { /* ignore */ }
+}
+
+async function fetchApiHistory(): Promise<HistoryEntry[] | null> {
+  try {
+    const res = await fetch('/api/teacher/ai-history', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const body = await res.json().catch(() => null);
+    const entries = body?.data?.entries;
+    return Array.isArray(entries) ? entries as HistoryEntry[] : null;
+  } catch { return null; }
+}
+
+async function postApiHistory(entry: HistoryEntry & { chapterId?: string }): Promise<void> {
+  try {
+    await fetch('/api/teacher/ai-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        toolType: entry.toolType,
+        chapterTitle: entry.chapterTitle,
+        subject: entry.subject,
+        chapterId: entry.chapterId,
+        difficulty: entry.difficulty ?? 'mixed',
+        result: entry.result,
+      }),
+    });
+  } catch { /* fire-and-forget */ }
 }
 
 /* ── Plain-text renderer: converts structure into readable HTML-like sections */
@@ -167,7 +196,14 @@ export default function AIToolsPage() {
         setScopes(Array.isArray(body?.effectiveScopes) ? body.effectiveScopes : []);
       })
       .catch(() => undefined);
-    setHistory(loadHistory());
+    // Load history from API; fall back to localStorage if unavailable
+    fetchApiHistory().then((entries) => {
+      if (entries && entries.length > 0) {
+        setHistory(entries);
+      } else {
+        setHistory(loadLocalHistory());
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -204,17 +240,19 @@ export default function AIToolsPage() {
       setActiveTab('preview');
       setTweakInput('');
 
-      // Save to history
+      // Save to history (API + localStorage fallback)
       const entry: HistoryEntry = {
         id: `${Date.now()}`,
         toolType,
         chapterTitle: data.chapterTitle ?? chapter?.title ?? chapterId,
         subject: data.subject ?? chapter?.subject ?? '',
+        difficulty,
         result: text,
         generatedAt: new Date().toISOString(),
       };
-      saveHistory(entry);
-      setHistory(loadHistory());
+      saveLocalHistory(entry);
+      postApiHistory({ ...entry, chapterId });
+      setHistory((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)].slice(0, MAX_HISTORY));
     } catch {
       setError('Generation failed. Check your connection.');
     } finally {
@@ -263,6 +301,7 @@ export default function AIToolsPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
+      <BackButton href="/teacher" label="Dashboard" />
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">

@@ -30,15 +30,20 @@ function resolveSessionSecret(): string {
   const explicit = (process.env.SESSION_SIGNING_SECRET || '').trim();
   if (explicit) return explicit;
   if (process.env.NODE_ENV === 'production') return '';
-  return (
+  const fallback = (
     process.env.ADMIN_PORTAL_KEY ||
     process.env.TEACHER_PORTAL_KEY ||
     'vidyapath-dev-session-secret'
   ).trim();
+  if (fallback === 'vidyapath-dev-session-secret') {
+    // Only warn once per cold start — logs are visible in Vercel/dev console
+    console.warn('[session] Using insecure hardcoded session secret. Set SESSION_SIGNING_SECRET in .env.local for a proper dev secret.');
+  }
+  return fallback;
 }
 
 interface SessionPayload {
-  role: 'admin' | 'teacher' | 'student' | 'developer';
+  role: 'admin' | 'teacher' | 'student' | 'developer' | 'parent';
   teacherId?: string;
   studentId?: string;
   studentName?: string;
@@ -46,6 +51,7 @@ interface SessionPayload {
   classLevel?: number;
   section?: string;
   username?: string;
+  phone?: string;
   expiresAt: number;
 }
 
@@ -115,7 +121,7 @@ async function signBase64UrlPayload(payloadBase64Url: string, secret: string): P
 
 async function isValidSignedSessionToken(
   token: string | undefined,
-  expectedRole: 'admin' | 'teacher' | 'student' | 'developer'
+  expectedRole: 'admin' | 'teacher' | 'student' | 'developer' | 'parent'
 ): Promise<boolean> {
   if (!token) return false;
   const [encodedPayload, providedSignature] = token.split('.');
@@ -140,6 +146,13 @@ async function isValidSignedSessionToken(
         !parsed.rollCode ||
         typeof parsed.rollCode !== 'string' ||
         (parsed.classLevel !== 10 && parsed.classLevel !== 12))
+    ) {
+      return false;
+    }
+    if (
+      expectedRole === 'parent' &&
+      (!parsed.studentId || typeof parsed.studentId !== 'string' ||
+       !parsed.phone || typeof parsed.phone !== 'string')
     ) {
       return false;
     }
@@ -185,17 +198,17 @@ export async function middleware(request: NextRequest) {
   const supabaseRefresh = request.cookies.get(SUPABASE_REFRESH_COOKIE)?.value;
   const supabaseRoleHint = parseSupabaseRoleHint(request.cookies.get(SUPABASE_ROLE_HINT_COOKIE)?.value);
   const hasSupabaseSession = hasValidSupabaseSession(supabaseAccess, supabaseRefresh);
-  const [legacyHasAdminSession, legacyHasTeacherSession, legacyHasStudentSession, legacyHasDeveloperSession] = await Promise.all([
+  const [legacyHasAdminSession, legacyHasTeacherSession, legacyHasStudentSession, legacyHasDeveloperSession, hasParentSession] = await Promise.all([
     isValidSignedSessionToken(adminToken, 'admin'),
     isValidSignedSessionToken(teacherToken, 'teacher'),
     isValidSignedSessionToken(studentToken, 'student'),
     isValidSignedSessionToken(developerToken, 'developer'),
+    isValidSignedSessionToken(parentToken, 'parent'),
   ]);
   const hasDeveloperSession = legacyHasDeveloperSession || (hasSupabaseSession && supabaseRoleHint === 'developer');
   const hasAdminSession = legacyHasAdminSession || (hasSupabaseSession && (supabaseRoleHint === 'admin' || supabaseRoleHint === 'developer'));
   const hasTeacherSession = legacyHasTeacherSession || (hasSupabaseSession && supabaseRoleHint === 'teacher');
   const hasStudentSession = legacyHasStudentSession || (hasSupabaseSession && supabaseRoleHint === 'student');
-  const hasParentSession = !!parentToken;
   const hasDeveloperLikeSession = hasDeveloperSession || (singleEnvMode && hasAdminSession);
   const isAuthRequiredAiApi = AUTH_REQUIRED_AI_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
   const hasAnySession = hasStudentSession || hasTeacherSession || hasAdminSession || hasDeveloperSession;

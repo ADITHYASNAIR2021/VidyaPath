@@ -50,6 +50,7 @@ import {
 } from '@/lib/supabase-rest';
 import { getTeacherStorageStatus } from '@/lib/persistence/teacher-storage';
 import { ensureDefaultEnrollmentsForStudent } from '@/lib/school-management-db';
+import { logServerEvent } from '@/lib/observability';
 
 type RowId = string;
 
@@ -609,20 +610,20 @@ export async function authenticateTeacher(phone: string, pin: string, schoolId?:
     filters,
     limit: 1,
   }).catch((err: unknown) => {
-    console.error('[auth:teacher] Supabase query failed in authenticateTeacher:', err instanceof Error ? err.message : String(err));
+    logServerEvent({ level: 'error', event: 'auth:teacher:query-failed', details: { fn: 'authenticateTeacher', error: err instanceof Error ? err.message : String(err) } });
     return [] as TeacherProfileRow[];
   });
   const row = rows[0];
   if (!row) {
-    console.warn('[auth:teacher] No teacher found for phone:', cleanPhone);
+    logServerEvent({ level: 'warn', event: 'auth:teacher:not-found', details: { phone: cleanPhone } });
     return null;
   }
   if (row.status !== 'active') {
-    console.warn('[auth:teacher] Teacher is not active. Status:', row.status, 'id:', row.id);
+    logServerEvent({ level: 'warn', event: 'auth:teacher:inactive', details: { status: row.status, teacherId: row.id } });
     return null;
   }
   if (!verifyPin(pin, row.pin_hash)) {
-    console.warn('[auth:teacher] PIN mismatch for teacher id:', row.id, '— stored hash prefix:', row.pin_hash?.slice(0, 12));
+    logServerEvent({ level: 'warn', event: 'auth:teacher:pin-mismatch', details: { teacherId: row.id } });
     return null;
   }
   return getTeacherSessionById(row.id, schoolId);
@@ -640,24 +641,46 @@ export async function authenticateTeacherByIdentifier(
   // Also try matching after stripping a leading country code (e.g. +91 or 0091 prefix)
   const strippedPhone = normalizedPhone.replace(/^\+91|^0091/, '');
   const normalizedStaff = normalizeRosterToken(cleanIdentifier, 50);
-  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
-    { column: 'status', value: 'active' },
-  ];
-  if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
-  const rows = await supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
-    select: '*',
-    filters,
-    limit: 5000,
-  }).catch((err: unknown) => {
-    console.error('[auth:teacher] Supabase query failed in authenticateTeacherByIdentifier:', err instanceof Error ? err.message : String(err));
-    return [] as TeacherProfileRow[];
-  });
-  if (rows.length === 0) {
-    console.warn('[auth:teacher] authenticateTeacherByIdentifier: Supabase returned 0 active teachers — possible connectivity or permissions issue.');
+  const schoolFilter = schoolId ? [{ column: 'school_id', value: sanitizeText(schoolId, 80) }] : [];
+
+  // Run targeted queries in parallel instead of full table scan
+  const phoneVariants = [...new Set([normalizedPhone, strippedPhone].filter(Boolean))];
+  const [byPhoneFull, byPhoneStripped, byStaff] = await Promise.all([
+    supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
+      select: '*',
+      filters: [{ column: 'status', value: 'active' }, { column: 'phone', value: phoneVariants[0] ?? '' }, ...schoolFilter],
+      limit: 10,
+    }).catch(() => [] as TeacherProfileRow[]),
+    phoneVariants[1] ? supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
+      select: '*',
+      filters: [{ column: 'status', value: 'active' }, { column: 'phone', value: phoneVariants[1] }, ...schoolFilter],
+      limit: 10,
+    }).catch(() => [] as TeacherProfileRow[]) : Promise.resolve([] as TeacherProfileRow[]),
+    normalizedStaff ? supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
+      select: '*',
+      filters: [{ column: 'status', value: 'active' }, { column: 'staff_code', value: normalizedStaff }, ...schoolFilter],
+      limit: 10,
+    }).catch((err: unknown) => {
+      logServerEvent({ level: 'error', event: 'auth:teacher:query-failed', details: { fn: 'authenticateTeacherByIdentifier', error: err instanceof Error ? err.message : String(err) } });
+      return [] as TeacherProfileRow[];
+    }) : Promise.resolve([] as TeacherProfileRow[]),
+  ]);
+
+  // Deduplicate by id
+  const seen = new Set<string>();
+  const candidates: TeacherProfileRow[] = [];
+  for (const row of [...byPhoneFull, ...byPhoneStripped, ...byStaff]) {
+    if (!seen.has(row.id)) { seen.add(row.id); candidates.push(row); }
   }
-  const candidates = rows.filter((row) => {
+
+  if (candidates.length === 0) {
+    logServerEvent({ level: 'warn', event: 'auth:teacher:no-db-results', details: { identifier: cleanIdentifier } });
+    return { session: null };
+  }
+
+  // Verify country-code variants in memory (narrow set, not 5000 rows)
+  const matched_candidates = candidates.filter((row) => {
     const storedPhone = normalizePhone(row.phone || '');
-    // Accept match with or without country code on either side
     const phoneMatch =
       storedPhone === normalizedPhone ||
       storedPhone === strippedPhone ||
@@ -666,20 +689,20 @@ export async function authenticateTeacherByIdentifier(
     const staffMatch = normalizeRosterToken(row.staff_code || '', 50) === normalizedStaff;
     return phoneMatch || (!!normalizedStaff && staffMatch);
   });
-  if (candidates.length === 0) {
-    console.warn('[auth:teacher] No candidate found for identifier:', cleanIdentifier, '— checked', rows.length, 'active teachers');
+  if (matched_candidates.length === 0) {
+    logServerEvent({ level: 'warn', event: 'auth:teacher:no-candidate', details: { identifier: cleanIdentifier } });
     return { session: null };
   }
-  const pinMatched = candidates.filter((row) => {
+  const pinMatched = matched_candidates.filter((row) => {
     try {
       return verifyPin(pin, row.pin_hash);
     } catch (err: unknown) {
-      console.error('[auth:teacher] verifyPin threw for teacher id:', row.id, '— stored hash prefix:', row.pin_hash?.slice(0, 16), 'error:', err instanceof Error ? err.message : String(err));
+      logServerEvent({ level: 'error', event: 'auth:teacher:verify-pin-threw', details: { teacherId: row.id, error: err instanceof Error ? err.message : String(err) } });
       return false;
     }
   });
   if (pinMatched.length === 0) {
-    console.warn('[auth:teacher] PIN mismatch for', candidates.length, 'candidate(s). Stored hash prefix(es):', candidates.map((r) => r.pin_hash?.slice(0, 12)).join(', '));
+    logServerEvent({ level: 'warn', event: 'auth:teacher:pin-mismatch', details: { candidates: matched_candidates.length } });
     return { session: null };
   }
   if (pinMatched.length > 1) return { session: null, ambiguous: true };
@@ -744,11 +767,11 @@ export async function getStudentByRollCode(rollCode: string, schoolId?: string):
     filters,
     limit: 1,
   }).catch((err: unknown) => {
-    console.error('[auth:student] Supabase query failed in getStudentByRollCode:', err instanceof Error ? err.message : String(err));
+    logServerEvent({ level: 'error', event: 'auth:student:query-failed', details: { fn: 'getStudentByRollCode', error: err instanceof Error ? err.message : String(err) } });
     return [] as StudentProfileRow[];
   });
   if (rows.length === 0) {
-    console.warn('[auth:student] No student found for roll_code:', normalized, schoolId ? `(schoolId: ${schoolId})` : '(no school filter)');
+    logServerEvent({ level: 'warn', event: 'auth:student:not-found', details: { hasSchoolFilter: !!schoolId } });
   }
   return rows[0] ?? null;
 }
@@ -776,7 +799,7 @@ export async function findStudentsByRollNo(input: {
     filters,
     limit: 2000,
   }).catch((err: unknown) => {
-    console.error('[auth:student] Supabase query failed in findStudentsByRollNo:', err instanceof Error ? err.message : String(err));
+    logServerEvent({ level: 'error', event: 'auth:student:query-failed', details: { fn: 'findStudentsByRollNo', error: err instanceof Error ? err.message : String(err) } });
     return [] as StudentProfileRow[];
   });
   return rows.filter((row) => row.status === 'active');
@@ -941,21 +964,21 @@ export async function authenticateStudent(rollCode: string, pin?: string, school
   const row = await getStudentByRollCode(rollCode, schoolId);
   if (!row) return null;
   if (row.status !== 'active') {
-    console.warn('[auth:student] Student is not active. Status:', row.status, 'id:', row.id);
+    logServerEvent({ level: 'warn', event: 'auth:student:inactive', details: { status: row.status, studentId: row.id } });
     return null;
   }
   if (row.pin_hash) {
     if (!pin) {
-      console.warn('[auth:student] pin_hash is set but no PIN provided for student id:', row.id);
+      logServerEvent({ level: 'warn', event: 'auth:student:pin-required', details: { studentId: row.id } });
       return null;
     }
     try {
       if (!verifyPin(pin, row.pin_hash)) {
-        console.warn('[auth:student] PIN mismatch for student id:', row.id, '— stored hash prefix:', row.pin_hash.slice(0, 12));
+        logServerEvent({ level: 'warn', event: 'auth:student:pin-mismatch', details: { studentId: row.id } });
         return null;
       }
     } catch (err: unknown) {
-      console.error('[auth:student] verifyPin threw for student id:', row.id, '— stored hash prefix:', row.pin_hash?.slice(0, 16), '— error:', err instanceof Error ? err.message : String(err));
+      logServerEvent({ level: 'error', event: 'auth:student:verify-pin-threw', details: { studentId: row.id, error: err instanceof Error ? err.message : String(err) } });
       return null;
     }
   }
@@ -1835,16 +1858,26 @@ export async function getPrivateTeacherConfig(teacherId: string): Promise<Privat
   const teacherSession = await getTeacherSessionById(teacherId);
   if (!teacherSession) throw new Error('Unauthorized teacher session.');
   const storageStatus = await getTeacherStorageStatus();
-  const [topicRows, quizRows, announcementRows, packRows, activityRows, submissionRows, analytics] =
+  const [topicRows, quizRows, announcementRows, packRows, activityRows, analytics] =
     await Promise.all([
       supabaseSelect<TeacherTopicPriorityRow>(TABLES.topicPriority, { select: '*', filters: [{ column: 'teacher_id', value: teacherId }, { column: 'is_active', value: true }], orderBy: 'updated_at', ascending: false, limit: 500 }).catch(() => []),
       supabaseSelect<TeacherQuizLinkRow>(TABLES.quizLinks, { select: '*', filters: [{ column: 'teacher_id', value: teacherId }, { column: 'is_active', value: true }], orderBy: 'updated_at', ascending: false, limit: 500 }).catch(() => []),
       supabaseSelect<TeacherAnnouncementRow>(TABLES.announcements, { select: '*', filters: [{ column: 'teacher_id', value: teacherId }, { column: 'is_active', value: true }], orderBy: 'created_at', ascending: false, limit: 120 }).catch(() => []),
       supabaseSelect<TeacherAssignmentPackRow>(TABLES.assignmentPacks, { select: '*', filters: [{ column: 'teacher_id', value: teacherId }], orderBy: 'updated_at', ascending: false, limit: 300 }).catch(() => []),
       supabaseSelect<TeacherActivityRow>(TABLES.activity, { select: '*', filters: [{ column: 'teacher_id', value: teacherId }], orderBy: 'created_at', ascending: false, limit: 200 }).catch(() => []),
-      supabaseSelect<TeacherSubmissionRow>(TABLES.submissions, { select: '*', orderBy: 'created_at', ascending: false, limit: 2000 }).catch(() => []),
       getAnalyticsSummary(12),
     ]);
+  // Fetch submissions scoped to this teacher's packs only — avoids cross-teacher data exposure
+  const teacherPackIds = packRows.map((r) => r.id).filter(Boolean);
+  const submissionRows: TeacherSubmissionRow[] = teacherPackIds.length > 0
+    ? await supabaseSelect<TeacherSubmissionRow>(TABLES.submissions, {
+        select: '*',
+        filters: [{ column: 'pack_id', op: 'in', value: `(${teacherPackIds.join(',')})` }],
+        orderBy: 'created_at',
+        ascending: false,
+        limit: 500,
+      }).catch(() => [])
+    : [];
 
   const sortedPrivateTopicRows = sortByLatestThenSpecificity(
     topicRows.map((row) => ({ ...row, updatedAt: row.updated_at }))
@@ -2241,6 +2274,18 @@ export async function updateAssignmentPackStatus(input: {
   if (!pack) return null;
   const canAccess = await canTeacherAccessAssignmentPack(input.teacherId, input.packId);
   if (!canAccess) return null;
+
+  // State-machine guard — prevent invalid transitions
+  const VALID_TRANSITIONS: Record<TeacherPackStatus, TeacherPackStatus[]> = {
+    draft:     ['review', 'archived'],
+    review:    ['published', 'draft', 'archived'],
+    published: ['archived'],
+    archived:  [],
+  };
+  if (!VALID_TRANSITIONS[pack.status]?.includes(input.status)) {
+    throw new Error(`Cannot transition assignment pack from '${pack.status}' to '${input.status}'.`);
+  }
+
   const nextPayload: TeacherAssignmentPack = {
     ...pack,
     status: input.status,
@@ -2725,7 +2770,7 @@ export async function gradeSubmission(input: {
       maxScore: Number(item.maxScore),
       feedback: item.feedback ? sanitizeText(item.feedback, 400) : undefined,
     }))
-    .filter((item) => item.questionNo && Number.isFinite(item.scoreAwarded) && Number.isFinite(item.maxScore) && item.maxScore >= 0)
+    .filter((item) => item.questionNo && Number.isFinite(item.scoreAwarded) && Number.isFinite(item.maxScore) && item.maxScore > 0)
     .map((item) => ({
       ...item,
       scoreAwarded: Math.max(0, Math.min(item.maxScore, item.scoreAwarded)),
