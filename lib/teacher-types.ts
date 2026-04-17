@@ -1,5 +1,6 @@
 import type { MCQItem, RevisionWeek } from '@/lib/ai/validators';
 import type { Subject } from '@/lib/data';
+import type { AcademicStream } from '@/lib/academic-taxonomy';
 
 export type TeacherSectionCode = string;
 export type TeacherStatus = 'active' | 'inactive';
@@ -399,6 +400,7 @@ export interface StudentProfile {
   batch?: string;
   rollCode: string;
   classLevel: 10 | 12;
+  stream?: AcademicStream;
   section?: string;
   status: 'active' | 'inactive';
   hasPin: boolean;
@@ -417,7 +419,7 @@ export interface StudentSession {
   schoolCode?: string;
   batch?: string;
   mustChangePassword?: boolean;
-  stream?: 'Science' | 'Commerce' | 'Humanities';
+  stream?: AcademicStream;
   enrolledSubjects?: Subject[];
 }
 

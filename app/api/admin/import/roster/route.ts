@@ -1,5 +1,5 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
-import { isSupportedSubject } from '@/lib/academic-taxonomy';
+import { isSupportedSubject, normalizeAcademicStream } from '@/lib/academic-taxonomy';
 import { isValidPin } from '@/lib/auth/pin';
 import {
   buildInitialStudentPasswordFromLoginId,
@@ -11,6 +11,7 @@ import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { importRosterSchema } from '@/lib/schemas/admin-management';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { createStudent } from '@/lib/teacher-admin-db';
 import { createTeacher } from '@/lib/teacher/auth.db';
 import type { TeacherScope } from '@/lib/teacher-types';
@@ -119,6 +120,21 @@ export async function POST(req: Request) {
       status: 400,
     });
   }
+  const limit = await checkRateLimit({
+    key: buildRateLimitKey('admin:roster-import:bulk-write', [schoolId]),
+    windowSeconds: 60,
+    maxRequests: 5,
+    blockSeconds: 180,
+  });
+  if (!limit.allowed) {
+    return errorJson({
+      requestId,
+      errorCode: 'rate-limit-exceeded',
+      message: 'Too many roster import attempts for this school. Please retry shortly.',
+      status: 429,
+      hint: `Retry after ${limit.retryAfterSeconds}s`,
+    });
+  }
 
   if (entity === 'students' && adminSession.role === 'admin' && !emergencyOverride) {
     return errorJson({
@@ -158,10 +174,14 @@ export async function POST(req: Request) {
         const rollNo = readString(row.rollNo ?? row.roll_number ?? row.roll, 50).toUpperCase();
         const rollCode = readString(row.rollCode ?? row.roll_code, 80).toUpperCase();
         const classLevel = readClassLevel(row.classLevel ?? row.class ?? row.standard);
+        const stream = normalizeAcademicStream(row.stream ?? row.academicStream ?? row.track);
         const section = readString(row.section, 30);
         const batch = readString(row.batch, 30);
         if (!name || !classLevel) {
           throw new Error('Required student fields: name and classLevel.');
+        }
+        if (classLevel === 12 && !stream) {
+          throw new Error('Class 12 student rows must include stream (pcm|pcb|commerce|interdisciplinary).');
         }
         const pinInput = readString(row.pin, 16);
         const pin = pinInput && isValidPin(pinInput) ? pinInput : generateStudentPin(rollNo || rollCode || name);
@@ -171,6 +191,7 @@ export async function POST(req: Request) {
           rollNo: rollNo || undefined,
           rollCode: rollCode || undefined,
           classLevel,
+          stream,
           section: section || undefined,
           batch: batch || undefined,
           pin,

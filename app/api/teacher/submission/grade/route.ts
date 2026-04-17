@@ -26,7 +26,7 @@ export async function POST(req: Request) {
         issues: bodyResult.issues,
       });
     }
-    const { submissionId, grades: questionGrades } = bodyResult.value;
+    const { submissionId, grades: questionGrades, allowRegrade } = bodyResult.value;
 
     if (!submissionId || questionGrades.length === 0) {
       return errorJson({
@@ -41,6 +41,7 @@ export async function POST(req: Request) {
       teacherId: session.teacher.id,
       submissionId,
       questionGrades,
+      allowRegrade: allowRegrade === true,
     });
 
     if (!submission) {

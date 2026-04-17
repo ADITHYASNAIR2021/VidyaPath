@@ -49,5 +49,5 @@ export function isSharedRoleShellPath(pathname: string): boolean {
 }
 
 export function isExamLikePath(pathname: string): boolean {
-  return pathname.startsWith('/exam/') || pathname.startsWith('/student/assignment/');
+  return pathname.startsWith('/exam/');
 }

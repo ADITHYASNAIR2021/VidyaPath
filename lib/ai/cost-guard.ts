@@ -1,20 +1,20 @@
 /**
  * AI token-cost guardrail.
  *
- * Enforces two limits:
- *   1. Per-request hard cap  — configurable via AI_MAX_TOKENS_PER_REQUEST (default 4000)
- *   2. Per-school daily budget — configurable via AI_DAILY_TOKEN_BUDGET_PER_SCHOOL (default 100,000)
+ * Enforces:
+ *   1) per-request hard cap (AI_MAX_TOKENS_PER_REQUEST, default 4000)
+ *   2) per-school daily budget (AI_DAILY_TOKEN_BUDGET_PER_SCHOOL, default 100000)
+ *   3) global daily budget (AI_DAILY_TOKEN_BUDGET_GLOBAL, default 1000000)
  *
- * Storage: Upstash Redis when available, Supabase app_state table as fallback.
- * Counters expire automatically (24-hour rolling window).
- *
- * Usage:
- *   const guard = await checkAiTokenBudget({ schoolId, requestedTokens: estimatedMax });
- *   if (!guard.allowed) return Response.json({ error: 'token-budget-exceeded' }, { status: 429 });
+ * Usage (preferred route input):
+ *   const guard = await checkAiTokenBudget({
+ *     context,
+ *     endpoint: '/api/ai-tutor',
+ *     projectedInputText: userPrompt,
+ *     projectedOutputTokens: 1800,
+ *   });
  */
 import { logger } from '@/lib/logger';
-
-// ── Config ───────────────────────────────────────────────────────────────
 
 const MAX_TOKENS_PER_REQUEST = Math.max(
   256,
@@ -31,16 +31,13 @@ const DAILY_BUDGET_GLOBAL = Math.max(
   Math.min(100_000_000, Number(process.env.AI_DAILY_TOKEN_BUDGET_GLOBAL) || 1_000_000),
 );
 
-const WINDOW_SECONDS = 24 * 60 * 60; // 24 hours
-
-// ── Redis client (lazy) ──────────────────────────────────────────────────
+const WINDOW_SECONDS = 24 * 60 * 60;
 
 function getRedisClient() {
   try {
     const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
     const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
     if (!url || !token) return null;
-    // Dynamic import to avoid loading Redis in edge contexts that don't need it
     const { Redis } = require('@upstash/redis');
     return new Redis({ url, token }) as {
       incrby(key: string, delta: number): Promise<number>;
@@ -52,8 +49,6 @@ function getRedisClient() {
   }
 }
 
-// ── Supabase fallback ────────────────────────────────────────────────────
-
 async function getSupabaseTokenCount(key: string): Promise<number> {
   try {
     const { supabaseSelect } = await import('@/lib/supabase-rest');
@@ -64,7 +59,6 @@ async function getSupabaseTokenCount(key: string): Promise<number> {
     }).catch(() => []);
     const row = rows[0];
     if (!row) return 0;
-    // Expire stale counters (>24h)
     const updated = Date.parse(row.updated_at);
     if (!Number.isFinite(updated) || Date.now() - updated > WINDOW_SECONDS * 1000) return 0;
     return Number(row.value) || 0;
@@ -90,6 +84,7 @@ async function incrSupabaseTokenCount(key: string, delta: number): Promise<numbe
       return Number(row.value) || 0;
     })();
     const next = current + delta;
+
     if (row) {
       await supabaseUpdate('app_state', { value: String(next), updated_at: now }, [
         { column: 'key', value: key },
@@ -97,40 +92,70 @@ async function incrSupabaseTokenCount(key: string, delta: number): Promise<numbe
     } else {
       await supabaseInsert('app_state', { key, value: String(next), updated_at: now }).catch(() => {});
     }
+
     return next;
   } catch {
     return 0;
   }
 }
 
-// ── Public API ───────────────────────────────────────────────────────────
-
 export interface TokenBudgetResult {
   allowed: boolean;
-  /** Approximate tokens remaining in the current window (may be stale under high concurrency). */
   remaining: number;
-  /** Tokens requested for this call. */
   requested: number;
-  /** Budget limit that was checked. */
   limit: number;
-  /** Reason code when not allowed. */
   reason?: 'per-request-cap' | 'school-daily-budget' | 'global-daily-budget';
 }
 
-/**
- * Check and decrement the AI token budget for a given school.
- * Call BEFORE making the AI request.
- *
- * @param schoolId  Optional; if absent, only the global budget is checked.
- * @param requestedTokens  Estimated upper-bound tokens for the request.
- */
-export async function checkAiTokenBudget(input: {
+export interface TokenBudgetInput {
+  context?: { schoolId?: string | null } | null;
+  endpoint?: string;
+  projectedInputText?: string;
+  projectedOutputTokens?: number;
   schoolId?: string | null;
-  requestedTokens: number;
-}): Promise<TokenBudgetResult> {
-  const { schoolId, requestedTokens } = input;
+  requestedTokens?: number;
+}
 
-  // 1. Hard per-request cap
+function estimateTokens(text: string): number {
+  const normalized = String(text || '').trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.round(normalized.length / 4));
+}
+
+function toStrictTokenInt(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  if (n < 0) return 0;
+  return Math.floor(n);
+}
+
+function resolveRequestedTokens(input: TokenBudgetInput): number {
+  const direct = toStrictTokenInt(input.requestedTokens);
+  if (direct !== null && direct > 0) return direct;
+
+  const projectedInput = estimateTokens(input.projectedInputText || '');
+  const projectedOutput = toStrictTokenInt(input.projectedOutputTokens) ?? 0;
+  return Math.max(1, projectedInput + projectedOutput);
+}
+
+function resolveSchoolId(input: TokenBudgetInput): string | null {
+  const fromContext = input.context?.schoolId;
+  if (typeof fromContext === 'string' && fromContext.trim().length > 0) return fromContext.trim();
+  if (typeof input.schoolId === 'string' && input.schoolId.trim().length > 0) return input.schoolId.trim();
+  return null;
+}
+
+/**
+ * Check and consume token budget before AI invocation.
+ *
+ * Accepts either:
+ *   A) rich route shape: { context, endpoint, projectedInputText, projectedOutputTokens }
+ *   B) legacy shape: { schoolId, requestedTokens }
+ */
+export async function checkAiTokenBudget(input: TokenBudgetInput): Promise<TokenBudgetResult> {
+  const schoolId = resolveSchoolId(input);
+  const requestedTokens = resolveRequestedTokens(input);
+
   if (requestedTokens > MAX_TOKENS_PER_REQUEST) {
     return {
       allowed: false,
@@ -141,108 +166,92 @@ export async function checkAiTokenBudget(input: {
     };
   }
 
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const today = new Date().toISOString().slice(0, 10);
   const schoolKey = schoolId ? `ai:tokens:school:${schoolId}:${today}` : null;
   const globalKey = `ai:tokens:global:${today}`;
+  const delta = Math.max(1, Math.floor(requestedTokens));
 
   try {
     const redis = getRedisClient();
-
     if (redis) {
-      // ── Redis path (atomic) ─────────────────────────────────────────
-      const pipeline: Array<Promise<unknown>> = [];
-
+      let schoolRemaining = DAILY_BUDGET_GLOBAL;
       if (schoolKey) {
-        const schoolTotal = await redis.incrby(schoolKey, requestedTokens);
-        await redis.expire(schoolKey, WINDOW_SECONDS + 3600); // +1h grace
+        const schoolTotal = await redis.incrby(schoolKey, delta);
+        await redis.expire(schoolKey, WINDOW_SECONDS + 3600);
+
         if (schoolTotal > DAILY_BUDGET_PER_SCHOOL) {
           return {
             allowed: false,
             remaining: 0,
-            requested: requestedTokens,
+            requested: delta,
             limit: DAILY_BUDGET_PER_SCHOOL,
             reason: 'school-daily-budget',
           };
         }
-        const schoolRemaining = Math.max(0, DAILY_BUDGET_PER_SCHOOL - schoolTotal);
-        // Global check
-        const globalTotal = await redis.incrby(globalKey, requestedTokens);
-        await redis.expire(globalKey, WINDOW_SECONDS + 3600);
-        if (globalTotal > DAILY_BUDGET_GLOBAL) {
-          return {
-            allowed: false,
-            remaining: 0,
-            requested: requestedTokens,
-            limit: DAILY_BUDGET_GLOBAL,
-            reason: 'global-daily-budget',
-          };
-        }
-        return {
-          allowed: true,
-          remaining: Math.min(schoolRemaining, Math.max(0, DAILY_BUDGET_GLOBAL - globalTotal)),
-          requested: requestedTokens,
-          limit: DAILY_BUDGET_PER_SCHOOL,
-        };
-      } else {
-        const globalTotal = await redis.incrby(globalKey, requestedTokens);
-        await redis.expire(globalKey, WINDOW_SECONDS + 3600);
-        if (globalTotal > DAILY_BUDGET_GLOBAL) {
-          return {
-            allowed: false,
-            remaining: 0,
-            requested: requestedTokens,
-            limit: DAILY_BUDGET_GLOBAL,
-            reason: 'global-daily-budget',
-          };
-        }
-        return {
-          allowed: true,
-          remaining: Math.max(0, DAILY_BUDGET_GLOBAL - globalTotal),
-          requested: requestedTokens,
-          limit: DAILY_BUDGET_GLOBAL,
-        };
+        schoolRemaining = Math.max(0, DAILY_BUDGET_PER_SCHOOL - schoolTotal);
       }
-      void pipeline; // suppress unused warning
-    } else {
-      // ── Supabase fallback ────────────────────────────────────────────
-      if (schoolKey) {
-        const schoolCurrent = await getSupabaseTokenCount(schoolKey);
-        if (schoolCurrent + requestedTokens > DAILY_BUDGET_PER_SCHOOL) {
-          return {
-            allowed: false,
-            remaining: 0,
-            requested: requestedTokens,
-            limit: DAILY_BUDGET_PER_SCHOOL,
-            reason: 'school-daily-budget',
-          };
-        }
-        await incrSupabaseTokenCount(schoolKey, requestedTokens);
-      }
-      const globalCurrent = await getSupabaseTokenCount(globalKey);
-      if (globalCurrent + requestedTokens > DAILY_BUDGET_GLOBAL) {
+
+      const globalTotal = await redis.incrby(globalKey, delta);
+      await redis.expire(globalKey, WINDOW_SECONDS + 3600);
+      if (globalTotal > DAILY_BUDGET_GLOBAL) {
         return {
           allowed: false,
           remaining: 0,
-          requested: requestedTokens,
+          requested: delta,
           limit: DAILY_BUDGET_GLOBAL,
           reason: 'global-daily-budget',
         };
       }
-      await incrSupabaseTokenCount(globalKey, requestedTokens);
+
       return {
         allowed: true,
-        remaining: Math.max(0, DAILY_BUDGET_GLOBAL - globalCurrent - requestedTokens),
-        requested: requestedTokens,
-        limit: DAILY_BUDGET_GLOBAL,
+        remaining: Math.min(schoolRemaining, Math.max(0, DAILY_BUDGET_GLOBAL - globalTotal)),
+        requested: delta,
+        limit: schoolKey ? DAILY_BUDGET_PER_SCHOOL : DAILY_BUDGET_GLOBAL,
       };
     }
+
+    if (schoolKey) {
+      const schoolCurrent = await getSupabaseTokenCount(schoolKey);
+      if (schoolCurrent + delta > DAILY_BUDGET_PER_SCHOOL) {
+        return {
+          allowed: false,
+          remaining: 0,
+          requested: delta,
+          limit: DAILY_BUDGET_PER_SCHOOL,
+          reason: 'school-daily-budget',
+        };
+      }
+      await incrSupabaseTokenCount(schoolKey, delta);
+    }
+
+    const globalCurrent = await getSupabaseTokenCount(globalKey);
+    if (globalCurrent + delta > DAILY_BUDGET_GLOBAL) {
+      return {
+        allowed: false,
+        remaining: 0,
+        requested: delta,
+        limit: DAILY_BUDGET_GLOBAL,
+        reason: 'global-daily-budget',
+      };
+    }
+    await incrSupabaseTokenCount(globalKey, delta);
+
+    return {
+      allowed: true,
+      remaining: Math.max(0, DAILY_BUDGET_GLOBAL - globalCurrent - delta),
+      requested: delta,
+      limit: DAILY_BUDGET_GLOBAL,
+    };
   } catch (err) {
-    // Fail-open: if budget tracking fails, allow the request but log it
-    logger.warn({ err, schoolId }, 'AI token budget check failed — failing open');
+    logger.warn(
+      { err, schoolId, endpoint: input.endpoint, requestedTokens: delta },
+      'AI token budget check failed; failing open'
+    );
     return {
       allowed: true,
       remaining: MAX_TOKENS_PER_REQUEST,
-      requested: requestedTokens,
+      requested: delta,
       limit: MAX_TOKENS_PER_REQUEST,
     };
   }

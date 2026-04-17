@@ -1,8 +1,10 @@
-﻿import Link from 'next/link';
+import Link from 'next/link';
 import { ALL_CHAPTERS } from '@/lib/data';
+import type { Subject } from '@/lib/data';
+import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { chapterNotesSlug, slugify } from '@/lib/seo-notes';
 
-const chapters = ALL_CHAPTERS
+const allChapters = ALL_CHAPTERS
   .filter((chapter) => chapter.classLevel !== 11)
   .sort((a, b) => {
     if (a.classLevel !== b.classLevel) return a.classLevel - b.classLevel;
@@ -10,13 +12,21 @@ const chapters = ALL_CHAPTERS
     return a.chapterNumber - b.chapterNumber;
   });
 
+export const dynamic = 'force-dynamic';
+
 export const metadata = {
   title: 'CBSE Notes by Chapter | VidyaPath',
   description:
     'Class 10 and Class 12 CBSE chapter-wise notes, high-yield topics, PYQ trends, formula focus, and revision strategy.',
 };
 
-export default function CbseNotesIndexPage() {
+export default async function CbseNotesIndexPage() {
+  const studentSession = await getStudentSessionFromRequestCookies().catch(() => null);
+  const enrolledSubjectSet = studentSession?.studentId
+    ? new Set<Subject>((studentSession.enrolledSubjects ?? []).filter((item): item is Subject => typeof item === 'string'))
+    : null;
+  const chapters = allChapters.filter((chapter) => !enrolledSubjectSet || enrolledSubjectSet.has(chapter.subject));
+
   return (
     <div className="min-h-screen bg-[#FDFAF6]">
       <div className="bg-gradient-to-br from-sky-700 to-indigo-700 text-white px-4 py-12">
@@ -29,6 +39,11 @@ export default function CbseNotesIndexPage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-8">
+        {studentSession?.studentId && (
+          <p className="mb-4 text-xs font-semibold text-indigo-700">
+            Showing only your enrolled subjects: {(studentSession.enrolledSubjects ?? []).join(', ') || 'None assigned yet'}.
+          </p>
+        )}
         <div className="grid md:grid-cols-2 gap-4">
           {chapters.map((chapter) => {
             const subjectSlug = slugify(chapter.subject);
@@ -45,7 +60,7 @@ export default function CbseNotesIndexPage() {
                 </p>
                 <h2 className="font-fraunces text-lg font-bold text-navy-700 mt-1">{chapter.title}</h2>
                 <p className="text-sm text-[#5C5870] mt-1 line-clamp-2">{chapter.description}</p>
-              <p className="text-xs text-indigo-700 font-semibold mt-3">Open notes</p>
+                <p className="text-xs text-indigo-700 font-semibold mt-3">Open notes</p>
               </Link>
             );
           })}
@@ -54,5 +69,3 @@ export default function CbseNotesIndexPage() {
     </div>
   );
 }
-
-

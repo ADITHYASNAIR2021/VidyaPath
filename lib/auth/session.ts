@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { NextResponse } from 'next/server';
+import { normalizeAcademicStream, type AcademicStream } from '@/lib/academic-taxonomy';
 
 export const ADMIN_SESSION_COOKIE = 'vp_admin_session';
 export const TEACHER_SESSION_COOKIE = 'vp_teacher_session';
@@ -43,7 +44,7 @@ export interface StudentSession {
   schoolCode?: string;
   batch?: string;
   mustChangePassword?: boolean;
-  stream?: 'Science' | 'Commerce' | 'Humanities';
+  stream?: AcademicStream;
   enrolledSubjects?: string[];
   issuedAt: number;
   expiresAt: number;
@@ -117,9 +118,13 @@ function verifyToken(token: string): SessionPayload | null {
       typeof parsed.rollCode === 'string' &&
       parsed.rollCode.trim() &&
       (parsed.classLevel === 10 || parsed.classLevel === 12) &&
+      (parsed.stream === undefined || !!normalizeAcademicStream(parsed.stream)) &&
       (parsed.mustChangePassword === undefined || typeof parsed.mustChangePassword === 'boolean')
     ) {
-      return parsed;
+      return {
+        ...parsed,
+        stream: normalizeAcademicStream(parsed.stream),
+      };
     }
     return null;
   } catch {
@@ -167,7 +172,7 @@ export function createStudentSessionToken(
     schoolCode?: string;
     batch?: string;
     mustChangePassword?: boolean;
-    stream?: 'Science' | 'Commerce' | 'Humanities';
+    stream?: AcademicStream;
     enrolledSubjects?: string[];
   },
   ttlSeconds = DEFAULT_TTL_SECONDS
@@ -184,7 +189,7 @@ export function createStudentSessionToken(
     schoolCode: student.schoolCode,
     batch: student.batch,
     mustChangePassword: student.mustChangePassword === true,
-    stream: student.stream,
+    stream: normalizeAcademicStream(student.stream),
     enrolledSubjects: Array.isArray(student.enrolledSubjects) ? student.enrolledSubjects : undefined,
     issuedAt,
     expiresAt: issuedAt + ttlSeconds * 1000,

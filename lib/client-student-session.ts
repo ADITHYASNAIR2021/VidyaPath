@@ -1,6 +1,7 @@
 'use client';
 
 import type { Subject } from '@/lib/data';
+import { normalizeAcademicStream, type AcademicStream } from '@/lib/academic-taxonomy';
 
 export interface ClientStudentSession {
   studentId?: string;
@@ -9,7 +10,7 @@ export interface ClientStudentSession {
   section?: string;
   batch?: string;
   mustChangePassword?: boolean;
-  stream?: 'Science' | 'Commerce' | 'Humanities';
+  stream?: AcademicStream;
   enrolledSubjects: Subject[];
 }
 
@@ -54,10 +55,7 @@ export async function fetchClientStudentSession(): Promise<ClientStudentSession 
     section: typeof data.section === 'string' ? data.section.trim() || undefined : undefined,
     batch: typeof data.batch === 'string' ? data.batch.trim() || undefined : undefined,
     mustChangePassword: data.mustChangePassword === true,
-    stream:
-      data.stream === 'Science' || data.stream === 'Commerce' || data.stream === 'Humanities'
-        ? data.stream
-        : undefined,
+    stream: normalizeAcademicStream(data.stream),
     enrolledSubjects,
   };
 }

@@ -286,10 +286,11 @@ export async function POST(req: NextRequest) {
       endpoint: '/api/teacher/ai',
       provider: generated.provider,
       model: generated.model,
-      promptText: user,
-      completionText: generated.text,
+      promptTokens: generated.usage?.promptTokens,
+      completionTokens: generated.usage?.completionTokens,
+      totalTokens: generated.usage?.totalTokens,
       requestId,
-      estimated: true,
+      estimated: !generated.usage,
     });
 
     logServerEvent({

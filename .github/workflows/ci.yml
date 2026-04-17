@@ -5,16 +5,30 @@
 #     branches:
 #       - main
 #       - master
+#       - 'release/**'
 #   pull_request:
 
 # jobs:
 #   quality:
-#     name: Type-check · Lint · Test
+#     name: Typecheck, Lint, Tests, Guards
 #     runs-on: ubuntu-latest
+#     timeout-minutes: 25
+#     env:
+#       NODE_ENV: test
+#       SESSION_SIGNING_SECRET: ci-session-signing-secret-32chars-minimum-0001
+#       ADMIN_PORTAL_KEY: ci-admin-key
+#       TEACHER_PORTAL_KEY: ci-teacher-key
+#       DEVELOPER_USERNAME: ci-developer
+#       DEVELOPER_PASSWORD: ci-developer-password
+#       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+#       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+#       SUPABASE_SERVICE_ROLE_KEY: ci-service-key
 #     steps:
-#       - uses: actions/checkout@v4
+#       - name: Checkout
+#         uses: actions/checkout@v4
 
-#       - uses: actions/setup-node@v4
+#       - name: Setup Node
+#         uses: actions/setup-node@v4
 #         with:
 #           node-version: 20
 #           cache: npm
@@ -22,27 +36,34 @@
 #       - name: Install dependencies
 #         run: npm ci
 
-#       - name: TypeScript — check
+#       - name: Type check
 #         run: npm run typecheck
 
-#       - name: ESLint — check
-#         run: npm run lint
+#       - name: Lint
+#         run: npm run lint:strict
 
-#       - name: Vitest — unit tests
+#       - name: Unit tests
 #         run: npm run test
-#         env:
-#           NODE_ENV: test
 
-#       - name: Security guards smoke-test
+#       - name: Security guards
 #         run: npm run test:security-guards
 
-#   audit:
-#     name: Dependency audit
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v4
+#       - name: Route and URL integrity
+#         run: npm run check:route-links
 
-#       - uses: actions/setup-node@v4
+#       - name: Supabase migration lint
+#         run: npm run db:lint
+
+#   audit:
+#     name: Dependency Audit (prod)
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 10
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
+
+#       - name: Setup Node
+#         uses: actions/setup-node@v4
 #         with:
 #           node-version: 20
 #           cache: npm
@@ -50,18 +71,31 @@
 #       - name: Install dependencies
 #         run: npm ci
 
-#       - name: npm audit (production deps, high+)
+#       - name: npm audit
 #         run: npm audit --omit=dev --audit-level=high
 
 #   build-check:
-#     name: Next.js build check
+#     name: Build Check
 #     runs-on: ubuntu-latest
-#     # Only run on PRs targeting main to avoid unnecessary builds on pushes
-#     if: github.event_name == 'pull_request'
+#     timeout-minutes: 20
+#     env:
+#       NODE_ENV: production
+#       SESSION_SIGNING_SECRET: ci-build-session-signing-secret-32chars-min
+#       ADMIN_PORTAL_KEY: ci-admin-key
+#       TEACHER_PORTAL_KEY: ci-teacher-key
+#       DEVELOPER_USERNAME: ci-developer
+#       DEVELOPER_PASSWORD: ci-developer-password
+#       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+#       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+#       SUPABASE_SERVICE_ROLE_KEY: ci-service-key
+#       NEXT_PUBLIC_APP_URL: https://example.com
+#       STRICT_ENV_VALIDATION: '0'
 #     steps:
-#       - uses: actions/checkout@v4
+#       - name: Checkout
+#         uses: actions/checkout@v4
 
-#       - uses: actions/setup-node@v4
+#       - name: Setup Node
+#         uses: actions/setup-node@v4
 #         with:
 #           node-version: 20
 #           cache: npm
@@ -69,13 +103,5 @@
 #       - name: Install dependencies
 #         run: npm ci
 
-#       - name: Build (dry-run — validates compilation)
+#       - name: Build
 #         run: npm run build
-#         env:
-#           SESSION_SIGNING_SECRET: ci-build-only-secret-not-real
-#           TEACHER_PORTAL_KEY: ci-build-only
-#           ADMIN_PORTAL_KEY: ci-build-only
-#           GROQ_API_KEY: ci-build-only
-#           GEMINI_API_KEY: ci-build-only
-#           # Ensure no Supabase calls during build-time
-#           SKIP_ENV_VALIDATION: '1'

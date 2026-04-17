@@ -6,6 +6,7 @@
 import { z } from 'zod';
 
 const classLevel = z.union([z.literal(10), z.literal(12)]);
+const academicStream = z.enum(['foundation', 'pcm', 'pcb', 'commerce', 'interdisciplinary']);
 const sectionField = z.string().trim().max(40).optional();
 const phoneField = z.string().trim().min(1).max(20);
 const uuidField = z.string().trim().min(1).max(120);
@@ -60,12 +61,31 @@ export type ResetPinInput = z.infer<typeof resetPinSchema>;
 export const createStudentSchema = z.object({
   name: z.string().trim().min(1).max(120),
   classLevel,
+  stream: academicStream.optional(),
   section: sectionField,
   batch: z.string().trim().max(40).optional(),
   rollNo: z.string().trim().max(50).optional(),
   rollCode: z.string().trim().max(40).optional(),
   pin: z.string().trim().max(12).optional(),
   schoolId: uuidField.optional(),
+}).superRefine((value, ctx) => {
+  if (value.classLevel === 10) {
+    if (value.stream && value.stream !== 'foundation') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stream'],
+        message: 'Class 10 stream must be foundation.',
+      });
+    }
+    return;
+  }
+  if (!value.stream || value.stream === 'foundation') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['stream'],
+      message: 'Class 12 stream is required: pcm, pcb, commerce, or interdisciplinary.',
+    });
+  }
 });
 export type CreateStudentInput = z.infer<typeof createStudentSchema>;
 
@@ -73,6 +93,21 @@ export const updateStudentSchema = createStudentSchema.partial().extend({
   rollCode: z.string().trim().max(40).optional(),
   status: z.enum(['active', 'inactive']).optional(),
   mustChangePassword: z.boolean().optional(),
+}).superRefine((value, ctx) => {
+  if (value.classLevel === 10 && value.stream && value.stream !== 'foundation') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['stream'],
+      message: 'Class 10 stream must be foundation.',
+    });
+  }
+  if (value.classLevel === 12 && (!value.stream || value.stream === 'foundation')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['stream'],
+      message: 'Class 12 stream is required when classLevel is updated to 12.',
+    });
+  }
 });
 export type UpdateStudentInput = z.infer<typeof updateStudentSchema>;
 
@@ -129,6 +164,7 @@ const rosterRow = z.object({
   section: z.string().trim().max(40).optional(),
   batch: z.string().trim().max(40).optional(),
   classLevel: classLevel.optional(),
+  stream: academicStream.optional(),
   pin: z.string().trim().max(12).optional(),
 });
 

@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { CLASS_BRANCH_CONFIG, isSupportedSubject, type SupportedSubject } from '@/lib/academic-taxonomy';
+import {
+  enforceAcademicStreamForClass,
+  getSubjectsForAcademicTrack,
+  normalizeAcademicStream,
+  isSupportedSubject,
+  type AcademicStream,
+  type SupportedSubject,
+} from '@/lib/academic-taxonomy';
 import { getChapterById } from '@/lib/data';
 import { isSupabaseServiceConfigured, supabaseInsert, supabaseSelect, supabaseUpdate } from '@/lib/supabase-rest';
 
@@ -123,8 +130,8 @@ function toClassSectionView(
   };
 }
 
-function getDefaultSubjectsForClass(classLevel: 10 | 12): SupportedSubject[] {
-  return [...CLASS_BRANCH_CONFIG[classLevel].subjects];
+function getDefaultSubjectsForClass(classLevel: 10 | 12, stream?: AcademicStream): SupportedSubject[] {
+  return getSubjectsForAcademicTrack(classLevel, stream);
 }
 
 async function getTeacherNameMap(schoolId: string): Promise<Map<string, string>> {
@@ -504,12 +511,18 @@ export async function ensureDefaultEnrollmentsForStudent(input: {
   studentId: string;
   classLevel: 10 | 12;
   classSectionId?: string;
+  stream?: AcademicStream;
+  replaceExisting?: boolean;
 }): Promise<void> {
   if (!isSupabaseServiceConfigured()) return;
   const schoolId = sanitizeId(input.schoolId);
   const studentId = sanitizeId(input.studentId);
   if (!schoolId || !studentId) return;
-  const defaults = getDefaultSubjectsForClass(input.classLevel);
+  const stream = input.classLevel === 10
+    ? 'foundation'
+    : enforceAcademicStreamForClass(input.classLevel, normalizeAcademicStream(input.stream));
+  const defaults = getDefaultSubjectsForClass(input.classLevel, stream);
+  const defaultsSet = new Set(defaults);
   const existing = await supabaseSelect<StudentSubjectEnrollmentRow>(TABLES.studentSubjectEnrollments, {
     select: '*',
     filters: [{ column: 'school_id', value: schoolId }, { column: 'student_id', value: studentId }],
@@ -537,6 +550,18 @@ export async function ensureDefaultEnrollmentsForStudent(input: {
       status: 'active',
     }).catch(() => undefined);
   }
+
+  if (input.replaceExisting === true) {
+    for (const row of existing) {
+      if (row.status !== 'active') continue;
+      if (defaultsSet.has(row.subject)) continue;
+      await supabaseUpdate<StudentSubjectEnrollmentRow>(
+        TABLES.studentSubjectEnrollments,
+        { status: 'inactive' },
+        [{ column: 'id', value: row.id }]
+      ).catch(() => undefined);
+    }
+  }
 }
 
 export async function getStudentEnrolledSubjects(
@@ -562,13 +587,31 @@ export async function getStudentEnrolledSubjects(
   return subjects;
 }
 
-export function deriveStudentStream(subjects: SupportedSubject[], classLevel: 10 | 12): 'Science' | 'Commerce' | 'Humanities' {
+export function deriveStudentStream(
+  subjects: SupportedSubject[],
+  classLevel: 10 | 12,
+  explicitStream?: AcademicStream
+): AcademicStream {
+  if (classLevel === 10) return 'foundation';
+  const normalizedExplicit = normalizeAcademicStream(explicitStream);
+  if (normalizedExplicit && normalizedExplicit !== 'foundation') return normalizedExplicit;
+
   const set = new Set(subjects);
+  const hasPhysics = set.has('Physics');
+  const hasChemistry = set.has('Chemistry');
+  const hasBiology = set.has('Biology');
+  const hasMath = set.has('Math');
   const hasCommerce = ['Accountancy', 'Business Studies', 'Economics'].some((item) => set.has(item as SupportedSubject));
-  const hasScience = ['Physics', 'Chemistry', 'Biology', 'Math'].some((item) => set.has(item as SupportedSubject));
-  if (hasCommerce) return 'Commerce';
-  if (hasScience || classLevel === 10) return 'Science';
-  return 'Humanities';
+  const hasCoreScience = hasPhysics && hasChemistry;
+
+  if (hasCommerce && !(hasMath || hasBiology || hasCoreScience)) return 'commerce';
+  if (hasCoreScience && hasMath && !hasBiology && !hasCommerce) return 'pcm';
+  if (hasCoreScience && hasBiology && !hasMath && !hasCommerce) return 'pcb';
+  if (hasCoreScience && hasMath && hasBiology && !hasCommerce) return 'interdisciplinary';
+  if (hasCommerce) return 'commerce';
+  if (hasCoreScience && hasMath) return 'pcm';
+  if (hasCoreScience && hasBiology) return 'pcb';
+  return 'interdisciplinary';
 }
 
 export async function studentCanAccessSubject(input: {

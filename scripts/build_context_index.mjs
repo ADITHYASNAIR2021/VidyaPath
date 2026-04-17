@@ -223,6 +223,7 @@ function build() {
     chaptersWithoutPyq: [],
     chaptersWithoutResolvedSource: [],
     chapterChunkCounts: {},
+    fallbackSubjectChunks: 0,
   };
   let chunkCounter = 1;
 
@@ -255,6 +256,7 @@ function build() {
         id: `ctx-node-${String(chunkCounter).padStart(7, '0')}`,
         text: buildSnippet(chapter, pyq, year, resolved.sourcePath, resolved.paperType),
         sourcePath: resolved.sourcePath,
+        sourceType: 'paper',
         classLevel: chapter.classLevel,
         subject: normalizeSubject(chapter.classLevel, chapter.subject),
         chapterId: chapter.id,
@@ -271,6 +273,62 @@ function build() {
       diagnostics.chaptersWithoutResolvedSource.push(chapter.id);
     }
     showProgress('Building context', index + 1, chapters.length);
+  }
+
+  const usedSourcePaths = new Set(chunks.map((chunk) => chunk.sourcePath));
+  const subjectYearSeen = new Set();
+  const sortedHfEntries = Object.entries(hfIndex).sort((a, b) => {
+    const [aPaperType, aYear, aClass, aSubject = ''] = a[0].split('|');
+    const [bPaperType, bYear, bClass, bSubject = ''] = b[0].split('|');
+    const classDelta = Number(aClass) - Number(bClass);
+    if (classDelta !== 0) return classDelta;
+    const subjectDelta = String(aSubject).localeCompare(String(bSubject));
+    if (subjectDelta !== 0) return subjectDelta;
+    const yearDelta = Number(bYear) - Number(aYear);
+    if (yearDelta !== 0) return yearDelta;
+    return String(aPaperType).localeCompare(String(bPaperType));
+  });
+
+  for (const [key, sourcePath] of sortedHfEntries) {
+    const [paperType, yearRaw, classRaw, subjectRaw = '', variant = 'default'] = key.split('|');
+    const classLevel = Number(classRaw);
+    const year = Number(yearRaw);
+    if (!Number.isFinite(classLevel) || !Number.isFinite(year)) continue;
+    if (!sourcePath || typeof sourcePath !== 'string') continue;
+
+    const subject = normalizeSubject(classLevel, subjectRaw);
+    const subjectKey = `${classLevel}|${subject}`;
+    if (!subjectSources[subjectKey]) subjectSources[subjectKey] = [];
+    if (!subjectSources[subjectKey].includes(sourcePath) && subjectSources[subjectKey].length < 200) {
+      subjectSources[subjectKey].push(sourcePath);
+    }
+
+    const subjectYearKey = `${classLevel}|${subject}|${paperType}|${year}`;
+    if (subjectYearSeen.has(subjectYearKey)) continue;
+    subjectYearSeen.add(subjectYearKey);
+
+    if (usedSourcePaths.has(sourcePath)) continue;
+    usedSourcePaths.add(sourcePath);
+
+    chunks.push({
+      id: `ctx-node-${String(chunkCounter).padStart(7, '0')}`,
+      text: [
+        `Class ${classLevel} ${subject} paper source for board-style retrieval.`,
+        `Year ${year}, paper type ${paperType}, variant ${variant}, archived in the local CBSE corpus.`,
+        `Use this source to ground exam pattern, question framing, marking language, and chapter-weight trend hints when direct chapter mapping is unavailable.`,
+        `Fallback source path: ${sourcePath}.`,
+        `This synthetic chunk exists so every subject/year bucket remains indexed even when chapter-level keyword mapping is incomplete.`,
+      ].join(' '),
+      sourcePath,
+      sourceType: 'paper',
+      classLevel,
+      subject,
+      chapterId: null,
+      year,
+      paperType,
+    });
+    diagnostics.fallbackSubjectChunks += 1;
+    chunkCounter += 1;
   }
 
   if (chapters.length === 0) {
@@ -302,11 +360,13 @@ function build() {
         stats: {
           chunks: chunks.length,
           chapters: Object.keys(chapterSources).length,
+          subjectBuckets: Object.keys(subjectSources).length,
           parsedChapters: diagnostics.parsedChapters,
           parsedPyqEntries: diagnostics.parsedPyqEntries,
           hfIndexKeys: diagnostics.hfIndexKeys,
           chaptersWithoutPyq: diagnostics.chaptersWithoutPyq.length,
           chaptersWithoutResolvedSource: diagnostics.chaptersWithoutResolvedSource.length,
+          fallbackSubjectChunks: diagnostics.fallbackSubjectChunks,
         },
         diagnostics,
       },

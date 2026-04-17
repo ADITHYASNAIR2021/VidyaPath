@@ -27,6 +27,7 @@ export default function AdminStudentsPage() {
     rollNo: '',
     batch: '',
     classLevel: 12 as 10 | 12,
+    stream: 'pcm' as 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary',
     section: '',
     pin: '',
   });
@@ -83,7 +84,15 @@ export default function AdminStudentsPage() {
         password: String(credentials?.password || ''),
       });
       setShowCreate(false);
-      setNewStudent({ name: '', rollNo: '', batch: '', classLevel: 12, section: '', pin: '' });
+      setNewStudent({
+        name: '',
+        rollNo: '',
+        batch: '',
+        classLevel: 12,
+        stream: 'pcm',
+        section: '',
+        pin: '',
+      });
       await load();
     } catch {
       setError('Failed to add student.');
@@ -159,10 +168,44 @@ export default function AdminStudentsPage() {
             <input value="" disabled placeholder="Login ID auto-generated" className="rounded-xl border border-gray-200 bg-gray-100 px-3 py-2 text-sm text-gray-500" />
             <input value={newStudent.rollNo} onChange={(e) => setNewStudent((p) => ({ ...p, rollNo: e.target.value }))} placeholder="Roll number (optional)" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             <input type="password" value={newStudent.pin} onChange={(e) => setNewStudent((p) => ({ ...p, pin: e.target.value }))} placeholder="PIN (optional)" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
-            <select value={newStudent.classLevel} onChange={(e) => setNewStudent((p) => ({ ...p, classLevel: Number(e.target.value) as 10 | 12 }))} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
+            <select
+              value={newStudent.classLevel}
+              onChange={(e) => {
+                const classLevel = Number(e.target.value) as 10 | 12;
+                setNewStudent((p) => ({
+                  ...p,
+                  classLevel,
+                  stream: classLevel === 10 ? 'foundation' : (p.stream === 'foundation' ? 'pcm' : p.stream),
+                }));
+              }}
+              className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+            >
               <option value={10}>Class 10</option>
               <option value={12}>Class 12</option>
             </select>
+            {newStudent.classLevel === 12 ? (
+              <select
+                value={newStudent.stream}
+                onChange={(e) =>
+                  setNewStudent((p) => ({
+                    ...p,
+                    stream: e.target.value as 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary',
+                  }))
+                }
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+              >
+                <option value="pcm">Stream: PCM</option>
+                <option value="pcb">Stream: PCB</option>
+                <option value="commerce">Stream: Commerce</option>
+                <option value="interdisciplinary">Stream: Interdisciplinary</option>
+              </select>
+            ) : (
+              <input
+                value="Foundation"
+                disabled
+                className="rounded-xl border border-gray-200 bg-gray-100 px-3 py-2 text-sm text-gray-500"
+              />
+            )}
             <input value={newStudent.section} onChange={(e) => setNewStudent((p) => ({ ...p, section: e.target.value }))} placeholder="Section (e.g. A)" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             <input value={newStudent.batch} onChange={(e) => setNewStudent((p) => ({ ...p, batch: e.target.value }))} placeholder="Batch (optional)" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
           </div>

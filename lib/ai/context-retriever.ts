@@ -26,6 +26,11 @@ interface ContextChunk {
   sourcePath: string;
   classLevel: number;
   subject: string;
+  sourceType?: 'paper' | 'textbook';
+  medium?: string;
+  language?: string;
+  chapterTitle?: string;
+  chapterNumber?: number;
   chapterId?: string | null;
   year?: number;
   paperType?: PaperType;
@@ -50,6 +55,9 @@ export interface ContextSnippet {
   sourcePath: string;
   classLevel: number;
   subject: string;
+  sourceType?: 'paper' | 'textbook';
+  medium?: string;
+  language?: string;
   chapterId?: string;
   year?: number;
   paperType?: PaperType;
@@ -70,21 +78,30 @@ export interface ContextPack {
   snippets: ContextSnippet[];
   contextHash: string;
   usedOnDemandFallback: boolean;
+  usedPgvector: boolean;
 }
 
 const CONTEXT_DIR = path.join(process.cwd(), 'lib', 'context');
-const CHUNKS_PATH = path.join(CONTEXT_DIR, 'chunks.jsonl');
-const INDEX_PATH = path.join(CONTEXT_DIR, 'chapter_index.json');
+const CHUNK_PATHS = [
+  path.join(CONTEXT_DIR, 'chunks.jsonl'),
+  path.join(CONTEXT_DIR, 'textbook_chunks.jsonl'),
+];
+const INDEX_PATHS = [
+  path.join(CONTEXT_DIR, 'chapter_index.json'),
+  path.join(CONTEXT_DIR, 'textbook_chapter_index.json'),
+];
 const DATASET_ROOT = path.join(process.cwd(), 'dataset', 'cbse_papers');
 const INDEX_SCRIPT = path.join(process.cwd(), 'scripts', 'build_context_index.py');
 const CACHE_TTL_MS = 45_000;
 const EMBEDDING_DIM = 192;
 const DEFAULT_NVIDIA_RERANK_MODEL = 'nvidia/llama-nemotron-rerank-1b-v2';
+const VECTOR_INDEX_PATH = path.join(CONTEXT_DIR, 'chunk_vectors.jsonl');
 
 let cacheLoadedAt = 0;
 let cachedChunks: ContextChunk[] = [];
 let cachedIndex: ChapterIndexPayload = {};
 const chunkEmbeddingCache = new Map<string, Float32Array>();
+const persistedEmbeddingCache = new Map<string, Float32Array>();
 
 function normalizeSubject(classLevel: number, subject: string): string {
   const s = subject.trim().toLowerCase();
@@ -104,9 +121,12 @@ function normalizeSubject(classLevel: number, subject: string): string {
 }
 
 function tokenize(text: string): string[] {
-  return (text.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter(
-    (token) => !['the', 'and', 'for', 'with', 'that', 'this', 'from', 'board', 'class', 'paper'].includes(token)
-  );
+  return (text.toLowerCase().match(/[a-z]{3,}|[\u0900-\u097f]{2,}/g) ?? []).filter((token) => {
+    if (/^[a-z]{3,}$/.test(token)) {
+      return !['the', 'and', 'for', 'with', 'that', 'this', 'from', 'board', 'class', 'paper'].includes(token);
+    }
+    return true;
+  });
 }
 
 function canonicalizeSourcePath(sourcePath: string): string {
@@ -178,17 +198,23 @@ function sanitizeChunkText(text: string): string {
     .replace(/section\s+[a-e]\s+questions?\s+no\.\s*\d+\s+to\s+\d+[^.!?]{0,220}/gi, ' ')
     .replace(/there is no overall choice[^.!?]{0,220}/gi, ' ')
     .replace(/use of calculators? is not allowed[^.!?]{0,80}/gi, ' ')
-    .replace(/[\u0900-\u097F]+/g, ' ')
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]+/g, ' ')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]+/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
 function getEnglishRatio(text: string): number {
   const englishTokens = text.match(/[a-zA-Z]{2,}/g) ?? [];
-  const allTokens = text.match(/[a-zA-Z0-9]+/g) ?? [];
+  const allTokens = text.match(/[a-zA-Z0-9\u0900-\u097F]+/g) ?? [];
   if (allTokens.length === 0) return 0;
   return englishTokens.length / allTokens.length;
+}
+
+function getDevanagariRatio(text: string): number {
+  const devanagariTokens = text.match(/[\u0900-\u097F]{2,}/g) ?? [];
+  const allTokens = text.match(/[a-zA-Z0-9\u0900-\u097F]+/g) ?? [];
+  if (allTokens.length === 0) return 0;
+  return devanagariTokens.length / allTokens.length;
 }
 
 function looksLikeInstructionChunk(text: string): boolean {
@@ -216,7 +242,9 @@ function looksLikeInstructionChunk(text: string): boolean {
 
 function isHighQualityChunk(text: string): boolean {
   if (!text || text.length < 220) return false;
-  if (getEnglishRatio(text) < 0.72) return false;
+  const englishRatio = getEnglishRatio(text);
+  const devanagariRatio = getDevanagariRatio(text);
+  if (englishRatio < 0.55 && devanagariRatio < 0.45) return false;
   if (looksLikeInstructionChunk(text)) return false;
   return true;
 }
@@ -230,20 +258,89 @@ function inferChapterIdFromSource(sourcePath: string): string | undefined {
   return undefined;
 }
 
+function normalizeChapterSourceMap(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object') return {};
+  const record = value as Record<string, unknown>;
+  const out: Record<string, string[]> = {};
+
+  for (const [chapterId, rawSources] of Object.entries(record)) {
+    if (!chapterId) continue;
+    if (Array.isArray(rawSources)) {
+      out[chapterId] = rawSources
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => canonicalizeSourcePath(item));
+      continue;
+    }
+    if (rawSources && typeof rawSources === 'object') {
+      const payload = rawSources as Record<string, unknown>;
+      const fromSources = Array.isArray(payload.sources)
+        ? payload.sources
+        : Array.isArray(payload.sourcePaths)
+          ? payload.sourcePaths
+          : [];
+      out[chapterId] = fromSources
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => canonicalizeSourcePath(item));
+    }
+  }
+  return out;
+}
+
+function normalizeSubjectSourceMap(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object') return {};
+  const record = value as Record<string, unknown>;
+  const out: Record<string, string[]> = {};
+  for (const [key, rawSources] of Object.entries(record)) {
+    if (!Array.isArray(rawSources)) continue;
+    out[key] = rawSources
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .map((item) => canonicalizeSourcePath(item));
+  }
+  return out;
+}
+
+function mergeIndexPayload(base: ChapterIndexPayload, incoming: ChapterIndexPayload): ChapterIndexPayload {
+  const mergedChapters = normalizeChapterSourceMap(base.chapters);
+  const incomingChapters = normalizeChapterSourceMap(incoming.chapters);
+  for (const [chapterId, sources] of Object.entries(incomingChapters)) {
+    const current = mergedChapters[chapterId] ?? [];
+    const deduped = new Set(current);
+    for (const source of sources) deduped.add(source);
+    mergedChapters[chapterId] = Array.from(deduped);
+  }
+
+  const mergedSubjectSources = normalizeSubjectSourceMap(base.sourcesBySubjectClass);
+  const incomingSubjectSources = normalizeSubjectSourceMap(incoming.sourcesBySubjectClass);
+  for (const [key, sources] of Object.entries(incomingSubjectSources)) {
+    const current = mergedSubjectSources[key] ?? [];
+    const deduped = new Set(current);
+    for (const source of sources) deduped.add(source);
+    mergedSubjectSources[key] = Array.from(deduped);
+  }
+
+  return {
+    ...base,
+    ...incoming,
+    chapters: mergedChapters,
+    sourcesBySubjectClass: mergedSubjectSources,
+  };
+}
+
 async function loadContextArtifacts(force = false): Promise<void> {
   const now = Date.now();
   if (!force && now - cacheLoadedAt < CACHE_TTL_MS) return;
   cacheLoadedAt = now;
 
   try {
-    const [chunksRaw, indexRaw] = await Promise.all([
-      fs.readFile(CHUNKS_PATH, 'utf-8').catch(() => ''),
-      fs.readFile(INDEX_PATH, 'utf-8').catch(() => '{}'),
+    const [chunkPayloads, indexPayloads, vectorPayload] = await Promise.all([
+      Promise.all(CHUNK_PATHS.map((chunkPath) => fs.readFile(chunkPath, 'utf-8').catch(() => ''))),
+      Promise.all(INDEX_PATHS.map((indexPath) => fs.readFile(indexPath, 'utf-8').catch(() => '{}'))),
+      fs.readFile(VECTOR_INDEX_PATH, 'utf-8').catch(() => ''),
     ]);
 
     const seen = new Set<string>();
-    cachedChunks = chunksRaw
-      .split('\n')
+    cachedChunks = chunkPayloads
+      .flatMap((payload) => payload.split('\n'))
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
@@ -257,28 +354,57 @@ async function loadContextArtifacts(force = false): Promise<void> {
         (entry): entry is ContextChunk =>
           !!entry &&
           typeof entry.text === 'string' &&
-          !!entry.sourcePath &&
-          typeof entry.chapterId === 'string' &&
-          entry.chapterId.trim().length > 0
+          typeof entry.sourcePath === 'string' &&
+          typeof entry.classLevel === 'number' &&
+          typeof entry.subject === 'string'
       )
-      .map((entry) => {
+      .map<ContextChunk>((entry) => {
         const cleanedText = sanitizeChunkText(entry.text);
+        const chapterId = typeof entry.chapterId === 'string' && entry.chapterId.trim().length > 0
+          ? entry.chapterId.trim()
+          : null;
+        const sourceType: 'paper' | 'textbook' = entry.sourceType === 'textbook' ? 'textbook' : 'paper';
         return {
           ...entry,
+          chapterId,
+          sourceType,
           sourcePath: canonicalizeSourcePath(entry.sourcePath),
           text: cleanedText,
         };
       })
       .filter((entry) => isHighQualityChunk(entry.text))
       .filter((entry) => {
-        const dedupeKey = `${entry.chapterId}|${entry.sourcePath}|${entry.text.slice(0, 260).toLowerCase()}`;
+        const dedupeKey = `${entry.chapterId ?? 'none'}|${entry.sourcePath}|${entry.text.slice(0, 260).toLowerCase()}`;
         if (seen.has(dedupeKey)) return false;
         seen.add(dedupeKey);
         return true;
       });
     chunkEmbeddingCache.clear();
+    persistedEmbeddingCache.clear();
+    if (vectorPayload.trim().length > 0) {
+      for (const rawLine of vectorPayload.split('\n')) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        try {
+          const parsed = JSON.parse(line) as { id?: string; embedding?: number[] };
+          if (!parsed.id || !Array.isArray(parsed.embedding)) continue;
+          if (parsed.embedding.length !== EMBEDDING_DIM) continue;
+          const vec = new Float32Array(parsed.embedding);
+          persistedEmbeddingCache.set(parsed.id, vec);
+        } catch {
+          continue;
+        }
+      }
+    }
 
-    cachedIndex = JSON.parse(indexRaw.replace(/^\uFEFF/, '')) as ChapterIndexPayload;
+    cachedIndex = indexPayloads.reduce<ChapterIndexPayload>((acc, raw) => {
+      try {
+        const parsed = JSON.parse(raw.replace(/^\uFEFF/, '')) as ChapterIndexPayload;
+        return mergeIndexPayload(acc, parsed);
+      } catch {
+        return acc;
+      }
+    }, {});
   } catch (error) {
     console.error('[context-retriever] Failed to load context artifacts', error);
     cachedChunks = [];
@@ -318,11 +444,19 @@ function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: 
 
   let chunkEmbedding = chunkEmbeddingCache.get(chunk.id);
   if (!chunkEmbedding) {
-    chunkEmbedding = buildLocalEmbedding(chunk.text);
+    chunkEmbedding = persistedEmbeddingCache.get(chunk.id) ?? buildLocalEmbedding(chunk.text);
     chunkEmbeddingCache.set(chunk.id, chunkEmbedding);
   }
   const semantic = cosineSimilarity(chunkEmbedding, queryEmbedding);
   score += Math.max(0, semantic) * 24;
+
+  if (chunk.sourceType === 'textbook') {
+    score += 2;
+    if (query.chapterId && chunk.chapterId === query.chapterId) score += 6;
+    if (['chapter-pack', 'chapter-drill', 'chapter-diagnose', 'chapter-remediate', 'chat'].includes(query.task)) {
+      score += 2;
+    }
+  }
 
   score += paperTypeWeight(chunk.paperType);
   score += yearWeight(chunk.year);
@@ -412,6 +546,8 @@ async function rerankContextSnippets(query: ContextQuery, snippets: ContextSnipp
 function buildContextHash(snippets: ContextSnippet[]): string {
   const digest = createHash('sha1');
   for (const snippet of snippets) {
+    digest.update(snippet.sourceType ?? 'paper');
+    digest.update('|');
     digest.update(snippet.sourcePath);
     digest.update('|');
     digest.update(snippet.text.slice(0, 120));
@@ -423,22 +559,32 @@ function buildContextHash(snippets: ContextSnippet[]): string {
 }
 
 function selectFallbackSource(query: ContextQuery): string | null {
+  const sourcePriority = (sourcePath: string): number => {
+    if (/^\d{4}(?:-COMPTT)?\/Class_(10|12)\//.test(sourcePath)) return 0; // CBSE paper dataset
+    if (/^dataset\/cbse_papers\//.test(sourcePath)) return 0;
+    if (/ncert_textbooks/i.test(sourcePath)) return 2;
+    return 1;
+  };
+
   const chapterSources = query.chapterId ? cachedIndex.chapters?.[query.chapterId] ?? [] : [];
-  const normalizedChapterSources = Array.from(new Set(chapterSources.map((item) => canonicalizeSourcePath(item))));
+  const normalizedChapterSources = Array.from(new Set(chapterSources.map((item) => canonicalizeSourcePath(item))))
+    .sort((a, b) => sourcePriority(a) - sourcePriority(b));
   if (normalizedChapterSources.length > 0) return normalizedChapterSources[0];
 
   const normalizedSubject = normalizeSubject(query.classLevel, query.subject);
   const key = `${query.classLevel}|${normalizedSubject}`;
   const subjectSources = cachedIndex.sourcesBySubjectClass?.[key] ?? [];
-  const normalizedSubjectSources = Array.from(new Set(subjectSources.map((item) => canonicalizeSourcePath(item))));
+  const normalizedSubjectSources = Array.from(new Set(subjectSources.map((item) => canonicalizeSourcePath(item))))
+    .sort((a, b) => sourcePriority(a) - sourcePriority(b));
   if (normalizedSubjectSources.length > 0) return normalizedSubjectSources[0];
   return null;
 }
 
 async function appendChunkToCache(chunk: ContextChunk): Promise<void> {
-  if (!chunk.chapterId || typeof chunk.chapterId !== 'string' || !chunk.chapterId.trim()) return;
   const normalizedChunk: ContextChunk = {
     ...chunk,
+    sourceType: chunk.sourceType === 'textbook' ? 'textbook' : 'paper',
+    chapterId: typeof chunk.chapterId === 'string' && chunk.chapterId.trim().length > 0 ? chunk.chapterId.trim() : null,
     sourcePath: canonicalizeSourcePath(chunk.sourcePath),
     text: sanitizeChunkText(chunk.text),
   };
@@ -446,7 +592,7 @@ async function appendChunkToCache(chunk: ContextChunk): Promise<void> {
   const line = `${JSON.stringify(normalizedChunk)}\n`;
   try {
     await fs.mkdir(CONTEXT_DIR, { recursive: true });
-    await fs.appendFile(CHUNKS_PATH, line, 'utf-8');
+    await fs.appendFile(CHUNK_PATHS[0], line, 'utf-8');
     cachedChunks.push(normalizedChunk);
 
     if (normalizedChunk.chapterId) {
@@ -464,7 +610,7 @@ async function appendChunkToCache(chunk: ContextChunk): Promise<void> {
       sources[key] = [...existing, normalizedChunk.sourcePath].slice(0, 40);
     }
 
-    await fs.writeFile(INDEX_PATH, JSON.stringify(cachedIndex, null, 2), 'utf-8');
+    await fs.writeFile(INDEX_PATHS[0], JSON.stringify(cachedIndex, null, 2), 'utf-8');
   } catch (error) {
     console.error('[context-retriever] Failed to write-through chunk cache', error);
   }
@@ -539,6 +685,7 @@ async function getOnDemandSnippet(query: ContextQuery): Promise<ContextSnippet |
   const resolvedChapterId = query.chapterId ?? inferChapterIdFromSource(sourcePath);
   const chunk: ContextChunk = {
     id: `ctx-ondemand-${createHash('md5').update(`${sourcePath}|${query.chapterId ?? ''}`).digest('hex').slice(0, 12)}`,
+    sourceType: 'paper',
     text: cleaned,
     sourcePath: canonicalizeSourcePath(sourcePath),
     classLevel: query.classLevel,
@@ -556,7 +703,101 @@ async function getOnDemandSnippet(query: ContextQuery): Promise<ContextSnippet |
   };
 }
 
+// ── pgvector retrieval (when document_embeddings table is populated) ──────────
+
+interface PgvectorRow {
+  id: string;
+  text: string;
+  source_path: string;
+  class_level: number;
+  subject: string;
+  source_type: string;
+  chapter_id: string | null;
+  year: number | null;
+  paper_type: string | null;
+  similarity: number;
+}
+
+async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[] | null> {
+  const nvidiaKey = process.env.NVIDIA_API_KEY?.trim();
+  if (!isUsableNvidiaApiKey(nvidiaKey)) return null;
+
+  try {
+    const [{ isSupabaseServiceConfigured, supabaseRpc }, { createNvidiaEmbeddings }] = await Promise.all([
+      import('@/lib/supabase-rest'),
+      import('@/lib/ai/nvidia-client'),
+    ]);
+    if (!isSupabaseServiceConfigured()) return null;
+
+    const queryText = [query.query ?? '', ...(query.chapterTopics ?? [])]
+      .filter(Boolean)
+      .join(' ')
+      .slice(0, 2048);
+
+    const [embedding] = await createNvidiaEmbeddings({
+      apiKey: nvidiaKey,
+      model: 'nvidia/nv-embedqa-e5-v5',
+      input: [queryText],
+      inputType: 'query',
+    });
+    if (!embedding || embedding.length === 0) return null;
+
+    const topK = Math.max(1, Math.min(8, query.topK ?? 4));
+    const rows = await supabaseRpc<PgvectorRow[]>('match_document_embeddings', {
+      query_embedding: `[${embedding.join(',')}]`,
+      match_count: topK * 3,
+      filter_class: query.classLevel,
+      filter_subject: normalizeSubject(query.classLevel, query.subject),
+      filter_chapter: query.chapterId ?? null,
+    });
+
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+
+    const dedupeSet = new Set<string>();
+    const snippets: ContextSnippet[] = [];
+    for (const row of rows) {
+      const text = sanitizeChunkText(row.text).slice(0, 1600);
+      if (!isHighQualityChunk(text)) continue;
+      const dedupeKey = `${row.source_path}|${text.slice(0, 260).toLowerCase()}`;
+      if (dedupeSet.has(dedupeKey)) continue;
+      dedupeSet.add(dedupeKey);
+      snippets.push({
+        id: row.id,
+        text,
+        sourcePath: canonicalizeSourcePath(row.source_path),
+        classLevel: row.class_level,
+        subject: row.subject,
+        sourceType: row.source_type === 'textbook' ? 'textbook' : 'paper',
+        chapterId: row.chapter_id ?? undefined,
+        year: row.year ?? undefined,
+        paperType: row.paper_type as PaperType | undefined,
+        relevanceScore: Number((row.similarity * 100).toFixed(2)),
+      });
+      if (snippets.length >= topK) break;
+    }
+    return snippets.length > 0 ? snippets : null;
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function getContextPack(query: ContextQuery): Promise<ContextPack> {
+  // Try semantic pgvector retrieval first (requires document_embeddings populated)
+  const pgSnippets = await getPgvectorSnippets(query);
+  if (pgSnippets && pgSnippets.length > 0) {
+    const reranked = shouldUseNvidiaRerank(query)
+      ? await rerankContextSnippets(query, pgSnippets).catch(() => pgSnippets)
+      : pgSnippets;
+    return {
+      snippets: reranked,
+      contextHash: buildContextHash(reranked),
+      usedOnDemandFallback: false,
+      usedPgvector: true,
+    };
+  }
+
   await loadContextArtifacts();
   const topK = Math.max(1, Math.min(8, query.topK ?? 4));
   const normalizedSubject = normalizeSubject(query.classLevel, query.subject);
@@ -624,5 +865,6 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     snippets: reranked,
     contextHash: buildContextHash(reranked),
     usedOnDemandFallback,
+    usedPgvector: false,
   };
 }

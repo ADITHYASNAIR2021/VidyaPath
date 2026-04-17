@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { ContextSnippet, ContextTask } from '@/lib/ai/context-retriever';
 import { getTaskChatModelCandidates, type LlmProvider, type LlmModelConfig } from '@/lib/ai/model-routing';
-import { callNvidiaChatCompletion, isUsableNvidiaApiKey } from '@/lib/ai/nvidia-client';
+import { callNvidiaChatCompletion, isUsableNvidiaApiKey, type LlmUsageCounts } from '@/lib/ai/nvidia-client';
+
+export type { LlmUsageCounts };
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -20,6 +22,7 @@ export interface GenerationResult {
   provider: LlmProvider;
   model: string;
   cacheHit: boolean;
+  usage: LlmUsageCounts | null;
 }
 
 interface BaseGenerateOptions {
@@ -148,7 +151,7 @@ async function callGemini(
   temperature: number,
   maxOutputTokens: number,
   topP: number
-): Promise<string> {
+): Promise<{ text: string; usage: LlmUsageCounts | null }> {
   const contents =
     messages && messages.length > 0
       ? messages.slice(-12).map((message) => ({
@@ -181,6 +184,11 @@ async function callGemini(
 
   const payload = (await response.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      totalTokenCount?: number;
+    };
   };
   const text =
     payload.candidates?.[0]?.content?.parts
@@ -188,7 +196,17 @@ async function callGemini(
       .join('')
       .trim() ?? '';
   if (!text) throw new Error(`Gemini ${model} returned empty output`);
-  return text;
+
+  let usage: LlmUsageCounts | null = null;
+  const m = payload.usageMetadata;
+  if (m && typeof m.promptTokenCount === 'number' && typeof m.candidatesTokenCount === 'number') {
+    usage = {
+      promptTokens: m.promptTokenCount,
+      completionTokens: m.candidatesTokenCount,
+      totalTokens: m.totalTokenCount ?? m.promptTokenCount + m.candidatesTokenCount,
+    };
+  }
+  return { text, usage };
 }
 
 async function callGroq(
@@ -200,7 +218,7 @@ async function callGroq(
   temperature: number,
   maxOutputTokens: number,
   topP: number
-): Promise<string> {
+): Promise<{ text: string; usage: LlmUsageCounts | null }> {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -230,10 +248,25 @@ async function callGroq(
 
   const payload = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
   };
   const text = payload.choices?.[0]?.message?.content?.trim() ?? '';
   if (!text) throw new Error(`Groq ${model} returned empty output`);
-  return text;
+
+  let usage: LlmUsageCounts | null = null;
+  const u = payload.usage;
+  if (u && typeof u.prompt_tokens === 'number' && typeof u.completion_tokens === 'number') {
+    usage = {
+      promptTokens: u.prompt_tokens,
+      completionTokens: u.completion_tokens,
+      totalTokens: u.total_tokens ?? u.prompt_tokens + u.completion_tokens,
+    };
+  }
+  return { text, usage };
 }
 
 function stripCodeFence(text: string): string {
@@ -338,6 +371,7 @@ async function runGeneration(options: GenerateTextOptions): Promise<GenerationRe
         provider: fromCache.provider,
         model: fromCache.model,
         cacheHit: true,
+        usage: null,
       };
     }
   }
@@ -380,7 +414,7 @@ ${citationBlock}`;
           }
           continue;
         }
-        const text = await callNvidiaChatCompletion({
+        const nvidiaResult = await callNvidiaChatCompletion({
           apiKey: nvidiaKey,
           model: candidate.model,
           systemPrompt: fullSystemPrompt,
@@ -398,13 +432,13 @@ ${citationBlock}`;
         });
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, {
-            text,
+            text: nvidiaResult.text,
             provider: 'nvidia',
             model: candidate.model,
             expiresAt: now() + CACHE_TTL_MS,
           });
         }
-        return { text, provider: 'nvidia', model: candidate.model, cacheHit: false };
+        return { text: nvidiaResult.text, provider: 'nvidia', model: candidate.model, cacheHit: false, usage: nvidiaResult.usage };
       }
 
       if (candidate.provider === 'gemini') {
@@ -415,7 +449,7 @@ ${citationBlock}`;
           }
           continue;
         }
-        const text = await callGemini(
+        const geminiResult = await callGemini(
           geminiKey,
           candidate.model,
           fullSystemPrompt,
@@ -427,13 +461,13 @@ ${citationBlock}`;
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, {
-            text,
+            text: geminiResult.text,
             provider: 'gemini',
             model: candidate.model,
             expiresAt: now() + CACHE_TTL_MS,
           });
         }
-        return { text, provider: 'gemini', model: candidate.model, cacheHit: false };
+        return { text: geminiResult.text, provider: 'gemini', model: candidate.model, cacheHit: false, usage: geminiResult.usage };
       }
 
       if (candidate.provider === 'groq') {
@@ -444,7 +478,7 @@ ${citationBlock}`;
           }
           continue;
         }
-        const text = await callGroq(
+        const groqResult = await callGroq(
           groqKey,
           candidate.model,
           fullSystemPrompt,
@@ -456,13 +490,13 @@ ${citationBlock}`;
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, {
-            text,
+            text: groqResult.text,
             provider: 'groq',
             model: candidate.model,
             expiresAt: now() + CACHE_TTL_MS,
           });
         }
-        return { text, provider: 'groq', model: candidate.model, cacheHit: false };
+        return { text: groqResult.text, provider: 'groq', model: candidate.model, cacheHit: false, usage: groqResult.usage };
       }
     } catch (error) {
       errors.push(String(error));

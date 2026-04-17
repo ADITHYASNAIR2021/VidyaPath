@@ -887,7 +887,9 @@ export async function listStudentGrades(input: {
   const all = [...byStudent, ...byRollCode];
   const dedup = new Map<string, SubmissionRow>();
   for (const row of all) dedup.set(row.id, row);
-  const scopedSubmissions = [...dedup.values()].filter((row) => row.status === 'released' || row.status === 'graded');
+  const scopedSubmissions = [...dedup.values()].filter(
+    (row) => row.status === 'released' && typeof row.released_at === 'string' && row.released_at.length > 0
+  );
   if (scopedSubmissions.length === 0) return [];
   const packIds = [...new Set(scopedSubmissions.map((row) => row.pack_id))];
   const packs = await supabaseSelect<AssignmentPackRow>(TABLES.assignmentPacks, {

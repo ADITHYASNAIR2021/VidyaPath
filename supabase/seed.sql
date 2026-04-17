@@ -563,7 +563,7 @@ drop table if exists pg_temp.vp_student_profiles;
 create temp table vp_student_profiles as
 with ins as (
   insert into public.student_profiles (
-    school_id, auth_user_id, auth_email, batch, roll_no, name, roll_code, class_level, section, pin_hash, status
+    school_id, auth_user_id, auth_email, batch, roll_no, name, roll_code, class_level, academic_stream, section, pin_hash, status
   )
   select
     s.school_id,
@@ -574,11 +574,16 @@ with ins as (
     s.name,
     s.roll_code,
     s.class_level,
+    case
+      when s.class_level = 10 then 'foundation'
+      when s.class_level = 12 and s.section = 'B' then 'commerce'
+      else 'pcm'
+    end,
     s.section,
     null,
     'active'
   from vp_student_with_auth s
-  returning id, school_id, auth_user_id, auth_email, batch, roll_no, name, roll_code, class_level, section
+  returning id, school_id, auth_user_id, auth_email, batch, roll_no, name, roll_code, class_level, academic_stream, section
 )
 select * from ins;
 

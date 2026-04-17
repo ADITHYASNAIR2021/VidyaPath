@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import type { TeacherAssignmentPack } from '@/lib/teacher-types';
+import { useOfflineExamQueue } from '@/lib/hooks/useOfflineExamQueue';
 
 interface ExamSessionResponse {
   session: {
@@ -82,6 +83,8 @@ export default function ProctoredExamPage() {
   const [riskLevel, setRiskLevel] = useState<'low' | 'medium' | 'high'>('low');
   const violationQueueRef = useRef<ViolationEvent[]>([]);
   const handleSubmitRef = useRef<() => Promise<void>>(async () => undefined);
+  const [submissionQueued, setSubmissionQueued] = useState(false);
+  const { enqueueSubmission, pendingCount } = useOfflineExamQueue();
 
   useEffect(() => {
     async function loadStudentSession() {
@@ -268,15 +271,22 @@ export default function ProctoredExamPage() {
         })),
       ].filter((item) => item.answerText.trim().length > 0);
 
-      const response = await fetch('/api/exam/session/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, answers }),
-      });
-      const body = await response.json().catch(() => null);
-      const data = unwrapApiPayload<ExamSubmitResponse | null>(body);
-      if (!response.ok || !data) {
-        setError(extractApiError(body, 'Submission failed.'));
+      const outcome = await enqueueSubmission({ sessionId, answers });
+      if (outcome.status === 'queued') {
+        setSubmissionQueued(true);
+        setSubmitted(true);
+        if (document.fullscreenElement) {
+          await document.exitFullscreen().catch(() => undefined);
+        }
+        return;
+      }
+      if (outcome.status === 'error') {
+        setError(outcome.message);
+        return;
+      }
+      const data = unwrapApiPayload<ExamSubmitResponse | null>(outcome.data);
+      if (!data) {
+        setError('Submission failed.');
         return;
       }
       setResult(data);
@@ -411,6 +421,14 @@ export default function ProctoredExamPage() {
           >
             {submitting ? 'Submitting...' : 'Submit Exam'}
           </button>
+        ) : submissionQueued ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status" aria-live="polite">
+            <p className="font-semibold">Submission saved offline</p>
+            <p className="mt-1 text-amber-800">
+              Your answers have been saved locally and will be submitted automatically when your connection is restored.
+              {pendingCount > 0 && ` (${pendingCount} pending)`}
+            </p>
+          </div>
         ) : (
           <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" role="status" aria-live="polite">
             <p className="font-semibold">{result?.message || 'Submitted successfully.'}</p>

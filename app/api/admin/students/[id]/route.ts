@@ -1,4 +1,5 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { normalizeAcademicStream } from '@/lib/academic-taxonomy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { updateStudentSchema } from '@/lib/schemas/admin-management';
@@ -31,6 +32,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       rollNo: string;
       batch: string;
       classLevel: 10 | 12;
+      stream: 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary';
       section?: string;
       status: 'active' | 'inactive';
       pin: string;
@@ -40,6 +42,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (typeof body.rollNo === 'string') updates.rollNo = body.rollNo;
     if (typeof body.batch === 'string') updates.batch = body.batch;
     if (Number(body.classLevel) === 10 || Number(body.classLevel) === 12) updates.classLevel = Number(body.classLevel) as 10 | 12;
+    if (body.stream !== undefined) {
+      const stream = normalizeAcademicStream(body.stream);
+      if (stream) updates.stream = stream;
+    }
     if (typeof body.section === 'string') updates.section = body.section;
     if (body.status === 'active' || body.status === 'inactive') updates.status = body.status;
     if (typeof body.pin === 'string') updates.pin = body.pin;

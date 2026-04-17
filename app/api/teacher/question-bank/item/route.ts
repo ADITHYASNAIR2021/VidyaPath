@@ -2,27 +2,48 @@ import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { createQuestionBankItemSchema } from '@/lib/schemas/teacher-qbank';
-import { createTeacherQuestionBankItem, listTeacherQuestionBank } from '@/lib/teacher-admin-db';
+import { createTeacherQuestionBankItem, listTeacherQuestionBank, resolveTeacherScopeForChapter } from '@/lib/teacher-admin-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
+async function assertChapterInScope(teacherId: string, chapterId: string): Promise<void> {
+  const scope = await resolveTeacherScopeForChapter(teacherId, chapterId);
+  if (!scope) {
+    throw new Error('Teacher does not have scope for this chapter.');
+  }
+}
+
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
-  const session = await getTeacherSessionFromRequestCookies();
-  if (!session) {
+  try {
+    const session = await getTeacherSessionFromRequestCookies();
+    if (!session) {
+      return errorJson({
+        requestId,
+        errorCode: 'unauthorized',
+        message: 'Unauthorized teacher access.',
+        status: 401,
+      });
+    }
+    const url = new URL(req.url);
+    const chapterId = url.searchParams.get('chapterId')?.trim() || undefined;
+    if (chapterId) {
+      await assertChapterInScope(session.teacher.id, chapterId);
+    }
+    const items = await listTeacherQuestionBank(session.teacher.id, { chapterId });
+    return dataJson({ requestId, data: { items } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load question bank items.';
+    const status = /scope|chapter/i.test(message) ? 403 : 500;
     return errorJson({
       requestId,
-      errorCode: 'unauthorized',
-      message: 'Unauthorized teacher access.',
-      status: 401,
+      errorCode: 'question-item-read-failed',
+      message,
+      status,
     });
   }
-  const url = new URL(req.url);
-  const chapterId = url.searchParams.get('chapterId')?.trim() || undefined;
-  const items = await listTeacherQuestionBank(session.teacher.id, { chapterId });
-  return dataJson({ requestId, data: { items } });
 }
 
 export async function POST(req: Request) {
@@ -61,6 +82,7 @@ export async function POST(req: Request) {
         status: 400,
       });
     }
+    await assertChapterInScope(session.teacher.id, chapterId);
 
     const item = await createTeacherQuestionBankItem({
       teacherId: session.teacher.id,
@@ -98,8 +120,10 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create question bank item.';
-    const status = /required|valid|scope|chapter|kind/i.test(message)
-      ? 400
+    const status = /scope|chapter/i.test(message)
+      ? 403
+      : /required|valid|kind/i.test(message)
+        ? 400
       : /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message)
         ? 503
         : 500;

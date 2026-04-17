@@ -235,10 +235,11 @@ export async function POST(req: NextRequest) {
       endpoint: '/api/ai-tutor',
       provider: generated.provider,
       model: generated.model,
-      promptText: lastUserMessage,
-      completionText: message,
+      promptTokens: generated.usage?.promptTokens,
+      completionTokens: generated.usage?.completionTokens,
+      totalTokens: generated.usage?.totalTokens,
       requestId,
-      estimated: true,
+      estimated: !generated.usage,
     });
     logServerEvent({
       event: 'ai-tutor-response',

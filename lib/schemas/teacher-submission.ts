@@ -21,6 +21,7 @@ export const gradeSubmissionSchema = z.object({
   grades: z.array(gradeItem).min(1).max(60),
   overallFeedback: z.string().trim().max(2000).optional(),
   released: z.boolean().optional(),
+  allowRegrade: z.boolean().optional(),
 });
 export type GradeSubmissionInput = z.infer<typeof gradeSubmissionSchema>;
 

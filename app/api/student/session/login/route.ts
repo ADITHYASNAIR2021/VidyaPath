@@ -35,6 +35,7 @@ function buildSessionPayload(student: {
   name: string;
   rollCode: string;
   classLevel: 10 | 12;
+  stream?: 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary';
   section?: string;
   schoolId?: string;
   batch?: string;
@@ -45,6 +46,7 @@ function buildSessionPayload(student: {
     studentName: student.name,
     rollCode: student.rollCode,
     classLevel: student.classLevel,
+    stream: student.stream,
     section: student.section,
     schoolId: student.schoolId,
     batch: student.batch,
@@ -156,6 +158,7 @@ export async function POST(req: Request) {
     studentName: string;
     rollCode: string;
     classLevel: 10 | 12;
+    stream?: 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary';
     section?: string;
     schoolId?: string;
     batch?: string;
@@ -184,6 +187,7 @@ export async function POST(req: Request) {
         studentName: data.studentName,
         rollCode: data.rollCode,
         classLevel: data.classLevel,
+        stream: data.stream,
         section: data.section,
         schoolId: data.schoolId,
         schoolCode: schoolCode || undefined,
@@ -443,6 +447,7 @@ export async function POST(req: Request) {
           studentName: student.name,
           rollCode: student.rollCode,
           classLevel: student.classLevel,
+          stream: student.stream,
           section: student.section,
           schoolId: resolvedSchoolId,
           schoolCode: resolvedSchoolCode,

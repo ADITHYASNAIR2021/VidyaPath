@@ -137,6 +137,56 @@ npm run build:context:python:fast
 npm run verify:context
 ```
 
+RAG full pipeline (papers + textbooks + vectors):
+
+```bash
+npm run build:rag
+```
+
+RAG full pipeline with chunk cleanup (recommended for production-like indexing):
+
+```bash
+npm run build:rag:clean
+```
+
+Post-build cleanup only (if you already ran `build:rag`):
+
+```bash
+npm run clean:chunks
+npm run build:vectors
+```
+
+Preview cleanup impact without writing changes:
+
+```bash
+node scripts/clean_context_chunks.mjs --dry-run
+```
+
+Optional stricter cleanup knobs:
+
+```bash
+node scripts/clean_context_chunks.mjs --min-words 65 --min-alpha-ratio 0.5 --min-unique-ratio 0.3
+```
+
+What `build:rag` goes through (in order):
+- `npm run build:context` -> `scripts/build_context_index.py` (CBSE papers from `dataset/cbse_papers`)
+- `npm run build:textbooks` -> `scripts/build_textbook_index.py --merge-main-index` (NCERT textbooks from `dataset/ncert_textbooks`)
+- `npm run build:vectors` -> `scripts/build_vector_index.mjs` (vector file generation)
+
+Artifacts written under `lib/context/`:
+- `chunks.jsonl`
+- `chapter_index.json`
+- `textbook_chunks.jsonl`
+- `textbook_chapter_index.json`
+- `chunk_vectors.jsonl`
+
+Hugging Face dataset uploads (manual, not part of `build:rag`):
+
+```bash
+npm run hf:upload:cbse
+npm run hf:upload:ncert
+```
+
 What you will see during Python context build:
 - Live terminal progress with ETA for:
 - PDF scanning
@@ -170,7 +220,7 @@ Context troubleshooting quick checks:
 - Run `npm run verify:context` and confirm:
 - `chunks > 0`
 - `mapped > 0` (chapter-linked chunks exist)
-- `unmapped = 0` (no null/empty chapter IDs)
+- `unmapped` is not unexpectedly high (some unmapped chunks are now allowed for broader retrieval)
 - `pre2019 > 0` (older-year coverage present when available)
 - `build:context:python` is optional and slower; it requires a working Python install plus `pypdf`.
 - `build:context:python` now indexes all matched PDFs by default (`--max-files 0`).
@@ -302,6 +352,9 @@ Utilities in `scripts/` (one-line purpose each):
 
 - `build_context_index.py`: Build/rebuild paper-context artifacts (`lib/context/chunks.jsonl`, `lib/context/chapter_index.json`) and support single-file on-demand extraction mode.
 - `build_context_index.mjs`: Node-based context index builder (no Python required) using chapter + PYQ + HF paper mapping.
+- `build_textbook_index.py`: Build semantic/structural NCERT textbook chunks and chapter index, with optional merge into main context files.
+- `clean_context_chunks.mjs`: Post-process chunk JSONL files to remove instruction boilerplate, unicode/control-char noise, low-signal chunks, and duplicates.
+- `build_vector_index.mjs`: Generate local vector embeddings file (`lib/context/chunk_vectors.jsonl`) from paper + textbook chunks.
 - `verify_context_index.mjs`: Validate context artifact health (chunk count, chapter mapping coverage, year-range coverage).
 - `download_dataset.py`: Download full or filtered CBSE papers dataset from Hugging Face into local `dataset/`.
 - `extract_ncert.py`: Extract text from NCERT PDFs into JSON chapter context artifacts.

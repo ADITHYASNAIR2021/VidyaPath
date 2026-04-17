@@ -206,7 +206,7 @@ export async function getStudentSessionFromRequestCookies() {
     const fallbackClassLevel = parsed?.classLevel === 10 || parsed?.classLevel === 12 ? parsed.classLevel : undefined;
     if (!student && parsed) {
       const enrolledSubjects = await getStudentEnrolledSubjects(parsed.studentId, parsed.schoolId);
-      const stream = deriveStudentStream(enrolledSubjects, parsed.classLevel);
+      const stream = deriveStudentStream(enrolledSubjects, parsed.classLevel, parsed.stream);
       return {
         ...parsed,
         mustChangePassword: parsed.mustChangePassword === true,
@@ -216,7 +216,7 @@ export async function getStudentSessionFromRequestCookies() {
     }
     if (!student) return parsed ?? null;
     const enrolledSubjects = await getStudentEnrolledSubjects(student.id, student.schoolId);
-    const stream = deriveStudentStream(enrolledSubjects, student.classLevel);
+    const stream = deriveStudentStream(enrolledSubjects, student.classLevel, student.stream);
     return {
       studentId: student.id || fallbackStudentId,
       studentName: student.name || parsed?.studentName || 'Student',
@@ -241,7 +241,7 @@ export async function getStudentSessionFromRequestCookies() {
   const student = await getStudentById(parsed.studentId).catch(() => null);
   if (!student) return parsed;
   const enrolledSubjects = await getStudentEnrolledSubjects(student.id, student.schoolId);
-  const stream = deriveStudentStream(enrolledSubjects, student.classLevel);
+  const stream = deriveStudentStream(enrolledSubjects, student.classLevel, student.stream);
   return {
     ...parsed,
     schoolId: parsed.schoolId || student.schoolId,

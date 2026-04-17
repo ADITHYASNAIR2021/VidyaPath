@@ -236,7 +236,7 @@ async function* nvidiaStream(options: StreamOptions): AsyncGenerator<string> {
  */
 export function generateTaskTextStream(options: StreamOptions): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  const requestedTokens = options.maxTokens ?? 2048;
+  const fallbackRequestedTokens = Math.max(1, options.maxTokens ?? 2048);
 
   let gen: AsyncGenerator<string>;
   switch (options.provider) {
@@ -256,8 +256,15 @@ export function generateTaskTextStream(options: StreamOptions): ReadableStream<U
       // ── Token budget gate ─────────────────────────────────────────────
       const budget = await checkAiTokenBudget({
         schoolId: options.schoolId ?? null,
-        requestedTokens,
-      }).catch(() => ({ allowed: true, remaining: requestedTokens, requested: requestedTokens, limit: requestedTokens }));
+        endpoint: '/lib/ai/stream',
+        projectedInputText: options.userPrompt,
+        projectedOutputTokens: options.maxTokens ?? 2048,
+      }).catch(() => ({
+        allowed: true,
+        remaining: fallbackRequestedTokens,
+        requested: fallbackRequestedTokens,
+        limit: fallbackRequestedTokens,
+      }));
 
       if (!budget.allowed) {
         controller.enqueue(encoder.encode(

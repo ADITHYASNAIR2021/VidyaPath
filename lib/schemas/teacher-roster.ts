@@ -5,6 +5,8 @@
  */
 import { z } from 'zod';
 
+const academicStream = z.enum(['foundation', 'pcm', 'pcb', 'commerce', 'interdisciplinary']);
+
 // ── Enroll subjects ───────────────────────────────────────────────────────
 
 export const enrollSubjectsSchema = z.object({
@@ -25,6 +27,7 @@ const studentImportRow = z.object({
   section: z.string().trim().max(40).optional(),
   batch: z.string().trim().max(40).optional(),
   classLevel: z.union([z.literal(10), z.literal(12)]).optional(),
+  stream: academicStream.optional(),
   pin: z.string().trim().max(16).optional(),
 }).passthrough();
 

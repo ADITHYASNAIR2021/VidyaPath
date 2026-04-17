@@ -12,6 +12,7 @@ import {
 import clsx from 'clsx';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { Subject } from '@/lib/data';
+import { STREAM_LABELS, type AcademicStream } from '@/lib/academic-taxonomy';
 import { useProgressStore, useBookmarkStore } from '@/lib/store';
 import { getPaperStats } from '@/lib/papers';
 import { getPYQData } from '@/lib/pyq';
@@ -122,7 +123,7 @@ interface StudentSessionSnapshot {
   classLevel: 10 | 12;
   section?: string;
   mustChangePassword?: boolean;
-  stream?: 'Science' | 'Commerce' | 'Humanities';
+  stream?: AcademicStream;
   enrolledSubjects: Subject[];
 }
 
@@ -247,17 +248,27 @@ export default function DashboardPage() {
   const totalChapters = visibleChapters.length;
   const studiedCount = studiedChapterIds.filter((id) => chapterById.has(id)).length;
   const overallPct = totalChapters > 0 ? Math.round((studiedCount / totalChapters) * 100) : 0;
-  const dashboardTrack = useMemo(() => {
-    if (!studentSession) return 'General';
+  const dashboardStream = useMemo<AcademicStream>(() => {
+    if (!studentSession) return 'interdisciplinary';
     if (studentSession.stream) return studentSession.stream;
-    if (studentSession.classLevel === 10) return 'Science & Math Foundation';
+    if (studentSession.classLevel === 10) return 'foundation';
     const subjectSet = new Set(teacherAssignments.map((item) => item.subject));
     const hasCommerce = ['Accountancy', 'Business Studies', 'Economics'].some((subject) => subjectSet.has(subject));
-    const hasScience = ['Physics', 'Chemistry', 'Biology', 'Math'].some((subject) => subjectSet.has(subject));
-    if (hasCommerce) return 'Commerce';
-    if (hasScience) return 'Science';
-    return 'Humanities';
+    const hasPhysics = subjectSet.has('Physics');
+    const hasChemistry = subjectSet.has('Chemistry');
+    const hasBiology = subjectSet.has('Biology');
+    const hasMath = subjectSet.has('Math');
+    const hasCoreScience = hasPhysics && hasChemistry;
+    if (hasCommerce && (hasCoreScience || hasBiology || hasMath)) return 'interdisciplinary';
+    if (hasCommerce) return 'commerce';
+    if (hasCoreScience && hasBiology && !hasMath) return 'pcb';
+    if (hasCoreScience && hasMath && !hasBiology) return 'pcm';
+    if (hasCoreScience && hasBiology && hasMath) return 'interdisciplinary';
+    if (hasCoreScience && hasMath) return 'pcm';
+    if (hasCoreScience && hasBiology) return 'pcb';
+    return 'interdisciplinary';
   }, [studentSession, teacherAssignments]);
+  const dashboardTrack = STREAM_LABELS[dashboardStream];
   const orderedSubjects = useMemo(() => {
     const allSubjects = Object.keys(SUBJECT_META) as Array<keyof typeof SUBJECT_META>;
     const visibleSet = new Set(visibleChapters.map((chapter) => chapter.subject));
@@ -265,16 +276,19 @@ export default function DashboardPage() {
       if (studentSession?.classLevel === 10) {
         return ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'];
       }
-      if (dashboardTrack === 'Commerce') {
+      if (dashboardStream === 'commerce') {
         return ['Accountancy', 'Business Studies', 'Economics', 'English Core'];
       }
-      if (dashboardTrack === 'Science') {
-        return ['Physics', 'Chemistry', 'Math', 'Biology', 'English Core'];
+      if (dashboardStream === 'pcm') {
+        return ['Physics', 'Chemistry', 'Math', 'English Core', 'Biology'];
       }
-      return ['English Core', 'Physics', 'Chemistry', 'Biology', 'Math'];
+      if (dashboardStream === 'pcb') {
+        return ['Physics', 'Chemistry', 'Biology', 'English Core', 'Math'];
+      }
+      return ['English Core', 'Physics', 'Chemistry', 'Math', 'Biology', 'Accountancy', 'Business Studies', 'Economics'];
     })();
     return [...new Set([...priority, ...allSubjects])].filter((subject) => visibleSet.has(subject));
-  }, [dashboardTrack, studentSession, visibleChapters]);
+  }, [dashboardStream, studentSession, visibleChapters]);
   const plannerClassLevel = useMemo<10 | 12>(() => {
     const class10Weak = weakProfiles.filter((profile) => chapterById.get(profile.chapterId)?.classLevel === 10).length;
     const class12Weak = weakProfiles.filter((profile) => chapterById.get(profile.chapterId)?.classLevel === 12).length;

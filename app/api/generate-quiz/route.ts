@@ -187,10 +187,11 @@ ${schema}`;
       endpoint: '/api/generate-quiz',
       provider: result.provider,
       model: result.model,
-      promptText: userPrompt,
-      completionText: JSON.stringify(merged.slice(0, questionCount)),
+      promptTokens: result.usage?.promptTokens,
+      completionTokens: result.usage?.completionTokens,
+      totalTokens: result.usage?.totalTokens,
       requestId,
-      estimated: true,
+      estimated: !result.usage,
     });
 
     return dataJson({

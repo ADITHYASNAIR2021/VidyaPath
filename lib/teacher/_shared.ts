@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ALL_CHAPTERS, getChapterById } from '@/lib/data';
-import { isSupportedSubject } from '@/lib/academic-taxonomy';
+import { isSupportedSubject, normalizeAcademicStream, type AcademicStream } from '@/lib/academic-taxonomy';
 import { getAnalyticsSummary } from '@/lib/analytics-store';
 import { hashPin, isValidPin, verifyPin } from '@/lib/auth/pin';
 import { createSupabaseAuthUser } from '@/lib/auth/supabase-auth';
@@ -189,6 +189,7 @@ export interface StudentProfileRow {
   name: string;
   roll_code: string;
   class_level: number;
+  academic_stream?: AcademicStream | null;
   section: string | null;
   pin_hash: string | null;
   must_change_password?: boolean | null;
@@ -388,6 +389,7 @@ export function normalizeTopicList(topics: string[]): string[] {
 
 export function toStudentProfile(row: StudentProfileRow): StudentProfile | null {
   if (row.class_level !== 10 && row.class_level !== 12) return null;
+  const stream = normalizeAcademicStream(row.academic_stream);
   return {
     id: row.id,
     schoolId: row.school_id ?? undefined,
@@ -396,6 +398,7 @@ export function toStudentProfile(row: StudentProfileRow): StudentProfile | null 
     batch: row.batch ?? undefined,
     rollCode: row.roll_code,
     classLevel: row.class_level,
+    stream,
     section: row.section ?? undefined,
     status: row.status,
     hasPin: !!row.pin_hash,

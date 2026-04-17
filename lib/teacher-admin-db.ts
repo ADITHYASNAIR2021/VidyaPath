@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { ALL_CHAPTERS, getChapterById } from '@/lib/data';
-import { isSupportedSubject } from '@/lib/academic-taxonomy';
+import {
+  enforceAcademicStreamForClass,
+  isSupportedSubject,
+  normalizeAcademicStream,
+  type AcademicStream,
+} from '@/lib/academic-taxonomy';
 import { getAnalyticsSummary } from '@/lib/analytics-store';
 import { hashPin, isValidPin, verifyPin } from '@/lib/auth/pin';
 import { createSupabaseAuthUser } from '@/lib/auth/supabase-auth';
@@ -188,6 +193,7 @@ interface StudentProfileRow {
   name: string;
   roll_code: string;
   class_level: number;
+  academic_stream?: AcademicStream | null;
   section: string | null;
   pin_hash: string | null;
   must_change_password?: boolean | null;
@@ -387,6 +393,7 @@ function normalizeTopicList(topics: string[]): string[] {
 
 function toStudentProfile(row: StudentProfileRow): StudentProfile | null {
   if (row.class_level !== 10 && row.class_level !== 12) return null;
+  const stream = normalizeAcademicStream(row.academic_stream);
   return {
     id: row.id,
     schoolId: row.school_id ?? undefined,
@@ -395,6 +402,7 @@ function toStudentProfile(row: StudentProfileRow): StudentProfile | null {
     batch: row.batch ?? undefined,
     rollCode: row.roll_code,
     classLevel: row.class_level,
+    stream,
     section: row.section ?? undefined,
     status: row.status,
     hasPin: !!row.pin_hash,
@@ -773,6 +781,7 @@ export async function createStudent(input: {
   rollNo?: string;
   batch?: string;
   classLevel: 10 | 12;
+  stream?: AcademicStream;
   section?: string;
   pin?: string;
   password?: string;
@@ -783,6 +792,10 @@ export async function createStudent(input: {
   const schoolId = input.schoolId ? sanitizeText(input.schoolId, 80) : '';
   const name = sanitizeText(input.name, 120);
   const section = input.section ? sanitizeText(input.section, 40) : null;
+  const academicStream = enforceAcademicStreamForClass(
+    input.classLevel,
+    normalizeAcademicStream(input.stream)
+  );
   if (!schoolId) throw new Error('schoolId is required to create student.');
   const identity = await issueFriendlyIdentifier({
     schoolId,
@@ -818,6 +831,7 @@ export async function createStudent(input: {
       school_id: schoolId,
       profile_id: studentId,
       class_level: input.classLevel,
+      academic_stream: academicStream,
       section: section ?? undefined,
       roll_no: rollNo,
       roll_code: rollCode,
@@ -836,6 +850,7 @@ export async function createStudent(input: {
     name,
     roll_code: rollCode,
     class_level: input.classLevel,
+    academic_stream: academicStream,
     section,
     pin_hash: pinHash,
     must_change_password: true,
@@ -852,11 +867,20 @@ export async function createStudent(input: {
     schoolId,
     studentId: row.id,
     classLevel: input.classLevel,
+    stream: academicStream,
+    replaceExisting: true,
   });
   await logTeacherActivity({
     actorType: 'admin',
     action: 'create-student',
-    metadata: { rollCode, rollNo, classLevel: input.classLevel, section: section ?? undefined, batch: batch ?? undefined },
+    metadata: {
+      rollCode,
+      rollNo,
+      classLevel: input.classLevel,
+      stream: academicStream,
+      section: section ?? undefined,
+      batch: batch ?? undefined,
+    },
   });
   const student = toStudentProfile(row);
   if (!student) throw new Error('Student created but unavailable.');
@@ -871,6 +895,7 @@ export async function updateStudent(
     rollNo: string;
     batch: string;
     classLevel: 10 | 12;
+    stream: AcademicStream;
     section?: string;
     status: 'active' | 'inactive';
     pin?: string;
@@ -901,6 +926,26 @@ export async function updateStudent(
   }
   if (updates.classLevel === 10 || updates.classLevel === 12) {
     patch.class_level = updates.classLevel;
+    if (updates.classLevel === 10) {
+      patch.academic_stream = 'foundation';
+    } else if (updates.stream) {
+      patch.academic_stream = enforceAcademicStreamForClass(12, normalizeAcademicStream(updates.stream));
+    }
+  }
+  if (updates.stream !== undefined) {
+    const classLevel =
+      updates.classLevel === 10 || updates.classLevel === 12
+        ? updates.classLevel
+        : undefined;
+    if (classLevel) {
+      patch.academic_stream = enforceAcademicStreamForClass(classLevel, normalizeAcademicStream(updates.stream));
+    } else {
+      const stream = normalizeAcademicStream(updates.stream);
+      if (!stream || stream === 'foundation') {
+        throw new Error('Class 12 stream must be one of: pcm, pcb, commerce, interdisciplinary.');
+      }
+      patch.academic_stream = stream;
+    }
   }
   if (updates.section !== undefined) {
     patch.section = updates.section ? sanitizeText(updates.section, 40) : null;
@@ -924,6 +969,18 @@ export async function updateStudent(
   ).catch(() => []);
   const row = rows[0];
   if (!row) return null;
+  if (row.school_id && (updates.classLevel !== undefined || updates.stream !== undefined)) {
+    const classLevel = row.class_level === 10 || row.class_level === 12 ? row.class_level : null;
+    if (classLevel) {
+    await ensureDefaultEnrollmentsForStudent({
+      schoolId: row.school_id,
+      studentId: row.id,
+      classLevel,
+      stream: normalizeAcademicStream(row.academic_stream),
+      replaceExisting: true,
+    });
+    }
+  }
   await logTeacherActivity({
     actorType: 'admin',
     action: 'update-student',
@@ -960,6 +1017,7 @@ export async function authenticateStudent(rollCode: string, pin?: string, school
     studentName: row.name,
     rollCode: row.roll_code,
     classLevel: row.class_level,
+    stream: normalizeAcademicStream(row.academic_stream),
     section: row.section ?? undefined,
     mustChangePassword: row.must_change_password === true,
   };
@@ -996,6 +1054,7 @@ export async function authenticateStudentByRollNo(input: {
       studentName: row.name,
       rollCode: row.roll_code,
       classLevel: row.class_level,
+      stream: normalizeAcademicStream(row.academic_stream),
       section: row.section ?? undefined,
       mustChangePassword: row.must_change_password === true,
     },
@@ -2684,14 +2743,22 @@ export async function getStudentSubmissionResults(input: {
 
   const byStudentId = await supabaseSelect<TeacherSubmissionRow>(TABLES.submissions, {
     select: '*',
-    filters: [{ column: 'pack_id', value: packId }, { column: 'student_id', value: studentId }],
+    filters: [
+      { column: 'pack_id', value: packId },
+      { column: 'student_id', value: studentId },
+      { column: 'status', value: 'released' },
+    ],
     orderBy: 'created_at',
     ascending: false,
     limit: 60,
   }).catch(() => []);
   const byRollCode = await supabaseSelect<TeacherSubmissionRow>(TABLES.submissions, {
     select: '*',
-    filters: [{ column: 'pack_id', value: packId }, { column: 'submission_code', value: rollCode }],
+    filters: [
+      { column: 'pack_id', value: packId },
+      { column: 'submission_code', value: rollCode },
+      { column: 'status', value: 'released' },
+    ],
     orderBy: 'created_at',
     ascending: false,
     limit: 60,
@@ -2703,11 +2770,9 @@ export async function getStudentSubmissionResults(input: {
   for (const row of rows) {
     if (seen.has(row.id)) continue;
     seen.add(row.id);
-    const status: TeacherSubmissionStatus =
-      row.status === 'graded' || row.status === 'released' || row.status === 'pending_review'
-        ? row.status
-        : 'pending_review';
-    const released = status === 'released';
+    const status: TeacherSubmissionStatus = row.status === 'released' ? 'released' : 'pending_review';
+    const released = status === 'released' && !!row.released_at;
+    if (!released) continue;
     results.push({
       submissionId: row.id,
       packId: row.pack_id,
@@ -2735,6 +2800,7 @@ export async function gradeSubmission(input: {
   teacherId: string;
   submissionId: string;
   questionGrades: Array<{ questionNo: string; scoreAwarded: number; maxScore: number; feedback?: string }>;
+  allowRegrade?: boolean;
 }): Promise<TeacherSubmission | null> {
   const submissionId = sanitizeText(input.submissionId, 80);
   const rows = await supabaseSelect<TeacherSubmissionRow>(TABLES.submissions, {
@@ -2746,6 +2812,9 @@ export async function gradeSubmission(input: {
   if (!row) return null;
   const canAccess = await canTeacherAccessAssignmentPack(input.teacherId, row.pack_id);
   if (!canAccess) return null;
+  if (row.status === 'graded' && !input.allowRegrade) {
+    throw new Error('Submission is already graded. Pass allowRegrade=true to overwrite an existing grade.');
+  }
 
   const normalizedGrades = input.questionGrades
     .map((item) => ({
@@ -2823,6 +2892,10 @@ export async function releaseSubmissionResults(input: {
   const packId = sanitizeText(input.packId, 80);
   const canAccess = await canTeacherAccessAssignmentPack(input.teacherId, packId);
   if (!canAccess) return { releasedCount: 0 };
+  const pack = await getAssignmentPack(packId);
+  if (!pack || pack.status !== 'published') {
+    throw new Error('Results can only be released for a published assignment pack. Publish the pack first.');
+  }
 
   const rows = await supabaseSelect<TeacherSubmissionRow>(TABLES.submissions, {
     select: '*',

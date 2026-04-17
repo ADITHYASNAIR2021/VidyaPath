@@ -12,6 +12,18 @@ function Get-CanonicalSubject([string]$filename) {
   if ($filename -match 'business[_ -]?stud') { return 'Business Studies' }
   if ($filename -match 'economics|\beco\b') { return 'Economics' }
   if ($filename -match 'english|lang[_ -]?lit|language[_ -]?and[_ -]?literature') { return 'English Core' }
+  if ($filename -match 'social[-_ ]?science') { return 'Social Science' }
+  if ($filename -match 'political[-_ ]?science|civics') { return 'Political Science' }
+  if ($filename -match 'history') { return 'History' }
+  if ($filename -match 'geography') { return 'Geography' }
+  if ($filename -match 'computer[-_ ]?science') { return 'Computer Science' }
+  if ($filename -match 'informatics') { return 'Informatics Practices' }
+  if ($filename -match 'home[-_ ]?science') { return 'Home Science' }
+  if ($filename -match 'physical[-_ ]?education|phy[-_ ]?edu') { return 'Physical Education' }
+  if ($filename -match 'sociology') { return 'Sociology' }
+  if ($filename -match 'psychology') { return 'Psychology' }
+  if ($filename -match 'biotechnology') { return 'Biotechnology' }
+  if ($filename -match 'fine[-_ ]?arts?') { return 'Fine Arts' }
   if ($filename -match 'biology|\bbio\b' -and $filename -notmatch 'biotechnology') { return 'Biology' }
   if ($filename -match 'chem') { return 'Chemistry' }
   if (($filename -match 'physics') -or ($filename -match '(?:^|[^a-z])phy(?:[^a-z]|$)')) { return 'Physics' }
@@ -67,10 +79,6 @@ foreach ($file in $files) {
     # Class 10 board data is represented as Science in the app domain model.
     $subject = 'Science'
   }
-
-  if ($classLevel -eq 12 -and $subject -eq 'Science') { continue }
-  if ($classLevel -eq 10 -and $subject -notin @('Science', 'Math', 'English Core')) { continue }
-  if ($classLevel -eq 12 -and $subject -notin @('Physics', 'Chemistry', 'Biology', 'Math', 'Accountancy', 'Business Studies', 'Economics', 'English Core')) { continue }
 
   $variant = if ($subject -eq 'Math' -and $classLevel -eq 10) {
     Get-MathVariant $filename $relativePath.ToLower()

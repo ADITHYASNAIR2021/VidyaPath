@@ -41,8 +41,7 @@ DEFAULT_CHUNK_OVERLAP = 48
 MIN_ENGLISH_WORDS_PER_CHUNK = 28
 MIN_ENGLISH_RATIO = 0.7
 
-DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]+")
-NON_ASCII_RE = re.compile(r"[^\x09\x0A\x0D\x20-\x7E]+")
+CONTROL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]+")
 
 
 @dataclass
@@ -96,7 +95,7 @@ def tokenize(text: str) -> Set[str]:
 
 
 def clean_text(text: str) -> str:
-    text = text.replace("\x00", " ")
+    text = CONTROL_RE.sub(" ", text.replace("\x00", " "))
     text = text.replace("Rationalised 2023-24", " ")
     # Remove common exam-instruction boilerplate that hurts chapter mapping quality
     text = re.sub(
@@ -112,8 +111,6 @@ def clean_text(text: str) -> str:
         flags=re.I | re.S,
     )
     text = re.sub(r"Candidates must write the Q\.P\. Code.*?(?=(Section\s+[A-E]|Q\.?\s*1|$))", " ", text, flags=re.I | re.S)
-    text = DEVANAGARI_RE.sub(" ", text)
-    text = NON_ASCII_RE.sub(" ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -239,46 +236,61 @@ def parse_pyq_years(path: Path) -> Dict[str, List[int]]:
 
 def infer_subject(class_level: int, relative_path: str) -> Optional[str]:
     lower = relative_path.lower()
-    match = re.search(r"class_(10|12)/([^/]+)/", lower)
-    candidate = (match.group(2) if match else lower).strip()
-    token = re.sub(r"[^a-z]+", " ", candidate).strip()
+    parts = [p for p in lower.split("/") if p]
+    file_token = re.sub(r"\.pdf$", "", parts[-1]) if parts else lower
 
-    # Hard exclusions to prevent leaking non-target subjects into context
-    if any(x in token for x in ["social science", "home science", "physical education", "physical activity", "history", "geography"]):
-        return None
+    subject_candidates: List[str] = []
+    for idx, part in enumerate(parts):
+        if part == f"class_{class_level}":
+            subject_candidates.extend(parts[idx + 1 : -1])
+            break
+    if not subject_candidates:
+        subject_candidates = parts[:-1]
 
-    if class_level == 10:
-        if any(x in token for x in ["math", "mathematics"]):
-            return "Math"
-        if any(x in token for x in ["science", "scince", "physics", "chemistry", "biology"]):
-            return "Science"
-        if "english" in token:
-            return "English Core"
-        return None
+    filtered_candidates = [p for p in subject_candidates if "zip_extracted" not in p]
+    token_blob = " ".join(filtered_candidates + [file_token])
+    token = re.sub(r"[^a-z]+", " ", token_blob).strip()
 
-    if any(x in token for x in ["accountancy", "accounts", "accounting", "financial accounting"]):
+    if any(x in token for x in ["accountancy", "accounts", "accounting", "financial accounting", "book keeping"]):
         return "Accountancy"
-    if any(x in token for x in ["business studies", "business study", "business", "entrepreneurship", "marketing"]):
+    if any(x in token for x in ["business studies", "business study", "entrepreneurship", "marketing"]):
         return "Business Studies"
-    if any(x in token for x in ["economics", "economy", "macroeconomics", "microeconomics", "indian economic development"]):
+    if any(x in token for x in ["economics", "macroeconomics", "microeconomics", "indian economic development"]):
         return "Economics"
     if "english" in token:
         return "English Core"
-    if any(x in token for x in ["physics", "applied physics"]):
-        return "Physics"
+    if any(x in token for x in ["physics", "applied physics", "physical world"]):
+        return "Science" if class_level == 10 else "Physics"
     if any(x in token for x in ["chemistry", "chem"]):
-        return "Chemistry"
+        return "Science" if class_level == 10 else "Chemistry"
     if any(x in token for x in ["biology", "bio"]) and "biotech" not in token:
-        return "Biology"
-    if any(x in token for x in ["math", "mathematics", "applied mathematics"]):
+        return "Science" if class_level == 10 else "Biology"
+    if any(x in token for x in ["math", "mathematics", "applied mathematics", "maths"]):
         return "Math"
+    if any(x in token for x in ["science", "scince"]) and "social science" not in token:
+        return "Science"
+    if "social science" in token:
+        return "Social Science"
+    if "political science" in token:
+        return "Political Science"
+    if "history" in token:
+        return "History"
+    if "geography" in token:
+        return "Geography"
+    if "computer science" in token:
+        return "Computer Science"
+    if "physical education" in token:
+        return "Physical Education"
+
+    if filtered_candidates:
+        fallback = filtered_candidates[0].replace("_", " ").replace("-", " ").strip()
+        if fallback:
+            return " ".join(word.capitalize() for word in fallback.split())
     return None
 
 
 def parse_pdf_record(dataset_root: Path, file_path: Path, pyq_year_buckets: Set[Tuple[int, str, int]]) -> Optional[PdfRecord]:
     relative_path = file_path.relative_to(dataset_root).as_posix()
-    if ".zip_extracted/" in relative_path.lower():
-        return None
     m = re.match(r"(?P<year_token>\d{4}(?:-COMPTT)?)/Class_(?P<class_level>10|12)/", relative_path)
     if not m:
         return None
@@ -300,12 +312,17 @@ def parse_pdf_record(dataset_root: Path, file_path: Path, pyq_year_buckets: Set[
     pyq_boost = 3.0 if (class_level, subject, year) in pyq_year_buckets else 0.0
     filename = file_path.name.lower()
     noise_penalty = 0.0
+    lower_path = relative_path.lower()
+    if ".zip_extracted/" in lower_path:
+        noise_penalty -= 1.5
     if "solution" in filename:
         noise_penalty -= 2.5
     if "sample" in filename:
         noise_penalty -= 1.5
     if "marking" in filename:
         noise_penalty -= 1.0
+    if "urdu" in filename or "hindi" in filename:
+        noise_penalty -= 0.5
 
     score = recency_score + paper_type_weight + pyq_boost + noise_penalty
     return PdfRecord(
@@ -453,9 +470,11 @@ def build_index(
     max_pages: int,
     chunk_words_size: int,
     chunk_overlap: int,
+    keep_unmapped: bool,
+    include_non_english: bool,
     data_ts: Path,
     pyq_ts: Path,
-) -> Tuple[int, int, int, int, int]:
+) -> Tuple[int, int, int, int, int, int]:
     chapters = parse_data_ts(data_ts)
     pyq_by_chapter = parse_pyq_years(pyq_ts)
     pyq_year_buckets = build_pyq_year_buckets(chapters, pyq_by_chapter)
@@ -481,6 +500,7 @@ def build_index(
     dropped_unmapped_chunks = 0
     dropped_non_english_chunks = 0
     dropped_instruction_chunks = 0
+    kept_unmapped_chunks = 0
 
     chunk_counter = 1
     extract_started = time.time()
@@ -510,16 +530,19 @@ def build_index(
             if is_instruction_chunk(chunk_text):
                 dropped_instruction_chunks += 1
                 continue
-            if not is_english_chunk(chunk_text):
+            if not include_non_english and not is_english_chunk(chunk_text):
                 dropped_non_english_chunks += 1
                 continue
             chapter_id = map_chunk_to_chapter(chunk_text, chapter_pool)
             if not chapter_id:
                 dropped_unmapped_chunks += 1
-                continue
+                if not keep_unmapped:
+                    continue
+                kept_unmapped_chunks += 1
 
             entry = {
                 "id": f"ctx-{chunk_counter:07d}",
+                "sourceType": "paper",
                 "classLevel": record.class_level,
                 "subject": record.subject,
                 "chapterId": chapter_id,
@@ -557,6 +580,9 @@ def build_index(
             "pdfMatched": len(pdf_records),
             "pdfSelected": len(selected),
             "chunks": len(chunk_entries),
+            "keepUnmappedEnabled": keep_unmapped,
+            "includeNonEnglishEnabled": include_non_english,
+            "keptUnmappedChunks": kept_unmapped_chunks,
             "droppedUnmappedChunks": dropped_unmapped_chunks,
             "droppedNonEnglishChunks": dropped_non_english_chunks,
             "droppedInstructionChunks": dropped_instruction_chunks,
@@ -570,7 +596,14 @@ def build_index(
         encoding="utf-8",
     )
 
-    return len(selected), len(chunk_entries), dropped_unmapped_chunks, dropped_non_english_chunks, dropped_instruction_chunks
+    return (
+        len(selected),
+        len(chunk_entries),
+        dropped_unmapped_chunks,
+        kept_unmapped_chunks,
+        dropped_non_english_chunks,
+        dropped_instruction_chunks,
+    )
 
 
 def main() -> None:
@@ -586,6 +619,16 @@ def main() -> None:
     parser.add_argument("--max-pages", type=int, default=3, help="Max pages to extract per PDF")
     parser.add_argument("--chunk-words", type=int, default=DEFAULT_CHUNK_WORDS, help="Words per chunk")
     parser.add_argument("--chunk-overlap", type=int, default=DEFAULT_CHUNK_OVERLAP, help="Chunk overlap words")
+    parser.add_argument(
+        "--drop-unmapped",
+        action="store_true",
+        help="Drop chunks that could not be mapped to any chapter (default keeps them for broader subject retrieval)",
+    )
+    parser.add_argument(
+        "--strict-english",
+        action="store_true",
+        help="Drop non-English chunks (default keeps all languages)",
+    )
     parser.add_argument("--data-ts", default="lib/data.ts", help="Path to data.ts")
     parser.add_argument("--pyq-ts", default="lib/pyq.ts", help="Path to pyq.ts")
 
@@ -616,20 +659,26 @@ def main() -> None:
     if not pyq_ts.exists():
         raise SystemExit(f"pyq.ts not found: {pyq_ts}")
 
-    selected_count, chunk_count, dropped_unmapped_chunks, dropped_non_english_chunks, dropped_instruction_chunks = build_index(
+    keep_unmapped = not args.drop_unmapped
+    include_non_english = not args.strict_english
+
+    selected_count, chunk_count, dropped_unmapped_chunks, kept_unmapped_chunks, dropped_non_english_chunks, dropped_instruction_chunks = build_index(
         dataset_root=dataset_root,
         output_dir=output_dir,
         max_files=args.max_files,
         max_pages=max(1, args.max_pages),
         chunk_words_size=max(120, args.chunk_words),
         chunk_overlap=max(20, args.chunk_overlap),
+        keep_unmapped=keep_unmapped,
+        include_non_english=include_non_english,
         data_ts=data_ts,
         pyq_ts=pyq_ts,
     )
     print(
         "Built context index: "
         f"selected_pdfs={selected_count}, chunks={chunk_count}, dropped_unmapped={dropped_unmapped_chunks}, "
-        f"dropped_non_english={dropped_non_english_chunks}, dropped_instruction={dropped_instruction_chunks}, output={output_dir}"
+        f"kept_unmapped={kept_unmapped_chunks}, dropped_non_english={dropped_non_english_chunks}, "
+        f"dropped_instruction={dropped_instruction_chunks}, output={output_dir}"
     )
 
 

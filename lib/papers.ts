@@ -101,6 +101,9 @@ function getHfIndexKey(paper: PaperEntry): string | null {
 }
 
 function resolvePaperUrl(paper: PaperEntry): { url: string; isFromHF: boolean } {
+  if (paper.url.startsWith(`${HF_BASE}/`)) {
+    return { url: paper.url, isFromHF: true };
+  }
   const hfIndex = HF_PAPER_INDEX as Record<string, string>;
   const key = getHfIndexKey(paper);
   if (!key) return { url: paper.url, isFromHF: false };
@@ -117,6 +120,33 @@ function resolvePaperUrl(paper: PaperEntry): { url: string; isFromHF: boolean } 
   return { url: paper.url, isFromHF: false };
 }
 
+function parseHfPaperType(raw: string): PaperType {
+  if (raw === 'sample') return 'sample';
+  if (raw === 'compartment') return 'compartment';
+  return 'board';
+}
+
+function parseClassLevel(raw: string): 10 | 12 | null {
+  const value = Number(raw);
+  if (value === 10 || value === 12) return value;
+  return null;
+}
+
+function inferSetFromVariant(variant: string): PaperSet | undefined {
+  const normalized = variant.trim().toLowerCase();
+  if (normalized === 'basic') return 'Basic';
+  if (normalized === 'standard') return 'Standard';
+  return undefined;
+}
+
+function estimateTotalMarks(classLevel: 10 | 12, subject: string): number {
+  if (subject === 'Marking Scheme') return 0;
+  if (classLevel === 10) {
+    return subject.toLowerCase().includes('math') ? 80 : 80;
+  }
+  return subject.toLowerCase().includes('math') ? 80 : 80;
+}
+
 // ── CBSE Official base URLs - fallback / sample papers ───────
 const CBSE_QP_10 = 'https://cbseacademic.nic.in/Question_Paper_classx.html';
 const CBSE_QP_12 = 'https://cbseacademic.nic.in/Question_Paper.html';
@@ -130,7 +160,6 @@ const CBSE_MS = 'https://cbseacademic.nic.in/Marking_Scheme.html';
 
 const boardPapers12: PaperEntry[] = [
   // ── 2025 - HF direct links (update paths after upload) ────
-  // TODO: Replace hf(...) paths with actual filenames from your dataset upload
   { id: 'b12-phy-2025', classLevel: 12, subject: 'Physics', year: 2025, title: 'Class 12 Physics Board Paper 2025', duration: '3 Hours', totalMarks: 70, url: CBSE_QP_12, paperType: 'board', set: 'All India', isOfficial: true },
   { id: 'b12-chem-2025', classLevel: 12, subject: 'Chemistry', year: 2025, title: 'Class 12 Chemistry Board Paper 2025', duration: '3 Hours', totalMarks: 70, url: CBSE_QP_12, paperType: 'board', set: 'All India', isOfficial: true },
   { id: 'b12-bio-2025', classLevel: 12, subject: 'Biology', year: 2025, title: 'Class 12 Biology Board Paper 2025', duration: '3 Hours', totalMarks: 70, url: CBSE_QP_12, paperType: 'board', set: 'All India', isOfficial: true },
@@ -603,11 +632,52 @@ const resources: PaperEntry[] = [
   { id: 'ms-all-2023', classLevel: 'all', subject: 'Marking Scheme', year: 2023, title: 'CBSE Marking Schemes 2023 - All Classes', duration: '-', totalMarks: 0, url: CBSE_MS, paperType: 'board', isOfficial: true },
 ];
 
+function buildDiscoveredHfPapers(): PaperEntry[] {
+  const hfIndex = HF_PAPER_INDEX as Record<string, string>;
+  const out: PaperEntry[] = [];
+  for (const [key, relativePath] of Object.entries(hfIndex)) {
+    const [paperTypeRaw, yearRaw, classRaw, subjectRaw = 'Unknown Subject', variantRaw = 'default'] = key.split('|');
+    const classLevel = parseClassLevel(classRaw);
+    const year = Number(yearRaw);
+    if (!classLevel || !Number.isFinite(year) || !relativePath) continue;
+    const paperType = parseHfPaperType(paperTypeRaw);
+    const subject = subjectRaw.trim() || 'Unknown Subject';
+    const variant = variantRaw.trim() || 'default';
+    const set = inferSetFromVariant(variant);
+
+    out.push({
+      id: `hf-${paperType}-${classLevel}-${slugifyId(subject)}-${year}-${slugifyId(variant)}`,
+      classLevel,
+      subject,
+      year,
+      title: `Class ${classLevel} ${subject} ${paperType[0].toUpperCase()}${paperType.slice(1)} Paper ${year}`,
+      duration: '3 Hours',
+      totalMarks: estimateTotalMarks(classLevel, subject),
+      url: hf(relativePath),
+      paperType,
+      set,
+      isOfficial: false,
+      isFromHF: true,
+    });
+  }
+  return out;
+}
+
+function slugifyId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+function paperFingerprint(paper: PaperEntry): string {
+  const normalizedSubject = paper.subject.trim().toLowerCase();
+  const variant = paper.subject === 'Math' && paper.classLevel === 10 ? getMathVariant(paper) : 'default';
+  return [paper.paperType, String(paper.classLevel), normalizedSubject, String(paper.year), variant].join('|');
+}
+
 // ============================================================
 // COMBINED EXPORT
 // ============================================================
 
-export const ALL_PAPERS: PaperEntry[] = [
+const manualPapers: PaperEntry[] = [
   ...boardPapers12,
   ...boardPapers10,
   ...englishBoardPapers,
@@ -619,6 +689,24 @@ export const ALL_PAPERS: PaperEntry[] = [
   ...englishCompartmentPapers,
   ...commerceCompartmentPapers,
   ...resources,
+];
+
+const manualFingerprints = new Set(
+  manualPapers
+    .filter((paper) => paper.classLevel === 10 || paper.classLevel === 12)
+    .map((paper) => paperFingerprint(paper))
+);
+
+const discoveredHfPapers = buildDiscoveredHfPapers().filter((paper) => {
+  const fp = paperFingerprint(paper);
+  if (manualFingerprints.has(fp)) return false;
+  manualFingerprints.add(fp);
+  return true;
+});
+
+export const ALL_PAPERS: PaperEntry[] = [
+  ...manualPapers,
+  ...discoveredHfPapers,
 ];
 
 /** Years covered across all papers */

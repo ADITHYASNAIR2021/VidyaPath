@@ -246,9 +246,10 @@ Return ONLY JSON:
         endpoint: '/api/chapter-remediate',
         provider: result.provider,
         model: result.model,
-        promptText: prompt,
-        completionText: JSON.stringify(payload),
-        estimated: true,
+        promptTokens: result.usage?.promptTokens,
+        completionTokens: result.usage?.completionTokens,
+        totalTokens: result.usage?.totalTokens,
+        estimated: !result.usage,
       });
       return dataJson({ requestId, data: payload });
     } catch (aiError) {

@@ -92,14 +92,15 @@ export async function POST(req: Request) {
       })),
       contextHash: contextPack.contextHash,
       usedOnDemandFallback: contextPack.usedOnDemandFallback,
+      usedPgvector: contextPack.usedPgvector,
     };
     await logAiUsage({
       context,
       endpoint: '/api/context-pack',
-      provider: 'local-retriever',
-      model: 'context-index',
+      provider: contextPack.usedPgvector ? 'nvidia-pgvector' : 'local-retriever',
+      model: contextPack.usedPgvector ? 'nv-embedqa-e5-v5' : 'context-index',
       promptText: query,
-      completionText: JSON.stringify({ snippets: payload.snippets.length, usedOnDemandFallback: payload.usedOnDemandFallback }),
+      completionText: JSON.stringify({ snippets: payload.snippets.length, usedPgvector: payload.usedPgvector }),
       estimated: true,
     });
     return dataJson({ requestId, data: payload });

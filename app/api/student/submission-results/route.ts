@@ -74,5 +74,6 @@ export async function GET(req: Request) {
     studentId: student.studentId,
     rollCode: student.rollCode,
   });
-  return dataJson({ requestId, data: { attempts } });
+  const releasedAttempts = attempts.filter((attempt) => attempt.status === 'released' && !!attempt.releasedAt);
+  return dataJson({ requestId, data: { attempts: releasedAttempts } });
 }

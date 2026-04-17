@@ -1,15 +1,10 @@
 /**
  * Unit tests for lib/ai/cost-guard.ts
- *
- * We don't spin up Redis or Supabase here — we test:
- *   1. Per-request hard cap rejection
- *   2. Type contract for TokenBudgetResult
- *   3. Fail-open behavior when tracking fails
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { checkAiTokenBudget, type TokenBudgetResult } from '@/lib/ai/cost-guard';
 
-describe('checkAiTokenBudget — per-request cap', () => {
+describe('checkAiTokenBudget', () => {
   it('rejects requests above AI_MAX_TOKENS_PER_REQUEST (default 4000)', async () => {
     const result = await checkAiTokenBudget({
       schoolId: null,
@@ -20,34 +15,40 @@ describe('checkAiTokenBudget — per-request cap', () => {
     expect(result.remaining).toBe(0);
   });
 
-  it('allows requests within the per-request cap', async () => {
-    // This will also hit the global daily check, but in test env Redis/Supabase
-    // are both unconfigured so the cost-guard fails-open.
+  it('accepts rich route input and computes requested token estimate internally', async () => {
+    const projectedInputText = 'Electrostatics derivation for potential due to dipole.';
     const result = await checkAiTokenBudget({
-      schoolId: null,
-      requestedTokens: 100,
+      context: { schoolId: 'sch_test' },
+      endpoint: '/api/chapter-pack',
+      projectedInputText,
+      projectedOutputTokens: 1200,
     });
-    // Either allowed (fail-open) or rejected due to daily cap — but never per-request-cap
-    expect(result.reason ?? 'ok').not.toBe('per-request-cap');
+
     expect(typeof result.allowed).toBe('boolean');
-    expect(typeof result.remaining).toBe('number');
-    expect(typeof result.limit).toBe('number');
-    expect(result.requested).toBe(100);
+    expect(result.requested).toBeGreaterThan(1200);
+    expect(result.reason ?? 'ok').not.toBe('per-request-cap');
   });
 
-  it('result shape matches TokenBudgetResult interface', async () => {
+  it('uses backward-compatible legacy shape', async () => {
     const result: TokenBudgetResult = await checkAiTokenBudget({
-      requestedTokens: 500,
+      requestedTokens: 200,
     });
     expect('allowed' in result).toBe(true);
     expect('remaining' in result).toBe(true);
     expect('requested' in result).toBe(true);
     expect('limit' in result).toBe(true);
+    expect(result.requested).toBe(200);
   });
 
-  it('handles missing schoolId gracefully', async () => {
-    const result = await checkAiTokenBudget({ requestedTokens: 200 });
+  it('handles missing numeric token fields without NaN', async () => {
+    const result = await checkAiTokenBudget({
+      context: { schoolId: 'sch_test' },
+      endpoint: '/api/test',
+      projectedInputText: '',
+      projectedOutputTokens: Number.NaN,
+    });
     expect(result).toBeDefined();
-    expect(typeof result.allowed).toBe('boolean');
+    expect(Number.isFinite(result.requested)).toBe(true);
+    expect(result.requested).toBeGreaterThanOrEqual(1);
   });
 });

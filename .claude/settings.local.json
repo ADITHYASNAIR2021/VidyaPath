@@ -61,7 +61,14 @@
       "Bash(sed 's|/d/VidyaPath/app/api||; s|/route.ts||')",
       "Read(//tmp/**)",
       "Bash(xargs ls *)",
-      "Bash(grep -v \"//\")"
+      "Bash(grep -v \"//\")",
+      "Bash(node -e \"const fs=require\\('fs'\\); const lines=fs.readFileSync\\('supabase/migrations/20260418000600_pgvector_document_embeddings.sql','utf8'\\).split\\('\\\\n'\\); console.log\\(lines.length + ' lines, looks OK'\\)\")",
+      "Bash(powershell -Command \"Select-String -Path 'D:\\\\VidyaPath\\\\.env.example' -Pattern 'NVIDIA|AI_ENABLE|pgvector' -Quiet\")",
+      "Bash(powershell -Command \"Select-String -Path 'D:\\\\VidyaPath\\\\.env.example' -Pattern 'NVIDIA|AI_ENABLE|AI_RERANK|SUPABASE_SERVICE'\")",
+      "Bash(powershell -Command \"Select-String -Path 'D:\\\\VidyaPath\\\\.env.example' -Pattern 'embeddings|ingest|pgvector|document_embed'\")",
+      "Bash(node -e \"const s=require\\('fs'\\).readFileSync\\('scripts/ingest_embeddings.mjs','utf8'\\); console.log\\('withRetry found:', s.includes\\('withRetry'\\)\\); console.log\\('retry lines:', s.split\\('\\\\n'\\).filter\\(l=>l.includes\\('withRetry'\\)\\).length\\)\")",
+      "Bash(node scripts/gen-test-data.mjs)",
+      "Bash(node -e ' *)"
     ]
   }
 }

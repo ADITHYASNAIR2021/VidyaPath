@@ -59,6 +59,18 @@ const RECOMMENDED_SPECS: EnvSpec[] = [
     warnOnly: true,
     description: 'Upstash Redis REST URL. Required for fast-path rate limiting.',
   },
+  {
+    key: 'NVIDIA_API_KEY',
+    required: false,
+    warnOnly: true,
+    description: 'NVIDIA NIM API key (nvapi-...). Required for pgvector RAG embeddings and NVIDIA reranking.',
+  },
+  {
+    key: 'GROQ_API_KEY',
+    required: false,
+    warnOnly: true,
+    description: 'Groq API key (gsk_...). Primary LLM provider for text generation.',
+  },
 ];
 
 export interface EnvValidationResult {

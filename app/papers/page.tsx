@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Clock, Star, ChevronRight, Shield, BookOpen, Award,
@@ -8,9 +8,11 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import {
-  ALL_PAPERS, PAPER_YEARS, filterPapers, getPaperStats,
+  filterPapers, getPaperStats,
   type PaperEntry, type PaperType,
 } from '@/lib/papers';
+import type { Subject } from '@/lib/data';
+import { fetchClientStudentSession } from '@/lib/client-student-session';
 
 // ── Design tokens ────────────────────────────────────────────
 const SUBJECT_COLORS: Record<string, { bg: string; text: string; light: string; ring: string }> = {
@@ -180,6 +182,17 @@ function YearSection({ year, papers }: { year: number; papers: PaperEntry[] }) {
   );
 }
 
+function paperVisibleForEnrollment(paper: PaperEntry, enrolledSubjectSet: Set<Subject> | null): boolean {
+  if (!enrolledSubjectSet) return true;
+  if (paper.subject === 'All Subjects' || paper.subject === 'Marking Scheme') {
+    return enrolledSubjectSet.size > 0;
+  }
+  if (paper.subject === 'Science') {
+    return enrolledSubjectSet.has('Physics') || enrolledSubjectSet.has('Chemistry') || enrolledSubjectSet.has('Biology');
+  }
+  return enrolledSubjectSet.has(paper.subject as Subject);
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function PapersPage() {
   const stats = useMemo(() => getPaperStats(), []);
@@ -188,21 +201,73 @@ export default function PapersPage() {
   const [activeType, setActiveType] = useState<PaperType | 'all'>('all');
   const [activeSubject, setActiveSubject] = useState('All');
   const [viewMode, setViewMode] = useState<'grid' | 'year'>('year');
+  const [studentSession, setStudentSession] = useState<{
+    isStudent: boolean;
+    classLevel?: 10 | 12;
+    enrolledSubjects: Subject[];
+  }>({
+    isStudent: false,
+    enrolledSubjects: [],
+  });
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetchClientStudentSession()
+      .then((session) => {
+        if (!active) return;
+        if (!session?.studentId) {
+          setStudentSession({ isStudent: false, enrolledSubjects: [] });
+          return;
+        }
+        if (session.classLevel === 10 || session.classLevel === 12) {
+          setActiveClass(session.classLevel);
+        }
+        setStudentSession({
+          isStudent: true,
+          classLevel: session.classLevel,
+          enrolledSubjects: session.enrolledSubjects,
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setStudentSession({ isStudent: false, enrolledSubjects: [] });
+      })
+      .finally(() => {
+        if (active) setSessionLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const enrolledSubjectSet = useMemo(() => {
+    if (!studentSession.isStudent) return null;
+    return new Set<Subject>(studentSession.enrolledSubjects);
+  }, [studentSession.enrolledSubjects, studentSession.isStudent]);
 
   // Derive available subjects for selected class
   const classPapers = useMemo(
-    () => filterPapers({ classLevel: activeClass }),
-    [activeClass]
+    () => filterPapers({ classLevel: activeClass }).filter((paper) => paperVisibleForEnrollment(paper, enrolledSubjectSet)),
+    [activeClass, enrolledSubjectSet]
   );
   const subjects = useMemo(
     () => ['All', ...Array.from(new Set(classPapers.map((p) => p.subject))).sort()],
     [classPapers]
   );
 
+  useEffect(() => {
+    if (!subjects.includes(activeSubject)) {
+      setActiveSubject('All');
+    }
+  }, [activeSubject, subjects]);
+
   // Final filtered set
   const filtered = useMemo(
-    () => filterPapers({ classLevel: activeClass, subject: activeSubject, paperType: activeType }),
-    [activeClass, activeSubject, activeType]
+    () =>
+      filterPapers({ classLevel: activeClass, subject: activeSubject, paperType: activeType })
+        .filter((paper) => paperVisibleForEnrollment(paper, enrolledSubjectSet)),
+    [activeClass, activeSubject, activeType, enrolledSubjectSet]
   );
 
   // Years present in filtered set
@@ -332,6 +397,11 @@ export default function PapersPage() {
         </motion.div>
 
         {/* ── Results summary ── */}
+        {sessionLoaded && studentSession.isStudent && (
+          <p className="mb-4 text-xs font-semibold text-indigo-700">
+            Showing only your enrolled subjects: {studentSession.enrolledSubjects.join(', ') || 'None assigned yet'}.
+          </p>
+        )}
         <div className="flex items-center justify-between mb-5">
           <p className="text-sm text-[#8A8AAA]">
             <span className="font-semibold text-navy-700">{filtered.length}</span> papers found

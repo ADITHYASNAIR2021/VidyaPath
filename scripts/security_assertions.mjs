@@ -28,6 +28,8 @@ const parentSessionTs = read('lib/auth/parent-session.ts');
 const middlewareTs = read('middleware.ts');
 const guardsTs = read('lib/auth/guards.ts');
 const packageJson = JSON.parse(read('package.json'));
+const ciWorkflow = read('.github/workflows/ci.yml');
+const publicSwJs = read('public/sw.js');
 const migrationDir = path.join(root, 'supabase', 'migrations');
 const migrationNames = fs.existsSync(migrationDir) ? fs.readdirSync(migrationDir) : [];
 const apiRouteDir = path.join(root, 'app', 'api');
@@ -55,6 +57,10 @@ assertNotIncludes(middlewareTs, 'AUTH_REQUIRED_AI_API_PREFIXES', 'middleware.ts'
 assertIncludes(middlewareTs, "if (pathname.startsWith('/api/'))", 'middleware.ts');
 assertIncludes(guardsTs, 'isLegacySessionAuthEnabled', 'lib/auth/guards.ts');
 assertIncludes(guardsTs, 'resolveSupabaseContext', 'lib/auth/guards.ts');
+assertIncludes(ciWorkflow, 'name: CI', '.github/workflows/ci.yml');
+assertNotIncludes(ciWorkflow, '# name: CI', '.github/workflows/ci.yml');
+assertNotIncludes(publicSwJs, 'eval-source-map', 'public/sw.js');
+assertNotIncludes(publicSwJs, 'module.hot', 'public/sw.js');
 
 assert(!Object.prototype.hasOwnProperty.call(packageJson.dependencies || {}, 'xlsx'), 'package.json: xlsx dependency should be removed');
 

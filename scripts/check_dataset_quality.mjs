@@ -4,8 +4,10 @@ import path from 'node:path';
 
 const root = process.cwd();
 const datasetRoot = path.join(root, 'dataset', 'cbse_papers');
+const textbookRoot = path.join(root, 'dataset', 'ncert_textbooks');
 const hfIndexPath = path.join(root, 'lib', 'hfPaperIndex.json');
 const chapterIndexPath = path.join(root, 'lib', 'context', 'chapter_index.json');
+const textbookChunksPath = path.join(root, 'lib', 'context', 'textbook_chunks.jsonl');
 
 function walkFiles(dir, out = []) {
   if (!fs.existsSync(dir)) return out;
@@ -28,6 +30,7 @@ function pct(part, whole) {
 
 function main() {
   const files = walkFiles(datasetRoot, []);
+  const textbookFiles = walkFiles(textbookRoot, []).filter((file) => file.toLowerCase().endsWith('.pdf'));
   const metadata = files.filter((file) => file.endsWith('.metadata'));
   const unknownMetadata = metadata.filter((file) => file.includes(`${path.sep}Unknown${path.sep}`)).length;
   const class12Metadata = metadata.filter((file) => file.includes(`${path.sep}Class_12${path.sep}`));
@@ -55,6 +58,9 @@ function main() {
   const totalChapters = Object.keys(chapterMap).length;
   const emptyChapters = Object.values(chapterMap).filter((list) => !Array.isArray(list) || list.length === 0).length;
   const chapterCoveragePct = pct(totalChapters - emptyChapters, Math.max(1, totalChapters));
+  const textbookChunkLines = fs.existsSync(textbookChunksPath)
+    ? fs.readFileSync(textbookChunksPath, 'utf8').split('\n').map((line) => line.trim()).filter(Boolean).length
+    : 0;
 
   console.log(`[quality] metadata.total=${metadata.length}`);
   console.log(`[quality] metadata.unknown=${unknownMetadata} (${pct(unknownMetadata, metadata.length)}%)`);
@@ -62,6 +68,8 @@ function main() {
   console.log(`[quality] hfIndex.total=${hfKeys.length} commerceKeys=${commerceKeys}`);
   console.log(`[quality] hfIndex.broken=${broken} (${brokenRatio}%)`);
   console.log(`[quality] chapterCoverage=${chapterCoveragePct}%`);
+  console.log(`[quality] ncertTextbooks.pdf=${textbookFiles.length}`);
+  console.log(`[quality] ncertTextbooks.chunks=${textbookChunkLines}`);
 
   let fail = false;
   if (commerceKeys === 0) {
@@ -78,6 +86,10 @@ function main() {
   }
   if (chapterCoveragePct < 85) {
     console.error('[quality] FAIL: chapter coverage too low (<85%).');
+    fail = true;
+  }
+  if (textbookFiles.length > 0 && textbookChunkLines === 0) {
+    console.error('[quality] FAIL: NCERT textbook PDFs exist but textbook_chunks.jsonl is empty/missing.');
     fail = true;
   }
 

@@ -41,6 +41,17 @@ export interface NvidiaImageGenerationOptions {
   steps?: number;
 }
 
+export interface LlmUsageCounts {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface NvidiaCompletionResult {
+  text: string;
+  usage: LlmUsageCounts | null;
+}
+
 const DEFAULT_NVIDIA_INTEGRATE_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 const DEFAULT_NVIDIA_AI_BASE_URL = 'https://ai.api.nvidia.com/v1';
 
@@ -89,7 +100,7 @@ function normalizeMessageContent(content: unknown): string {
   return '';
 }
 
-export async function callNvidiaChatCompletion(options: NvidiaChatOptions): Promise<string> {
+export async function callNvidiaChatCompletion(options: NvidiaChatOptions): Promise<NvidiaCompletionResult> {
   const url = `${resolveIntegrateBaseUrl()}/chat/completions`;
   const messages =
     options.messages && options.messages.length > 0
@@ -129,12 +140,27 @@ export async function callNvidiaChatCompletion(options: NvidiaChatOptions): Prom
         reasoning_content?: unknown;
       };
     }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
   };
+
   const text = normalizeMessageContent(payload.choices?.[0]?.message?.content);
-  if (text) return text;
-  const reasoning = normalizeMessageContent(payload.choices?.[0]?.message?.reasoning_content);
-  if (reasoning) return reasoning;
-  throw new Error(`NVIDIA ${options.model} returned empty output`);
+  const outputText = text || normalizeMessageContent(payload.choices?.[0]?.message?.reasoning_content);
+  if (!outputText) throw new Error(`NVIDIA ${options.model} returned empty output`);
+
+  let usage: LlmUsageCounts | null = null;
+  const u = payload.usage;
+  if (u && typeof u.prompt_tokens === 'number' && typeof u.completion_tokens === 'number') {
+    usage = {
+      promptTokens: u.prompt_tokens,
+      completionTokens: u.completion_tokens,
+      totalTokens: u.total_tokens ?? u.prompt_tokens + u.completion_tokens,
+    };
+  }
+  return { text: outputText, usage };
 }
 
 export async function createNvidiaEmbeddings(options: NvidiaEmbeddingOptions): Promise<number[][]> {

@@ -1,4 +1,5 @@
 import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { normalizeAcademicStream } from '@/lib/academic-taxonomy';
 import { isValidPin } from '@/lib/auth/pin';
 import {
   buildInitialStudentPasswordFromLoginId,
@@ -115,8 +116,12 @@ export async function POST(req: Request) {
       const name = readString(row.name, 120);
       const rollNo = readString(row.rollNo ?? row.roll_number ?? row.roll, 50).toUpperCase();
       const rollCode = readString(row.rollCode ?? row.roll_code, 80).toUpperCase();
+      const stream = normalizeAcademicStream(row.stream ?? row.academicStream ?? row.track);
       if (!name) {
         throw new Error('Required student field missing: name.');
+      }
+      if (classSection.classLevel === 12 && !stream) {
+        throw new Error('Class 12 student rows must include stream (pcm|pcb|commerce|interdisciplinary).');
       }
       const pinInput = readString(row.pin, 16);
       const pin = pinInput && isValidPin(pinInput) ? pinInput : generatePin(rollNo || rollCode || name);
@@ -126,6 +131,7 @@ export async function POST(req: Request) {
         rollNo: rollNo || undefined,
         rollCode: rollCode || undefined,
         classLevel: classSection.classLevel,
+        stream,
         section: classSection.section,
         batch: classSection.batch,
         pin,

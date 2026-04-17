@@ -334,9 +334,10 @@ ${buildVariationInstruction(variation)}`;
         endpoint: '/api/chapter-drill',
         provider: result.provider,
         model: result.model,
-        promptText: promptWithVariation,
-        completionText: JSON.stringify(response),
-        estimated: true,
+        promptTokens: result.usage?.promptTokens,
+        completionTokens: result.usage?.completionTokens,
+        totalTokens: result.usage?.totalTokens,
+        estimated: !result.usage,
       });
       return dataJson({ requestId, data: response });
     } catch (aiError) {

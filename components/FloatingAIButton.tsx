@@ -69,7 +69,7 @@ function LoginCta() {
 
 export default function FloatingAIButton() {
   const pathname = usePathname();
-  const isExamRoute = pathname.startsWith('/exam/') || pathname.startsWith('/student/assignment/');
+  const isExamRoute = pathname.startsWith('/exam/');
 
   const [open, setOpen] = useState(false);
   const [showLockModal, setShowLockModal] = useState(false);

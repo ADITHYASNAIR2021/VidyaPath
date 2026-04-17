@@ -1,4 +1,5 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { normalizeAcademicStream } from '@/lib/academic-taxonomy';
 import {
   buildInitialStudentPasswordFromLoginId,
   generateLegacyPin,
@@ -8,6 +9,7 @@ import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request
 import { createStudentSchema } from '@/lib/schemas/admin-management';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { createStudent, listStudents } from '@/lib/teacher-admin-db';
 
 export const dynamic = 'force-dynamic';
@@ -60,6 +62,7 @@ export async function POST(req: Request) {
     const rollNo = typeof body.rollNo === 'string' ? body.rollNo.trim() : '';
     const batch = typeof body.batch === 'string' ? body.batch.trim() : undefined;
     const classLevel = Number(body.classLevel);
+    const stream = normalizeAcademicStream(body.stream);
     const section = typeof body.section === 'string' ? body.section.trim() : undefined;
     const pin = typeof body.pin === 'string' ? body.pin.trim() : undefined;
     const schoolId = adminSession.role === 'developer'
@@ -81,6 +84,21 @@ export async function POST(req: Request) {
         status: 400,
       });
     }
+    const limit = await checkRateLimit({
+      key: buildRateLimitKey('admin:students:bulk-write', [schoolId]),
+      windowSeconds: 60,
+      maxRequests: 5,
+      blockSeconds: 180,
+    });
+    if (!limit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many bulk student mutations for this school. Please retry shortly.',
+        status: 429,
+        hint: `Retry after ${limit.retryAfterSeconds}s`,
+      });
+    }
 
     const issuedPin = pin && /^\d{4,8}$/.test(pin) ? pin : generatePin(rollNo || rollCode || name);
     const student = await createStudent({
@@ -90,6 +108,7 @@ export async function POST(req: Request) {
       rollNo: rollNo || undefined,
       batch,
       classLevel: classLevel as 10 | 12,
+      stream,
       section,
       pin: issuedPin,
     });
