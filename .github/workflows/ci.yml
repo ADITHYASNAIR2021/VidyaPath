@@ -1,107 +1,107 @@
-# name: CI
+name: CI
 
-# on:
-#   push:
-#     branches:
-#       - main
-#       - master
-#       - 'release/**'
-#   pull_request:
+on:
+  push:
+    branches:
+      - main
+      - master
+      - 'release/**'
+  pull_request:
 
-# jobs:
-#   quality:
-#     name: Typecheck, Lint, Tests, Guards
-#     runs-on: ubuntu-latest
-#     timeout-minutes: 25
-#     env:
-#       NODE_ENV: test
-#       SESSION_SIGNING_SECRET: ci-session-signing-secret-32chars-minimum-0001
-#       ADMIN_PORTAL_KEY: ci-admin-key
-#       TEACHER_PORTAL_KEY: ci-teacher-key
-#       DEVELOPER_USERNAME: ci-developer
-#       DEVELOPER_PASSWORD: ci-developer-password
-#       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-#       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
-#       SUPABASE_SERVICE_ROLE_KEY: ci-service-key
-#     steps:
-#       - name: Checkout
-#         uses: actions/checkout@v4
+jobs:
+  quality:
+    name: Typecheck, Lint, Tests, Guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_ENV: test
+      SESSION_SIGNING_SECRET: ci-session-signing-secret-32chars-minimum-0001
+      ADMIN_PORTAL_KEY: ci-admin-key
+      TEACHER_PORTAL_KEY: ci-teacher-key
+      DEVELOPER_USERNAME: ci-developer
+      DEVELOPER_PASSWORD: ci-developer-password
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-service-key
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-#       - name: Setup Node
-#         uses: actions/setup-node@v4
-#         with:
-#           node-version: 20
-#           cache: npm
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-#       - name: Install dependencies
-#         run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-#       - name: Type check
-#         run: npm run typecheck
+      - name: Type check
+        run: npm run typecheck
 
-#       - name: Lint
-#         run: npm run lint:strict
+      - name: Lint
+        run: npm run lint:strict
 
-#       - name: Unit tests
-#         run: npm run test
+      - name: Unit tests
+        run: npm run test
 
-#       - name: Security guards
-#         run: npm run test:security-guards
+      - name: Security guards
+        run: npm run test:security-guards
 
-#       - name: Route and URL integrity
-#         run: npm run check:route-links
+      - name: Route and URL integrity
+        run: npm run check:route-links
 
-#       - name: Supabase migration lint
-#         run: npm run db:lint
+      - name: Supabase migration lint
+        run: npm run db:lint
 
-#   audit:
-#     name: Dependency Audit (prod)
-#     runs-on: ubuntu-latest
-#     timeout-minutes: 10
-#     steps:
-#       - name: Checkout
-#         uses: actions/checkout@v4
+  audit:
+    name: Dependency Audit (prod)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-#       - name: Setup Node
-#         uses: actions/setup-node@v4
-#         with:
-#           node-version: 20
-#           cache: npm
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-#       - name: Install dependencies
-#         run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-#       - name: npm audit
-#         run: npm audit --omit=dev --audit-level=high
+      - name: npm audit
+        run: npm audit --omit=dev --audit-level=high
 
-#   build-check:
-#     name: Build Check
-#     runs-on: ubuntu-latest
-#     timeout-minutes: 20
-#     env:
-#       NODE_ENV: production
-#       SESSION_SIGNING_SECRET: ci-build-session-signing-secret-32chars-min
-#       ADMIN_PORTAL_KEY: ci-admin-key
-#       TEACHER_PORTAL_KEY: ci-teacher-key
-#       DEVELOPER_USERNAME: ci-developer
-#       DEVELOPER_PASSWORD: ci-developer-password
-#       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-#       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
-#       SUPABASE_SERVICE_ROLE_KEY: ci-service-key
-#       NEXT_PUBLIC_APP_URL: https://example.com
-#       STRICT_ENV_VALIDATION: '0'
-#     steps:
-#       - name: Checkout
-#         uses: actions/checkout@v4
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: production
+      SESSION_SIGNING_SECRET: ci-build-session-signing-secret-32chars-min
+      ADMIN_PORTAL_KEY: ci-admin-key
+      TEACHER_PORTAL_KEY: ci-teacher-key
+      DEVELOPER_USERNAME: ci-developer
+      DEVELOPER_PASSWORD: ci-developer-password
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-service-key
+      NEXT_PUBLIC_APP_URL: https://example.com
+      STRICT_ENV_VALIDATION: '0'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-#       - name: Setup Node
-#         uses: actions/setup-node@v4
-#         with:
-#           node-version: 20
-#           cache: npm
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-#       - name: Install dependencies
-#         run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-#       - name: Build
-#         run: npm run build
+      - name: Build
+        run: npm run build
