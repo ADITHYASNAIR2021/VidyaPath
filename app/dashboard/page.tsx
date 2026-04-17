@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   Target, Trophy, BrainCircuit, Activity, BookOpen, ChevronRight,
@@ -120,6 +121,7 @@ interface StudentSessionSnapshot {
   studentName: string;
   classLevel: 10 | 12;
   section?: string;
+  mustChangePassword?: boolean;
   stream?: 'Science' | 'Commerce' | 'Humanities';
   enrolledSubjects: Subject[];
 }
@@ -190,6 +192,7 @@ interface DashboardSchoolAnnouncement {
 
 // ── Main page ─────────────────────────────────────────────────
 export default function DashboardPage() {
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [quizzesTaken, setQuizzesTaken] = useState(0);
   const [avgQuizScore, setAvgQuizScore] = useState(0);
@@ -296,6 +299,7 @@ export default function DashboardPage() {
           studentName: session.studentName,
           classLevel: session.classLevel,
           section: session.section,
+          mustChangePassword: session.mustChangePassword === true,
           stream: session.stream,
           enrolledSubjects: session.enrolledSubjects,
         } as StudentSessionSnapshot;
@@ -311,6 +315,12 @@ export default function DashboardPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (studentSession?.mustChangePassword) {
+      router.replace('/student/first-login');
+    }
+  }, [router, studentSession?.mustChangePassword]);
 
   useEffect(() => {
     if (!studentSession) {

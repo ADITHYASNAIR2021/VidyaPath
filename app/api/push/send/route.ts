@@ -13,8 +13,9 @@ import webpush from 'web-push';
 import { NextRequest } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
-import { supabaseSelect } from '@/lib/supabase-rest';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { pushSendSchema } from '@/lib/schemas/engagement';
+import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 
 const PUSH_TABLE = 'push_subscriptions';
 
@@ -48,35 +49,53 @@ export async function POST(req: NextRequest) {
 
     webpush.setVapidDetails(`mailto:${vapid.email}`, vapid.publicKey, vapid.privateKey);
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 8 * 1024);
-    if (!bodyResult.ok) return errorJson({ requestId, errorCode: bodyResult.reason, message: bodyResult.message, status: 400 });
+    const bodyResult = await parseAndValidateJsonBody(req, 8 * 1024, pushSendSchema);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
+      });
+    }
 
     const body = bodyResult.value;
     const title = typeof body.title === 'string' ? body.title.trim() : 'VidyaPath';
-    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    const message = body.message.trim();
     const url = typeof body.url === 'string' ? body.url.trim() : '/dashboard';
     const schoolId = context.role === 'admin' ? (context.schoolId || '') : (typeof body.schoolId === 'string' ? body.schoolId : '');
 
-    const filters = schoolId
-      ? [{ column: 'school_id', value: schoolId }]
-      : [];
-
-    const subscriptions = await supabaseSelect<{
-      endpoint: string;
-      p256dh: string;
-      auth: string;
-    }>(PUSH_TABLE, {
-      select: 'endpoint,p256dh,auth',
-      filters,
-      limit: 500,
-    });
+    const resolvedClient = resolveRequestSupabaseClient(req, 'service-first');
+    if (!resolvedClient) {
+      return errorJson({
+        requestId,
+        errorCode: 'supabase-unavailable',
+        message: 'Push storage backend is unavailable.',
+        status: 503,
+      });
+    }
+    let query = resolvedClient.client
+      .from(PUSH_TABLE)
+      .select('endpoint,p256dh,auth')
+      .limit(500);
+    if (schoolId) query = query.eq('school_id', schoolId);
+    const { data: subscriptions, error: subscriptionsError } = await query;
+    if (subscriptionsError) {
+      return errorJson({
+        requestId,
+        errorCode: 'push-subscriptions-read-failed',
+        message: subscriptionsError.message || 'Failed to load push subscriptions.',
+        status: 500,
+      });
+    }
 
     const payload = JSON.stringify({ title, body: message, url, icon: '/icon.png' });
     let sent = 0;
     let failed = 0;
 
     await Promise.allSettled(
-      subscriptions.map(async (sub) => {
+      (subscriptions || []).map(async (sub) => {
         try {
           await webpush.sendNotification(
             { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
@@ -89,7 +108,7 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    return dataJson({ requestId, data: { sent, failed, total: subscriptions.length } });
+    return dataJson({ requestId, data: { sent, failed, total: subscriptions?.length || 0 } });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Failed to send push notifications.';
     return errorJson({ requestId, errorCode: 'push-send-failed', message: msg, status: 500 });

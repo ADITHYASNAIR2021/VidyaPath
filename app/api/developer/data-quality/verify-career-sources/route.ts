@@ -1,6 +1,7 @@
 import { getDeveloperSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { verifyCareerSourcesSchema } from '@/lib/schemas/developer-ops';
 import {
   listCareerSourceIssues,
   listCareerSourceTargets,
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
   const session = await getDeveloperSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Developer session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 8 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 8 * 1024, verifyCareerSourcesSchema);
   let persistIssues = true;
   if (bodyResult.ok && typeof bodyResult.value.persistIssues === 'boolean') {
     persistIssues = Boolean(bodyResult.value.persistIssues);

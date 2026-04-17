@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic';
 import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { sheetsExportSchema } from '@/lib/schemas/sheets-integration';
 import { canTeacherAccessAssignmentPack, getAssignmentPack, getTeacherSubmissionSummary } from '@/lib/teacher-admin-db';
 import { exportToSheets } from '@/lib/sheets-bridge';
 
@@ -19,25 +20,17 @@ export async function POST(req: Request) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 24 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 24 * 1024, sheetsExportSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    const packId = typeof body?.packId === 'string' ? body.packId.trim() : '';
-    if (!packId) {
-      return errorJson({
-        requestId,
-        errorCode: 'missing-pack-id',
-        message: 'packId is required.',
-        status: 400,
-      });
-    }
+    const { packId = '' } = bodyResult.value;
 
     if (teacher && !(await canTeacherAccessAssignmentPack(teacher.teacher.id, packId))) {
       return errorJson({

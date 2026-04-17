@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Terminal } from 'lucide-react';
+import Link from 'next/link';
+import { Eye, EyeOff, Terminal } from 'lucide-react';
 
 export default function DeveloperLoginPage() {
   const router = useRouter();
@@ -11,6 +12,7 @@ export default function DeveloperLoginPage() {
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -66,29 +68,42 @@ export default function DeveloperLoginPage() {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && login()}
-          placeholder="developer"
+          placeholder="developer@vidyapath"
           autoComplete="username"
           className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
         />
 
         <label className="block text-xs font-semibold text-[#4A4560] mt-3 mb-1">Password</label>
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && login()}
-          placeholder="••••••••"
-          type="password"
-          autoComplete="current-password"
-          className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-        />
+        <div className="relative">
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && login()}
+            placeholder="********"
+            type={showPassword ? 'text' : 'password'}
+            autoComplete="current-password"
+            className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 pr-11 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((value) => !value)}
+            className="absolute inset-y-0 right-0 px-3 text-[#6A6580] hover:text-[#373347]"
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
+          >
+            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        </div>
 
         <button
           onClick={login}
           disabled={loading}
           className="mt-5 w-full rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 py-2.5 text-sm font-semibold text-white transition-colors"
         >
-          {loading ? 'Signing in…' : 'Sign in'}
+          {loading ? 'Signing in...' : 'Sign in'}
         </button>
+        <p className="mt-3 text-xs text-[#7A7490]">
+          Home: <Link href="/" className="font-semibold text-indigo-700 hover:text-indigo-800">Back to home</Link>
+        </p>
       </div>
     </div>
   );

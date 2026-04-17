@@ -1,10 +1,12 @@
 import { NextRequest } from 'next/server';
 import { getChapterById } from '@/lib/data';
 import { generateTaskText } from '@/lib/ai/generator';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { teacherAiRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { logServerEvent } from '@/lib/observability';
 
@@ -212,12 +214,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, teacherAiRequestSchema);
     if (!bodyResult.ok) {
-      return errorJson({ requestId, errorCode: bodyResult.reason, message: bodyResult.message, status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
+      });
     }
 
-    const body = bodyResult.value;
+    const body = bodyResult.value as Record<string, unknown>;
     const type = body.type as ToolType;
     if (!['worksheet', 'lesson-plan', 'question-paper'].includes(type)) {
       return errorJson({ requestId, errorCode: 'invalid-tool-type', message: 'type must be worksheet | lesson-plan | question-paper', status: 400 });
@@ -247,6 +255,21 @@ export async function POST(req: NextRequest) {
     const { system, user } = buildTeacherAIPrompt(
       type, chapterTitle, subject, classLevel, topics, questionCount, difficulty, customContext
     );
+    const tokenBudget = await checkAiTokenBudget({
+      context,
+      endpoint: '/api/teacher/ai',
+      projectedInputText: user,
+      projectedOutputTokens: 3000,
+    });
+    if (!tokenBudget.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: tokenBudget.reason || 'token-cap-exceeded',
+        message: 'AI usage limit reached for teacher tools.',
+        status: 429,
+        hint: `Retry after ${tokenBudget.retryAfterSeconds ?? 300}s`,
+      });
+    }
 
     const generated = await generateTaskText({
       task: 'chat',

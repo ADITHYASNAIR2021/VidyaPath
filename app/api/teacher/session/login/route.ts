@@ -10,16 +10,18 @@ import {
   signInWithPassword,
 } from '@/lib/auth/supabase-auth';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { teacherLoginSchema } from '@/lib/schemas/auth';
 import { logServerEvent } from '@/lib/observability';
 import {
   findTeacherAuthIdentities,
   findTeacherAuthIdentity,
   getSchoolByCode,
+  resolveRoleContextByAuthUserId,
 } from '@/lib/platform-rbac-db';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
-import { authenticateTeacher, authenticateTeacherByIdentifier, getTeacherSessionById } from '@/lib/teacher-admin-db';
+import { authenticateTeacher, authenticateTeacherByIdentifier, getTeacherSessionById } from '@/lib/teacher/auth.db';
 
 const SESSION_EXPIRY_MS = 8 * 60 * 60 * 1000;
 
@@ -34,13 +36,14 @@ export async function POST(req: Request) {
     });
   }
   const ip = getClientIp(req);
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 12 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 12 * 1024, teacherLoginSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 
@@ -91,6 +94,69 @@ export async function POST(req: Request) {
       status: 429,
       hint: `Retry after ${identityLimit.retryAfterSeconds}s`,
     });
+  }
+
+  if (identifier.includes('@')) {
+    try {
+      const authSession = await signInWithPassword({
+        email: identifier.toLowerCase(),
+        password,
+      });
+      const roleContext = authSession.user?.id
+        ? await resolveRoleContextByAuthUserId(authSession.user.id)
+        : null;
+      if (!roleContext || roleContext.role !== 'teacher' || !roleContext.profileId) {
+        return errorJson({
+          requestId,
+          errorCode: 'teacher-role-required',
+          message: 'Authenticated account does not have teacher access.',
+          status: 403,
+        });
+      }
+      if (schoolCode && roleContext.schoolCode && schoolCode.toUpperCase() !== roleContext.schoolCode.toUpperCase()) {
+        return errorJson({
+          requestId,
+          errorCode: 'teacher-school-mismatch',
+          message: 'Provided school code does not match this teacher account.',
+          status: 403,
+        });
+      }
+      const teacherSession = await getTeacherSessionById(roleContext.profileId, roleContext.schoolId);
+      if (!teacherSession) {
+        return errorJson({
+          requestId,
+          errorCode: 'teacher-profile-inactive',
+          message: 'Teacher profile is inactive or missing.',
+          status: 403,
+        });
+      }
+      const response = dataJson({
+        requestId,
+        data: {
+          teacher: teacherSession.teacher,
+          effectiveScopes: teacherSession.effectiveScopes,
+          role: 'teacher',
+          auth: 'supabase-email',
+          schoolId: roleContext.schoolId,
+          schoolCode: roleContext.schoolCode,
+          availableRoles: roleContext.availableRoles,
+          mustChangePassword: teacherSession.teacher.mustChangePassword ?? false,
+          sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
+        },
+      });
+      clearSupabaseSessionCookies(response);
+      clearAllRoleSessionCookies(response);
+      attachSupabaseSessionCookies(response, authSession, 'teacher');
+      attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
+      return response;
+    } catch {
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-teacher-credentials',
+        message: 'Invalid teacher credentials.',
+        status: 401,
+      });
+    }
   }
 
   if (schoolCode) {
@@ -144,6 +210,7 @@ export async function POST(req: Request) {
           schoolId: school.id,
           schoolCode,
           availableRoles: ['teacher'],
+          mustChangePassword: legacyResolved.session.teacher.mustChangePassword ?? false,
           sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
         },
       });
@@ -176,6 +243,7 @@ export async function POST(req: Request) {
           schoolId: authIdentity.schoolId,
           schoolCode,
           availableRoles: ['teacher'],
+          mustChangePassword: teacherSession.teacher.mustChangePassword ?? false,
           sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
         },
       });
@@ -229,6 +297,7 @@ export async function POST(req: Request) {
             auth: 'supabase',
             schoolId: authCandidates[0].schoolId,
             availableRoles: ['teacher'],
+            mustChangePassword: teacherSession.teacher.mustChangePassword ?? false,
             sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
           },
         });
@@ -278,6 +347,7 @@ export async function POST(req: Request) {
         role: 'teacher',
         auth: 'legacy',
         availableRoles: ['teacher'],
+        mustChangePassword: phoneSession.teacher.mustChangePassword ?? false,
         sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
       },
     });
@@ -295,6 +365,7 @@ export async function POST(req: Request) {
       role: 'teacher',
       auth: 'legacy',
       availableRoles: ['teacher'],
+      mustChangePassword: legacyResolved.session.teacher.mustChangePassword ?? false,
       sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
     },
   });

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function ParentLoginPage() {
   const router = useRouter();
@@ -54,6 +55,9 @@ export default function ParentLoginPage() {
         <button type="button" onClick={login} disabled={loading || !phone.trim() || !pin.trim()} className="mt-5 w-full rounded-xl bg-navy-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-navy-800 disabled:opacity-50">
           {loading ? 'Logging in...' : 'Login'}
         </button>
+        <p className="mt-3 text-xs text-[#7A7490]">
+          Home: <Link href="/" className="font-semibold text-indigo-700 hover:text-indigo-800">Back to home</Link>
+        </p>
       </div>
     </div>
   );

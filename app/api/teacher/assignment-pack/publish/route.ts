@@ -1,6 +1,7 @@
 import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getClientIp, getRequestId, withRequestIdHeader } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { publishPackSchema } from '@/lib/schemas/teacher-pack';
 import { logServerEvent } from '@/lib/observability';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -34,32 +35,24 @@ export async function POST(req: Request) {
 
     await assertTeacherStorageWritable();
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 16 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 16 * 1024, publishPackSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    const packId = typeof body.packId === 'string' ? body.packId.trim() : '';
-    if (!packId) {
-      return errorJson({
-        requestId,
-        errorCode: 'missing-pack-id',
-        message: 'packId is required.',
-        status: 400,
-      });
-    }
+    const { packId } = bodyResult.value;
 
     const idempotencyKey = req.headers.get('x-idempotency-key')?.trim() || `pack:${packId}:publish`;
     const idempotency = await beginIdempotentRequest({
       endpoint,
       actorScope: `teacher:${teacherSession.teacher.id}`,
       idempotencyKey,
-      requestBody: body,
+      requestBody: bodyResult.value as Record<string, unknown>,
       ttlSeconds: 24 * 60 * 60,
     });
     if (idempotency.kind === 'replay') {

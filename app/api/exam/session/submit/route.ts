@@ -1,6 +1,7 @@
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getClientIp, getRequestId, withRequestIdHeader } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { submitExamSchema } from '@/lib/schemas/exam-session';
 import { logServerEvent } from '@/lib/observability';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -55,25 +56,17 @@ export async function POST(req: Request) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 256 * 1024, submitExamSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
-    if (!sessionId) {
-      return errorJson({
-        requestId,
-        errorCode: 'missing-session-id',
-        message: 'sessionId is required.',
-        status: 400,
-      });
-    }
+    const { sessionId, answers: rawAnswers } = bodyResult.value;
 
     const idempotency = await beginIdempotentRequest({
       endpoint,
@@ -81,7 +74,7 @@ export async function POST(req: Request) {
       idempotencyKey: req.headers.get('x-idempotency-key')?.trim() || `exam-submit:${sessionId}`,
       requestBody: {
         sessionId,
-        answers: body.answers,
+        answers: rawAnswers,
       },
       ttlSeconds: 24 * 60 * 60,
     });
@@ -166,7 +159,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const answers = parseAnswers(body.answers);
+    const answers = parseAnswers(rawAnswers);
     if (answers.length === 0) {
       return errorJson({
         requestId,

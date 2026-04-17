@@ -17,8 +17,10 @@
 import { NextRequest } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
-import { supabaseInsert, supabaseSelect } from '@/lib/supabase-rest';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { pushSubscribeSchema } from '@/lib/schemas/engagement';
+import { decodeJwtPayload, getSupabaseAccessTokenFromRequest } from '@/lib/auth/supabase-auth';
+import { getUserClient } from '@/lib/supabase-rest';
 
 const PUSH_TABLE = 'push_subscriptions';
 
@@ -28,29 +30,51 @@ export async function POST(req: NextRequest) {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 8 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 8 * 1024, pushSubscribeSchema);
     if (!bodyResult.ok) {
-      return errorJson({ requestId, errorCode: bodyResult.reason, message: bodyResult.message, status: 400 });
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
+      });
+    }
+
+    const accessToken = getSupabaseAccessTokenFromRequest(req);
+    if (!accessToken) {
+      return errorJson({
+        requestId,
+        errorCode: 'supabase-session-required',
+        message: 'Supabase access token is required for push subscription updates.',
+        status: 401,
+      });
+    }
+    const client = getUserClient(accessToken);
+    const tokenPayload = decodeJwtPayload(accessToken);
+    if (!tokenPayload?.sub) {
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-supabase-session',
+        message: 'Supabase session is invalid or expired.',
+        status: 401,
+      });
     }
 
     const body = bodyResult.value;
-    const endpoint = typeof body.endpoint === 'string' ? body.endpoint.trim() : '';
-    const keysRaw = body.keys && typeof body.keys === 'object' ? body.keys as Record<string, unknown> : {};
-    const p256dh = typeof keysRaw.p256dh === 'string' ? keysRaw.p256dh : '';
-    const auth = typeof keysRaw.auth === 'string' ? keysRaw.auth : '';
-
-    if (!endpoint || !p256dh || !auth) {
-      return errorJson({ requestId, errorCode: 'invalid-subscription', message: 'endpoint and keys (p256dh, auth) are required.', status: 400 });
-    }
+    const endpoint = body.endpoint.trim();
+    const p256dh = body.keys.p256dh.trim();
+    const auth = body.keys.auth.trim();
 
     // Upsert: delete old subscription for same endpoint then insert
     try {
       // Check for existing
-      const existing = await supabaseSelect<Record<string, unknown>>(PUSH_TABLE, {
-        select: 'id',
-        filters: [{ column: 'endpoint', value: endpoint }],
-        limit: 1,
-      });
+      const { data: existing, error: selectError } = await client
+        .from(PUSH_TABLE)
+        .select('id')
+        .eq('endpoint', endpoint)
+        .limit(1);
+      if (selectError) throw selectError;
       if (existing.length > 0) {
         // Already stored, update user association if needed
         return dataJson({ requestId, data: { subscribed: true, updated: false } });
@@ -65,15 +89,23 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    await supabaseInsert(PUSH_TABLE, {
-      user_id: context?.profileId || context?.authUserId || 'anonymous',
-      role: context?.role || 'anonymous',
+    const { error: insertError } = await client.from(PUSH_TABLE).insert({
+      user_id: tokenPayload.sub,
+      role: context.role,
       school_id: context?.schoolId || null,
       endpoint,
       p256dh,
       auth,
       created_at: new Date().toISOString(),
     });
+    if (insertError) {
+      return errorJson({
+        requestId,
+        errorCode: 'push-subscribe-failed',
+        message: insertError.message || 'Failed to store push subscription.',
+        status: 500,
+      });
+    }
 
     return dataJson({ requestId, data: { subscribed: true, updated: true } });
   } catch (error) {

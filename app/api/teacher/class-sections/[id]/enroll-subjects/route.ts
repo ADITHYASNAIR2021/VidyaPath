@@ -1,6 +1,7 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { enrollSubjectsSchema } from '@/lib/schemas/teacher-roster';
 import {
   getClassSectionById,
   isTeacherClassTeacherForSection,
@@ -24,13 +25,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     });
   }
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, enrollSubjectsSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const subjects = Array.isArray(bodyResult.value.subjects)

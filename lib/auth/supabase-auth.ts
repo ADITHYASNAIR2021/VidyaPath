@@ -30,6 +30,24 @@ export interface JwtPayload {
   role?: string;
 }
 
+function readCookieValue(cookieHeader: string | null | undefined, name: string): string | null {
+  if (!cookieHeader) return null;
+  const parts = cookieHeader.split(';');
+  for (const part of parts) {
+    const [rawName, ...rawValue] = part.split('=');
+    if (!rawName || rawValue.length === 0) continue;
+    if (rawName.trim() !== name) continue;
+    const value = rawValue.join('=').trim();
+    if (!value) return null;
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+  return null;
+}
+
 function readSupabaseAuthConfig(): SupabaseAuthConfig | null {
   const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
   const anonKey = (
@@ -64,6 +82,14 @@ export function decodeJwtPayload(token: string | undefined | null): JwtPayload |
   } catch {
     return null;
   }
+}
+
+export function getSupabaseAccessTokenFromRequest(req: Request): string | null {
+  return readCookieValue(req.headers.get('cookie'), SUPABASE_ACCESS_COOKIE);
+}
+
+export function getSupabaseRefreshTokenFromRequest(req: Request): string | null {
+  return readCookieValue(req.headers.get('cookie'), SUPABASE_REFRESH_COOKIE);
 }
 
 export function isAccessTokenExpired(token: string | undefined | null, skewSeconds = 30): boolean {
@@ -180,6 +206,32 @@ export async function getSupabaseUser(accessToken: string): Promise<{ id: string
   };
 }
 
+export async function updateSupabasePassword(accessToken: string, newPassword: string): Promise<void> {
+  const config = readSupabaseAuthConfig();
+  if (!config) throw new Error('Supabase Auth is not configured.');
+  const response = await fetch(`${config.url}/auth/v1/user`, {
+    method: 'PUT',
+    headers: {
+      apikey: config.anonKey,
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password: newPassword }),
+    cache: 'no-store',
+  });
+  if (response.ok) return;
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  const message =
+    typeof json?.msg === 'string'
+      ? json.msg
+      : typeof json?.error_description === 'string'
+        ? json.error_description
+        : typeof json?.error === 'string'
+          ? json.error
+          : 'Failed to update password.';
+  throw new Error(message);
+}
+
 export async function createSupabaseAuthUser(input: {
   email: string;
   password: string;
@@ -249,7 +301,9 @@ export function attachSupabaseSessionCookies(
     expires: new Date(Date.now() + refreshMaxAge * 1000),
     maxAge: refreshMaxAge,
   });
-  if (roleHint) {
+  // Role-hint cookie is intentionally disabled by default.
+  // Middleware and guards should derive role from verified auth context only.
+  if (roleHint && process.env.ENABLE_SUPABASE_ROLE_HINT_COOKIE === '1') {
     response.cookies.set({
       name: SUPABASE_ROLE_HINT_COOKIE,
       value: roleHint,

@@ -3,11 +3,13 @@ import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskText, type ChatMessage } from '@/lib/ai/generator';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { trackAiQuestion } from '@/lib/analytics-store';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { aiTutorRequestSchema } from '@/lib/schemas/ai';
 import { logServerEvent } from '@/lib/observability';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
@@ -145,26 +147,32 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 48 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 48 * 1024, aiTutorRequestSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    if (!body || typeof body !== 'object') {
+    const payload = bodyResult.value as Record<string, unknown>;
+    const tokenBudget = await checkAiTokenBudget({
+      context,
+      endpoint: '/api/ai-tutor',
+      projectedInputText: JSON.stringify(payload),
+      projectedOutputTokens: 2048,
+    });
+    if (!tokenBudget.allowed) {
       return errorJson({
         requestId,
-        errorCode: 'invalid-request-body',
-        message: 'Invalid request body',
-        status: 400,
+        errorCode: tokenBudget.reason || 'token-cap-exceeded',
+        message: 'AI usage limit reached for this account. Please try again later.',
+        status: 429,
+        hint: `Retry after ${tokenBudget.retryAfterSeconds ?? 300}s`,
       });
     }
-
-    const payload = body;
     const messages = normalizeMessages(payload.messages);
     const chapterContext = normalizeChapterContext(payload.chapterContext);
 

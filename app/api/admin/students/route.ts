@@ -1,6 +1,11 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import {
+  buildInitialStudentPasswordFromLoginId,
+  generateLegacyPin,
+} from '@/lib/auth/password-policy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { createStudentSchema } from '@/lib/schemas/admin-management';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { createStudent, listStudents } from '@/lib/teacher-admin-db';
@@ -8,10 +13,7 @@ import { createStudent, listStudents } from '@/lib/teacher-admin-db';
 export const dynamic = 'force-dynamic';
 
 function generatePin(seed: string): string {
-  const digits = seed.replace(/\D/g, '');
-  const fromSeed = digits.slice(-4);
-  if (fromSeed.length === 4) return fromSeed;
-  return `${Math.floor(1000 + Math.random() * 9000)}`;
+  return generateLegacyPin(seed, 6);
 }
 
 export async function GET(req: Request) {
@@ -42,13 +44,14 @@ export async function POST(req: Request) {
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
   try {
     await assertTeacherStorageWritable();
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, createStudentSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
       });
     }
     const body = bodyResult.value;
@@ -59,7 +62,6 @@ export async function POST(req: Request) {
     const classLevel = Number(body.classLevel);
     const section = typeof body.section === 'string' ? body.section.trim() : undefined;
     const pin = typeof body.pin === 'string' ? body.pin.trim() : undefined;
-    const password = typeof body.password === 'string' ? body.password.trim() : undefined;
     const schoolId = adminSession.role === 'developer'
       ? (typeof body.schoolId === 'string' ? body.schoolId.trim() : undefined)
       : adminSession.schoolId;
@@ -68,14 +70,6 @@ export async function POST(req: Request) {
         requestId,
         errorCode: 'invalid-student-core-fields',
         message: 'Required: name and classLevel(10|12).',
-        status: 400,
-      });
-    }
-    if (!rollNo && !rollCode) {
-      return errorJson({
-        requestId,
-        errorCode: 'missing-student-identifier',
-        message: 'Provide rollNo (recommended) or rollCode.',
         status: 400,
       });
     }
@@ -89,7 +83,6 @@ export async function POST(req: Request) {
     }
 
     const issuedPin = pin && /^\d{4,8}$/.test(pin) ? pin : generatePin(rollNo || rollCode || name);
-    const issuedPassword = password || issuedPin;
     const student = await createStudent({
       schoolId,
       name,
@@ -99,8 +92,8 @@ export async function POST(req: Request) {
       classLevel: classLevel as 10 | 12,
       section,
       pin: issuedPin,
-      password: issuedPassword,
     });
+    const issuedPassword = buildInitialStudentPasswordFromLoginId(student.rollCode);
     const committedAt = new Date().toISOString();
     await recordAuditEvent({
       requestId,
@@ -117,8 +110,8 @@ export async function POST(req: Request) {
       data: {
         student,
         issuedCredentials: {
-          loginIdentifier: student.rollNo || student.rollCode,
-          alternateIdentifier: student.rollCode,
+          loginIdentifier: student.rollCode,
+          alternateIdentifier: student.rollNo,
           pin: issuedPin,
           password: issuedPassword,
         },

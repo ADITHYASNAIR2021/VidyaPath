@@ -20,6 +20,7 @@ function inspectVar(name: string): RuntimeEnvIssue | null {
 export function validateRuntimeEnv(): ValidationResult {
   const productionOnly = [
     'SUPABASE_SERVICE_ROLE_KEY',
+    'NEXT_PUBLIC_APP_URL',
   ];
 
   const issues: RuntimeEnvIssue[] = [];

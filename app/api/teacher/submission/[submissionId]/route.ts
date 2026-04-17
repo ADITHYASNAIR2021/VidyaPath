@@ -1,11 +1,26 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { canTeacherAccessAssignmentPack } from '@/lib/teacher-admin-db';
-import { supabaseSelect } from '@/lib/supabase-rest';
+import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 
 export const dynamic = 'force-dynamic';
 
 const SUBMISSIONS_TABLE = 'teacher_submissions';
+
+type SubmissionRow = {
+  id: string;
+  pack_id: string;
+  student_id: string | null;
+  student_name: string;
+  submission_code: string;
+  attempt_no: number;
+  status: string;
+  answers: Array<{ questionNo: string; answerText: string }>;
+  result: Record<string, unknown> | null;
+  grading: Record<string, unknown> | null;
+  released_at: string | null;
+  created_at: string;
+};
 
 export async function GET(req: Request, { params }: { params: { submissionId: string } }) {
   const requestId = getRequestId(req);
@@ -17,25 +32,27 @@ export async function GET(req: Request, { params }: { params: { submissionId: st
     return errorJson({ requestId, errorCode: 'missing-id', message: 'submissionId is required.', status: 400 });
   }
 
+  const resolvedClient = resolveRequestSupabaseClient(req, 'user-first');
+  if (!resolvedClient) {
+    return errorJson({
+      requestId,
+      errorCode: 'supabase-unavailable',
+      message: 'Submission storage is unavailable.',
+      status: 503,
+    });
+  }
+
   // Fetch the raw row
-  const rows = await supabaseSelect<{
-    id: string;
-    pack_id: string;
-    student_id: string | null;
-    student_name: string;
-    submission_code: string;
-    attempt_no: number;
-    status: string;
-    answers: Array<{ questionNo: string; answerText: string }>;
-    result: Record<string, unknown> | null;
-    grading: Record<string, unknown> | null;
-    released_at: string | null;
-    created_at: string;
-  }>(SUBMISSIONS_TABLE, {
-    select: '*',
-    filters: [{ column: 'id', value: submissionId }],
-    limit: 1,
-  }).catch(() => []);
+  const rows: SubmissionRow[] = await resolvedClient.client
+    .from(SUBMISSIONS_TABLE)
+    .select('*')
+    .eq('id', submissionId)
+    .limit(1)
+    .then(({ data, error }) => {
+      if (error) throw new Error(error.message || 'Failed to load submission.');
+      return (data || []) as SubmissionRow[];
+    })
+    .then(undefined, (): SubmissionRow[] => []);
 
   if (rows.length === 0) {
     return errorJson({ requestId, errorCode: 'not-found', message: 'Submission not found.', status: 404 });

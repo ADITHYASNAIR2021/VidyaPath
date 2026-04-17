@@ -1,25 +1,15 @@
 import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getClientIp, getRequestId, withRequestIdHeader } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { releaseResultsSchema } from '@/lib/schemas/teacher-submission';
+
+export const dynamic = 'force-dynamic';
+
 import { logServerEvent } from '@/lib/observability';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { beginIdempotentRequest, commitIdempotentResponse } from '@/lib/security/idempotency';
 import { releaseSubmissionResults } from '@/lib/teacher-admin-db';
-
-export const dynamic = 'force-dynamic';
-
-function parseSubmissionIds(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const ids: string[] = [];
-  for (const item of value) {
-    if (typeof item !== 'string') continue;
-    const normalized = item.trim();
-    if (!normalized) continue;
-    ids.push(normalized);
-  }
-  return ids.length > 0 ? ids : undefined;
-}
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
@@ -45,26 +35,17 @@ export async function POST(req: Request) {
     }
 
     await assertTeacherStorageWritable();
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 24 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 24 * 1024, releaseResultsSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    const packId = typeof body.packId === 'string' ? body.packId.trim() : '';
-    const submissionIds = parseSubmissionIds(body.submissionIds);
-    if (!packId) {
-      return errorJson({
-        requestId,
-        errorCode: 'missing-pack-id',
-        message: 'packId is required.',
-        status: 400,
-      });
-    }
+    const { packId, submissionIds } = bodyResult.value;
 
     const stableSubmissionKey = (submissionIds || []).slice().sort().join(',');
     const idempotencyKey =

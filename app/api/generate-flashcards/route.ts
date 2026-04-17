@@ -2,13 +2,15 @@ import { getPYQData } from '@/lib/pyq';
 import { getChapterById } from '@/lib/data';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { isFlashcardArray, normalizeFlashcards, type FlashcardItem } from '@/lib/ai/validators';
 import { buildDynamicFlashcardFallback } from '@/lib/ai/dynamic-fallback';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { flashcardsRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 function buildFallbackCards(input: {
@@ -49,16 +51,32 @@ export async function POST(req: Request) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, flashcardsRequestSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
+    const body = bodyResult.value as Record<string, unknown>;
+    const tokenBudget = await checkAiTokenBudget({
+      context,
+      endpoint: '/api/generate-flashcards',
+      projectedInputText: JSON.stringify(body),
+      projectedOutputTokens: 1300,
+    });
+    if (!tokenBudget.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: tokenBudget.reason || 'token-cap-exceeded',
+        message: 'AI usage limit reached for flashcard generation.',
+        status: 429,
+        hint: `Retry after ${tokenBudget.retryAfterSeconds ?? 300}s`,
+      });
+    }
 
     const incomingSubject = typeof body.subject === 'string' && body.subject.trim() ? body.subject.trim() : 'CBSE subject';
     const incomingChapterTitle =

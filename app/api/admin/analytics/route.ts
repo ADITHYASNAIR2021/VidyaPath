@@ -1,7 +1,7 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { getAdminOverview } from '@/lib/teacher-admin-db';
-import { supabaseSelect } from '@/lib/supabase-rest';
+import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +12,47 @@ interface SubmissionRow {
   status: string | null;
 }
 
+type TeacherIdRow = { id: string };
+type PackIdRow = { id: string };
+
 function startOfDay(date: Date): Date {
   const copy = new Date(date);
   copy.setHours(0, 0, 0, 0);
   return copy;
+}
+
+async function loadRecentSchoolSubmissions(req: Request, schoolId: string, sinceIso: string): Promise<SubmissionRow[]> {
+  const resolvedClient = resolveRequestSupabaseClient(req, 'service-first');
+  if (!resolvedClient) return [];
+
+  const { data: teacherRows, error: teachersError } = await resolvedClient.client
+    .from('teacher_profiles')
+    .select('id')
+    .eq('school_id', schoolId)
+    .eq('status', 'active')
+    .limit(5000);
+  if (teachersError) throw new Error(teachersError.message || 'Failed to load teacher profiles.');
+  const teacherIds = ((teacherRows || []) as TeacherIdRow[]).map((row) => row.id).filter(Boolean);
+  if (teacherIds.length === 0) return [];
+
+  const { data: packRows, error: packsError } = await resolvedClient.client
+    .from('teacher_assignment_packs')
+    .select('id')
+    .in('teacher_id', teacherIds)
+    .limit(25000);
+  if (packsError) throw new Error(packsError.message || 'Failed to load assignment packs.');
+  const packIds = ((packRows || []) as PackIdRow[]).map((row) => row.id).filter(Boolean);
+  if (packIds.length === 0) return [];
+
+  const { data: submissionRows, error: submissionsError } = await resolvedClient.client
+    .from('teacher_submissions')
+    .select('id,student_id,created_at,status')
+    .in('pack_id', packIds)
+    .gte('created_at', sinceIso)
+    .order('created_at', { ascending: false })
+    .limit(25000);
+  if (submissionsError) throw new Error(submissionsError.message || 'Failed to load submission analytics.');
+  return (submissionRows || []) as SubmissionRow[];
 }
 
 export async function GET(req: Request) {
@@ -36,13 +73,7 @@ export async function GET(req: Request) {
     const today = startOfDay(new Date());
     const sevenDaysAgo = new Date(today);
     sevenDaysAgo.setDate(today.getDate() - 6);
-    const submissions = await supabaseSelect<SubmissionRow>('teacher_submissions', {
-      select: 'id,student_id,created_at,status',
-      filters: [{ column: 'created_at', op: 'gte', value: sevenDaysAgo.toISOString() }],
-      orderBy: 'created_at',
-      ascending: false,
-      limit: 25000,
-    }).catch(() => []);
+    const submissions = await loadRecentSchoolSubmissions(req, adminSession.schoolId, sevenDaysAgo.toISOString());
     const activeByDate = new Map<string, Set<string>>();
     for (let i = 0; i < 7; i += 1) {
       const date = new Date(sevenDaysAgo);
@@ -93,4 +124,3 @@ export async function GET(req: Request) {
     });
   }
 }
-

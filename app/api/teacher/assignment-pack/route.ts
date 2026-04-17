@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { getStudentSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { createAssignmentPackSchema } from '@/lib/schemas/teacher-pack';
 import { logServerEvent } from '@/lib/observability';
 import {
   canTeacherAccessAssignmentPack,
@@ -208,53 +209,33 @@ export async function POST(req: Request) {
     }
     await assertTeacherStorageWritable();
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 96 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 96 * 1024, createAssignmentPackSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
       });
     }
     const body = bodyResult.value;
-    const chapterId = typeof (body as Record<string, unknown>).chapterId === 'string'
-      ? String((body as Record<string, unknown>).chapterId).trim()
-      : '';
-    if (!chapterId) {
-      return errorJson({
-        requestId,
-        errorCode: 'missing-chapter-id',
-        message: 'chapterId is required.',
-        status: 400,
-      });
-    }
-    const section = typeof (body as Record<string, unknown>).section === 'string'
-      ? String((body as Record<string, unknown>).section).trim()
-      : undefined;
+    const { chapterId, section, classLevel, subject, questionCount, difficultyMix,
+      includeShortAnswers, includeLongAnswers, includeFormulaDrill, dueDate, packId: incomingPackId } = body;
 
     const draft = await buildTeacherAssignmentPackDraft({
       chapterId,
-      classLevel: parseClassLevel((body as Record<string, unknown>).classLevel),
-      subject: typeof (body as Record<string, unknown>).subject === 'string'
-        ? String((body as Record<string, unknown>).subject).trim()
-        : '',
-      questionCount: Number((body as Record<string, unknown>).questionCount),
-      difficultyMix: typeof (body as Record<string, unknown>).difficultyMix === 'string'
-        ? String((body as Record<string, unknown>).difficultyMix).trim()
-        : '40% easy, 40% medium, 20% hard',
-      includeShortAnswers: (body as Record<string, unknown>).includeShortAnswers !== false,
-      includeLongAnswers: (body as Record<string, unknown>).includeLongAnswers !== false,
-      includeFormulaDrill: (body as Record<string, unknown>).includeFormulaDrill !== false,
-      dueDate: typeof (body as Record<string, unknown>).dueDate === 'string'
-        ? String((body as Record<string, unknown>).dueDate).trim()
-        : undefined,
+      classLevel,
+      subject,
+      questionCount,
+      difficultyMix: difficultyMix ?? '40% easy, 40% medium, 20% hard',
+      includeShortAnswers: includeShortAnswers !== false,
+      includeLongAnswers: includeLongAnswers !== false,
+      includeFormulaDrill: includeFormulaDrill !== false,
+      dueDate,
     });
 
-    const incomingPackId = typeof (body as Record<string, unknown>).packId === 'string'
-      ? String((body as Record<string, unknown>).packId).trim()
-      : '';
-    const packId = incomingPackId || randomUUID();
+    const packId = (incomingPackId?.trim()) || randomUUID();
     const { shareUrl, printUrl } = buildTeacherPackUrls(packId);
 
     const pack = await upsertAssignmentPack(teacherSession.teacher.id, {

@@ -16,8 +16,10 @@ import { NextRequest } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
-import { supabaseInsert, supabaseSelect } from '@/lib/supabase-rest';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { announcementReadSchema } from '@/lib/schemas/engagement';
+import { getSupabaseAccessTokenFromRequest } from '@/lib/auth/supabase-auth';
+import { getUserClient } from '@/lib/supabase-rest';
 
 const READS_TABLE = 'announcement_reads';
 
@@ -27,14 +29,30 @@ export async function POST(req: NextRequest) {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 4 * 1024);
-    if (!bodyResult.ok) return errorJson({ requestId, errorCode: bodyResult.reason, message: bodyResult.message, status: 400 });
+    const bodyResult = await parseAndValidateJsonBody(req, 4 * 1024, announcementReadSchema);
+    if (!bodyResult.ok) {
+      return errorJson({
+        requestId,
+        errorCode: bodyResult.reason,
+        message: bodyResult.message,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
+      });
+    }
+
+    const accessToken = getSupabaseAccessTokenFromRequest(req);
+    if (!accessToken) {
+      return errorJson({
+        requestId,
+        errorCode: 'supabase-session-required',
+        message: 'Supabase access token is required to mark announcements as read.',
+        status: 401,
+      });
+    }
+    const client = getUserClient(accessToken);
 
     const body = bodyResult.value;
-    const announcementId = typeof body.announcementId === 'string' ? body.announcementId.trim() : '';
-    if (!announcementId) {
-      return errorJson({ requestId, errorCode: 'missing-announcement-id', message: 'announcementId is required.', status: 400 });
-    }
+    const announcementId = body.announcementId.trim();
 
     const studentSession = await getStudentSessionFromRequestCookies();
     const studentId = context?.profileId || studentSession?.studentId || context?.authUserId || '';
@@ -45,14 +63,13 @@ export async function POST(req: NextRequest) {
 
     // Check if already read (idempotent)
     try {
-      const existing = await supabaseSelect<{ id: string }>(READS_TABLE, {
-        select: 'id',
-        filters: [
-          { column: 'announcement_id', value: announcementId },
-          { column: 'student_id', value: studentId },
-        ],
-        limit: 1,
-      });
+      const { data: existing, error: selectError } = await client
+        .from(READS_TABLE)
+        .select('id')
+        .eq('announcement_id', announcementId)
+        .eq('student_id', studentId)
+        .limit(1);
+      if (selectError) throw selectError;
       if (existing.length > 0) {
         return dataJson({ requestId, data: { alreadyRead: true } });
       }
@@ -61,12 +78,20 @@ export async function POST(req: NextRequest) {
       return dataJson({ requestId, data: { alreadyRead: false, skipped: true } });
     }
 
-    await supabaseInsert(READS_TABLE, {
+    const { error: insertError } = await client.from(READS_TABLE).insert({
       announcement_id: announcementId,
       student_id: studentId,
       school_id: schoolId,
       read_at: new Date().toISOString(),
     });
+    if (insertError) {
+      return errorJson({
+        requestId,
+        errorCode: 'read-record-failed',
+        message: insertError.message || 'Failed to record read.',
+        status: 500,
+      });
+    }
 
     return dataJson({ requestId, data: { alreadyRead: false } });
   } catch (error) {

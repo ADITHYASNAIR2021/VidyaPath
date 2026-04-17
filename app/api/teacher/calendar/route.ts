@@ -1,6 +1,15 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { z } from 'zod';
+const calendarEventBodySchema = z.object({
+  title: z.string().trim().min(1).max(180),
+  type: z.enum(['exam', 'assignment_due', 'holiday', 'meeting', 'other']),
+  eventDate: z.string().trim().min(1).max(20),
+  description: z.string().trim().max(1200).optional(),
+  classLevel: z.union([z.literal(10), z.literal(12)]).optional(),
+  section: z.string().trim().max(40).optional(),
+});
 import { createSchoolEvent, deleteSchoolEvent, listSchoolEvents } from '@/lib/school-ops-db';
 import { recordAuditEvent } from '@/lib/security/audit';
 
@@ -78,23 +87,19 @@ export async function POST(req: Request) {
       status: 403,
     });
   }
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 96 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 96 * 1024, calendarEventBodySchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
-  const body = bodyResult.value;
-  const title = toText(body.title, 180);
-  const description = toText(body.description, 1200);
-  const type = toText(body.type, 32);
-  const eventDate = toText(body.eventDate, 20);
-  const classLevel = toClassLevel(body.classLevel);
-  const section = toText(body.section, 40).toUpperCase();
-  if (!title || !eventDate || !isEventType(type)) {
+  const { title, type, eventDate, description = '', classLevel, section: rawSection } = bodyResult.value;
+  const section = rawSection?.toUpperCase() ?? '';
+  if (!title || !eventDate || !type) {
     return errorJson({
       requestId,
       errorCode: 'invalid-event-payload',

@@ -1,25 +1,11 @@
-﻿import { Rating } from 'ts-fsrs';
+import { Rating } from 'ts-fsrs';
 import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { srsReviewSchema } from '@/lib/schemas/student-srs';
 import { listDueSrsCards, reviewSrsCard } from '@/lib/study-enhancements-db';
 
 export const dynamic = 'force-dynamic';
-
-function toRating(value: unknown): Rating | null {
-  if (typeof value === 'number') {
-    if ([Rating.Again, Rating.Hard, Rating.Good, Rating.Easy].includes(value)) return value as Rating;
-    return null;
-  }
-  if (typeof value === 'string') {
-    const key = value.trim().toLowerCase();
-    if (key === 'again') return Rating.Again;
-    if (key === 'hard') return Rating.Hard;
-    if (key === 'good') return Rating.Good;
-    if (key === 'easy') return Rating.Easy;
-  }
-  return null;
-}
 
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
@@ -45,18 +31,21 @@ export async function POST(req: Request) {
   const studentSession = await getStudentSessionFromRequestCookies();
   if (!studentSession) return unauthorizedJson('Student session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, srsReviewSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 
-  const cardId = typeof bodyResult.value.cardId === 'string' ? bodyResult.value.cardId.trim() : '';
-  const rating = toRating(bodyResult.value.rating);
+  const { cardId, rating: ratingRaw } = bodyResult.value;
+  // Map enum string to ts-fsrs Rating number
+  const ratingMap: Record<string, number> = { Again: Rating.Again, Hard: Rating.Hard, Good: Rating.Good, Easy: Rating.Easy };
+  const rating = ratingMap[ratingRaw] ?? null;
   if (!cardId || rating === null) {
     return errorJson({
       requestId,

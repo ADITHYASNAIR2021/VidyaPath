@@ -1,9 +1,18 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { isSupportedSubject } from '@/lib/academic-taxonomy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { z } from 'zod';
+const classTeacherTagSchema = z.object({
+  classSectionId: z.string().trim().min(1).max(120),
+  isClassTeacher: z.boolean().optional(),
+  role: z.enum(['class_teacher', 'subject_teacher']).optional(),
+  subject: z.string().trim().max(80).optional(),
+  section: z.string().trim().max(40).optional(),
+  batch: z.string().trim().max(40).optional(),
+});
 import { assignTeacherToClassSection } from '@/lib/school-management-db';
-import { getTeacherById } from '@/lib/teacher-admin-db';
+import { getTeacherById } from '@/lib/teacher/auth.db';
 import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
@@ -46,13 +55,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     });
   }
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 48 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 16 * 1024, classTeacherTagSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const body = bodyResult.value;

@@ -1,0 +1,16 @@
+/**
+ * Exam session domain — thin re-export barrel.
+ *
+ * Source of truth: lib/teacher-admin-db.ts (pending full DDD extract).
+ * New callers should import from this path.
+ *
+ * Functions covered:
+ *   startExamSession, getExamSession,
+ *   recordExamHeartbeat, completeExamSession
+ */
+export {
+  startExamSession,
+  getExamSession,
+  recordExamHeartbeat,
+  completeExamSession,
+} from '@/lib/teacher-admin-db';

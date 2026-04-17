@@ -8,6 +8,7 @@ export interface ClientStudentSession {
   classLevel?: 10 | 12;
   section?: string;
   batch?: string;
+  mustChangePassword?: boolean;
   stream?: 'Science' | 'Commerce' | 'Humanities';
   enrolledSubjects: Subject[];
 }
@@ -52,6 +53,7 @@ export async function fetchClientStudentSession(): Promise<ClientStudentSession 
     classLevel,
     section: typeof data.section === 'string' ? data.section.trim() || undefined : undefined,
     batch: typeof data.batch === 'string' ? data.batch.trim() || undefined : undefined,
+    mustChangePassword: data.mustChangePassword === true,
     stream:
       data.stream === 'Science' || data.stream === 'Commerce' || data.stream === 'Humanities'
         ? data.stream

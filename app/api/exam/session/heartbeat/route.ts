@@ -2,35 +2,12 @@ import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage'
 import { getAssignmentPack, getAssignmentPackSchoolId, getExamSession, recordExamHeartbeat } from '@/lib/teacher-admin-db';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { examHeartbeatSchema } from '@/lib/schemas/exam-session';
 import type { ExamViolationEvent } from '@/lib/teacher-types';
 
-const EXAM_VIOLATION_TYPES: ExamViolationEvent['type'][] = [
-  'fullscreen-exit',
-  'tab-hidden',
-  'window-blur',
-  'copy-attempt',
-  'paste-attempt',
-  'context-menu',
-  'key-shortcut',
-];
 
-function parseEvents(value: unknown): ExamViolationEvent[] {
-  if (!Array.isArray(value)) return [];
-  const parsed: ExamViolationEvent[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== 'object') continue;
-    const event = item as Record<string, unknown>;
-    const rawType = typeof event.type === 'string' ? event.type.trim() : '';
-    if (!EXAM_VIOLATION_TYPES.includes(rawType as ExamViolationEvent['type'])) continue;
-    parsed.push({
-      type: rawType as ExamViolationEvent['type'],
-      occurredAt: typeof event.occurredAt === 'string' ? event.occurredAt : new Date().toISOString(),
-      detail: typeof event.detail === 'string' ? event.detail : undefined,
-    });
-  }
-  return parsed;
-}
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
@@ -46,25 +23,17 @@ export async function POST(req: Request) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, examHeartbeatSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    const sessionId = typeof body?.sessionId === 'string' ? body.sessionId.trim() : '';
-    if (!sessionId) {
-      return errorJson({
-        requestId,
-        errorCode: 'missing-session-id',
-        message: 'sessionId is required.',
-        status: 400,
-      });
-    }
+    const { sessionId, violations = [] } = bodyResult.value;
     const session = await getExamSession(sessionId);
     if (!session) {
       return errorJson({
@@ -133,7 +102,11 @@ export async function POST(req: Request) {
       });
     }
 
-    const events = parseEvents(body?.events);
+    const events: import('@/lib/teacher-types').ExamViolationEvent[] = violations.map((v) => ({
+      type: (v.eventType ?? 'window-blur') as import('@/lib/teacher-types').ExamViolationEvent['type'],
+      occurredAt: v.occurredAt ?? new Date().toISOString(),
+      detail: v.detail,
+    }));
     const data = await recordExamHeartbeat({ sessionId, events });
     return dataJson({ requestId, data });
   } catch (error) {

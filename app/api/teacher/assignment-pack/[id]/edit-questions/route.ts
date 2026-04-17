@@ -1,6 +1,7 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { editQuestionsSchema } from '@/lib/schemas/teacher-pack';
 import { getAssignmentPack, canTeacherAccessAssignmentPack, upsertAssignmentPack } from '@/lib/teacher-admin-db';
 import { recordAuditEvent } from '@/lib/security/audit';
 
@@ -21,16 +22,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return errorJson({ requestId, errorCode: 'forbidden', message: 'You do not own this pack.', status: 403 });
   }
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 256 * 1024, editQuestionsSchema);
   if (!bodyResult.ok) {
-    return errorJson({ requestId, errorCode: bodyResult.reason, message: bodyResult.message, status: bodyResult.reason === 'payload-too-large' ? 413 : 400 });
+    return errorJson({ requestId, errorCode: bodyResult.reason, message: bodyResult.message,
+      status: bodyReasonToStatus(bodyResult.reason), issues: bodyResult.issues });
   }
-
-  const { mcqs } = bodyResult.value as { mcqs?: unknown };
-  if (!Array.isArray(mcqs)) {
-    return errorJson({ requestId, errorCode: 'invalid-body', message: 'mcqs array is required.', status: 400 });
-  }
-
+  const { questions: sanitised } = bodyResult.value;
   const existing = await getAssignmentPack(packId);
   if (!existing) {
     return errorJson({ requestId, errorCode: 'not-found', message: 'Assignment pack not found.', status: 404 });
@@ -41,17 +38,19 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return errorJson({ requestId, errorCode: 'not-editable', message: 'Only draft packs can be edited. Regenerate to get a new draft.', status: 409 });
   }
 
-  // Validate and sanitise each MCQ
-  const sanitised = (mcqs as Array<Record<string, unknown>>).map((q) => ({
-    question: String(q.question ?? '').trim(),
-    options: Array.isArray(q.options) ? (q.options as unknown[]).map((o) => String(o).trim()) : ['', '', '', ''],
-    answer: Number.isFinite(Number(q.answer)) ? Math.max(0, Math.min(3, Number(q.answer))) : 0,
-    explanation: typeof q.explanation === 'string' ? q.explanation.trim() : '',
+  // Map schema shape → MCQItem shape expected by upsertAssignmentPack
+  const mcqs = sanitised.map((q) => ({
+    question: q.prompt,
+    options: q.options ?? [],
+    answer: q.answerIndex ?? 0,
+    explanation: q.rubric ?? '',
+    maxMarks: q.maxMarks,
+    kind: q.kind,
   }));
 
   const updatedPack = await upsertAssignmentPack(session.teacher.id, {
     ...existing,
-    mcqs: sanitised,
+    mcqs,
   });
 
   await recordAuditEvent({

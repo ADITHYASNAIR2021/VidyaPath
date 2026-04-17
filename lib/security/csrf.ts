@@ -4,28 +4,49 @@ export function isMutationMethod(method: string): boolean {
   return !SAFE_METHODS.has(method.toUpperCase());
 }
 
-export function isSameOriginRequest(req: Request): boolean {
-  const origin = req.headers.get('origin')?.trim();
-  if (!origin) return false;
+function normalizeOrigin(input: string | null | undefined): string | null {
+  if (!input) return null;
   try {
-    const requestUrl = new URL(req.url);
-    const originUrl = new URL(origin);
-    return requestUrl.origin === originUrl.origin;
+    return new URL(input).origin;
   } catch {
-    return false;
+    return null;
   }
 }
 
+function getRequestOrigin(req: Request): string | null {
+  return normalizeOrigin(req.url);
+}
+
+function getPinnedOrigins(req: Request): Set<string> {
+  const pinned = new Set<string>();
+  const requestOrigin = getRequestOrigin(req);
+  if (requestOrigin) pinned.add(requestOrigin);
+  const canonical = normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL);
+  if (canonical) pinned.add(canonical);
+  const fromEnv = (process.env.CSRF_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((item) => normalizeOrigin(item.trim()))
+    .filter((item): item is string => !!item);
+  for (const origin of fromEnv) pinned.add(origin);
+  return pinned;
+}
+
+export function isSameOriginRequest(req: Request): boolean {
+  const origin = normalizeOrigin(req.headers.get('origin')?.trim());
+  if (!origin) return false;
+  return getPinnedOrigins(req).has(origin);
+}
+
 export function isTrustedReferer(req: Request): boolean {
-  const referer = req.headers.get('referer')?.trim();
-  if (!referer) return false;
-  try {
-    const requestUrl = new URL(req.url);
-    const refererUrl = new URL(referer);
-    return requestUrl.origin === refererUrl.origin;
-  } catch {
-    return false;
-  }
+  const refererOrigin = normalizeOrigin(req.headers.get('referer')?.trim());
+  if (!refererOrigin) return false;
+  return getPinnedOrigins(req).has(refererOrigin);
+}
+
+function hasSafeFetchSite(req: Request): boolean {
+  const fetchSite = (req.headers.get('sec-fetch-site') || '').trim().toLowerCase();
+  if (!fetchSite) return true;
+  return fetchSite === 'same-origin' || fetchSite === 'same-site' || fetchSite === 'none';
 }
 
 export function hasCookieHeader(req: Request): boolean {
@@ -36,5 +57,6 @@ export function hasCookieHeader(req: Request): boolean {
 export function csrfAllowedForMutation(req: Request): boolean {
   if (!isMutationMethod(req.method)) return true;
   if (!hasCookieHeader(req)) return true;
+  if (!hasSafeFetchSite(req)) return false;
   return isSameOriginRequest(req) || isTrustedReferer(req);
 }

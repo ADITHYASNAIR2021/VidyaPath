@@ -1,6 +1,7 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { updateStudentSchema } from '@/lib/schemas/admin-management';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { updateStudent } from '@/lib/teacher-admin-db';
@@ -13,13 +14,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
   try {
     await assertTeacherStorageWritable();
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, updateStudentSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
       });
     }
     const body = bodyResult.value;

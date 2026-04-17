@@ -1,6 +1,7 @@
 import { getDeveloperSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { updateSchoolSchema } from '@/lib/schemas/developer-ops';
 import { logServerEvent } from '@/lib/observability';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { updateSchool } from '@/lib/platform-rbac-db';
@@ -21,13 +22,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       status: 400,
     });
   }
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, updateSchoolSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const body = bodyResult.value;

@@ -3,13 +3,15 @@ import { getPYQData } from '@/lib/pyq';
 import { getChapterById } from '@/lib/data';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { isMCQArray, normalizeMCQs, type MCQItem } from '@/lib/ai/validators';
 import { buildDynamicQuizFallback } from '@/lib/ai/dynamic-fallback';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { quizRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 function buildFallbackQuiz(input: {
@@ -54,22 +56,30 @@ export async function POST(req: Request) {
       });
     }
 
-    const parsedBody = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 40 * 1024);
+    const parsedBody = await parseAndValidateJsonBody(req, 40 * 1024, quizRequestSchema);
     if (!parsedBody.ok) {
       return errorJson({
         requestId,
         errorCode: parsedBody.reason,
         message: parsedBody.message,
-        status: parsedBody.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(parsedBody.reason),
+        issues: parsedBody.issues,
       });
     }
-    const body = parsedBody.value;
-    if (!body || typeof body !== 'object') {
+    const body = parsedBody.value as Record<string, unknown>;
+    const tokenBudget = await checkAiTokenBudget({
+      context,
+      endpoint: '/api/generate-quiz',
+      projectedInputText: JSON.stringify(body),
+      projectedOutputTokens: 1800,
+    });
+    if (!tokenBudget.allowed) {
       return errorJson({
         requestId,
-        errorCode: 'invalid-request-body',
-        message: 'Invalid request body.',
-        status: 400,
+        errorCode: tokenBudget.reason || 'token-cap-exceeded',
+        message: 'AI usage limit reached for quiz generation.',
+        status: 429,
+        hint: `Retry after ${tokenBudget.retryAfterSeconds ?? 300}s`,
       });
     }
 

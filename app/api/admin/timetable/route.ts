@@ -1,9 +1,10 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { upsertTimetableSchema } from '@/lib/schemas/admin-management';
 import { listTimetableSlots, replaceTimetableSlots } from '@/lib/school-ops-db';
 import { recordAuditEvent } from '@/lib/security/audit';
-import { listTeachers } from '@/lib/teacher-admin-db';
+import { listTeachers } from '@/lib/teacher/auth.db';
 
 export const dynamic = 'force-dynamic';
 
@@ -93,13 +94,14 @@ export async function PUT(req: Request) {
       status: 403,
     });
   }
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 512 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, upsertTimetableSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const body = bodyResult.value;
@@ -116,7 +118,7 @@ export async function PUT(req: Request) {
   }
 
   const slots = slotsRaw
-    .map((item) => {
+    .map((item: unknown) => {
       if (!item || typeof item !== 'object') return null;
       const row = item as Record<string, unknown>;
       const dayOfWeek = Number(row.dayOfWeek);
@@ -135,7 +137,10 @@ export async function PUT(req: Request) {
         endTime: endTime || undefined,
       };
     })
-    .filter((item): item is NonNullable<typeof item> => !!item);
+    .filter((item: unknown): item is NonNullable<typeof item & object> => !!item) as Array<{
+      dayOfWeek: number; periodNo: number; subject: string;
+      teacherId?: string; startTime?: string; endTime?: string;
+    }>;
 
   if (slots.length === 0) {
     return errorJson({

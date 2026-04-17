@@ -38,3 +38,11 @@ dataset/
 
 # Temp scraping artifacts
 byjus_tmp.html
+
+# Supabase CLI temp / local state (keep migrations + config committed)
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+
+# AI context bundle — fetched at runtime from CONTEXT_BUNDLE_URL
+lib/context/chunks.jsonl

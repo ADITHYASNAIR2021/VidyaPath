@@ -1,7 +1,8 @@
-﻿import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { getStudentById } from '@/lib/teacher-admin-db';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { linkParentSchema } from '@/lib/schemas/admin-management';
 import { createOrUpdateParentLink } from '@/lib/parent-portal-db';
 
 export const dynamic = 'force-dynamic';
@@ -24,13 +25,14 @@ export async function POST(req: Request, context: { params: { id: string } }) {
     return errorJson({ requestId, errorCode: 'missing-student-id', message: 'Student id is required.', status: 400 });
   }
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 16 * 1024, linkParentSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 

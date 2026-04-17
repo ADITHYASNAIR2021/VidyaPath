@@ -1,6 +1,7 @@
 ﻿import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { mockExamSubmitSchema } from '@/lib/schemas/exam';
 import { submitMockExamSession } from '@/lib/study-enhancements-db';
 
 export const dynamic = 'force-dynamic';
@@ -10,29 +11,20 @@ export async function POST(req: Request) {
   const studentSession = await getStudentSessionFromRequestCookies();
   if (!studentSession) return unauthorizedJson('Student session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 256 * 1024, mockExamSubmitSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 
-  const sessionId = typeof bodyResult.value.sessionId === 'string' ? bodyResult.value.sessionId.trim() : '';
-  const answersRaw = bodyResult.value.answers;
-  if (!sessionId || !answersRaw || typeof answersRaw !== 'object') {
-    return errorJson({
-      requestId,
-      errorCode: 'invalid-submit-payload',
-      message: 'sessionId and answers are required.',
-      status: 400,
-    });
-  }
-
+  const { sessionId, answers: answersRaw } = bodyResult.value;
   const answers: Record<string, number> = {};
-  for (const [questionId, value] of Object.entries(answersRaw as Record<string, unknown>)) {
+  for (const [questionId, value] of Object.entries(answersRaw ?? {})) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) continue;
     answers[questionId] = Math.trunc(parsed);

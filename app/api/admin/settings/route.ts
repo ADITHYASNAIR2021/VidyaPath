@@ -1,9 +1,10 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { adminSettingsPatchSchema } from '@/lib/schemas/admin';
 import { getSchoolById, updateSchool } from '@/lib/platform-rbac-db';
 import { recordAuditEvent } from '@/lib/security/audit';
-import { supabaseInsert, supabaseSelect, supabaseUpdate } from '@/lib/supabase-rest';
+import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,39 +66,31 @@ function settingsStateKey(schoolId: string): string {
   return `${SETTINGS_KEY_PREFIX}:${schoolId}`;
 }
 
-async function loadAdminSettings(schoolId: string): Promise<AdminSettingsState> {
+type DbClient = NonNullable<ReturnType<typeof resolveRequestSupabaseClient>>['client'];
+
+async function loadAdminSettings(client: DbClient, schoolId: string): Promise<AdminSettingsState> {
   const key = settingsStateKey(schoolId);
-  const rows = await supabaseSelect<AppStateRow>('app_state', {
-    select: 'state_key,state_json,updated_at',
-    filters: [{ column: 'state_key', value: key }],
-    limit: 1,
-  }).catch(() => []);
-  return sanitizeSettingsState(rows[0]?.state_json);
+  const { data, error } = await client
+    .from('app_state')
+    .select('state_key,state_json,updated_at')
+    .eq('state_key', key)
+    .limit(1);
+  if (error) return DEFAULT_SETTINGS;
+  const rows = (data || []) as AppStateRow[];
+  return sanitizeSettingsState(rows[0]?.state_json ?? DEFAULT_SETTINGS);
 }
 
-async function saveAdminSettings(schoolId: string, state: AdminSettingsState): Promise<void> {
+async function saveAdminSettings(client: DbClient, schoolId: string, state: AdminSettingsState): Promise<void> {
   const key = settingsStateKey(schoolId);
-  const existing = await supabaseSelect<AppStateRow>('app_state', {
-    select: 'state_key',
-    filters: [{ column: 'state_key', value: key }],
-    limit: 1,
-  }).catch(() => []);
-  if (existing[0]?.state_key) {
-    await supabaseUpdate<AppStateRow>(
-      'app_state',
-      {
-        state_json: state,
-        updated_at: new Date().toISOString(),
-      },
-      [{ column: 'state_key', value: key }]
-    );
-    return;
-  }
-  await supabaseInsert<AppStateRow>('app_state', {
-    state_key: key,
-    state_json: state,
-    updated_at: new Date().toISOString(),
-  });
+  const { error } = await client.from('app_state').upsert(
+    {
+      state_key: key,
+      state_json: state,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'state_key' }
+  );
+  if (error) throw new Error(error.message || 'Failed to save settings.');
 }
 
 export async function GET(req: Request) {
@@ -113,9 +106,18 @@ export async function GET(req: Request) {
     });
   }
   try {
+    const resolvedClient = resolveRequestSupabaseClient(req, 'service-first');
+    if (!resolvedClient) {
+      return errorJson({
+        requestId,
+        errorCode: 'supabase-unavailable',
+        message: 'Settings storage backend is unavailable.',
+        status: 503,
+      });
+    }
     const [school, settings] = await Promise.all([
       getSchoolById(adminSession.schoolId),
-      loadAdminSettings(adminSession.schoolId),
+      loadAdminSettings(resolvedClient.client, adminSession.schoolId),
     ]);
     if (!school) {
       return errorJson({
@@ -152,17 +154,27 @@ export async function PATCH(req: Request) {
       status: 403,
     });
   }
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, adminSettingsPatchSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const body = bodyResult.value;
   try {
+    const resolvedClient = resolveRequestSupabaseClient(req, 'service-first');
+    if (!resolvedClient) {
+      return errorJson({
+        requestId,
+        errorCode: 'supabase-unavailable',
+        message: 'Settings storage backend is unavailable.',
+        status: 503,
+      });
+    }
     const schoolPatch = {
       schoolName: readText(body.schoolName, 140),
       board: readText(body.board, 40),
@@ -180,7 +192,7 @@ export async function PATCH(req: Request) {
         status: 404,
       });
     }
-    const currentSettings = await loadAdminSettings(adminSession.schoolId);
+    const currentSettings = await loadAdminSettings(resolvedClient.client, adminSession.schoolId);
     const nextSettings = sanitizeSettingsState({
       pinPolicy: {
         expiryDays:
@@ -209,7 +221,7 @@ export async function PATCH(req: Request) {
               : currentSettings.notifications.weeklyDigest),
       },
     });
-    await saveAdminSettings(adminSession.schoolId, nextSettings);
+    await saveAdminSettings(resolvedClient.client, adminSession.schoolId, nextSettings);
     const committedAt = new Date().toISOString();
     await recordAuditEvent({
       requestId,

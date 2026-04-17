@@ -10,10 +10,12 @@ import {
   parseStudentSession,
   parseTeacherSession,
 } from '@/lib/auth/session';
-import { getStudentById, getTeacherSessionById } from '@/lib/teacher-admin-db';
+import { getStudentById } from '@/lib/teacher-admin-db';
+import { getTeacherSessionById } from '@/lib/teacher/auth.db';
 import { type PlatformRole } from '@/lib/auth/roles';
 import {
   decodeJwtPayload,
+  getSupabaseUser,
   isAccessTokenExpired,
   refreshSupabaseSession,
   SUPABASE_ACCESS_COOKIE,
@@ -35,6 +37,14 @@ export interface RequestAuthContext {
   availableRoles?: Array<Exclude<PlatformRole, 'anonymous'>>;
   issuedAt?: number;
   expiresAt?: number;
+}
+
+export function isLegacySessionAuthEnabled(): boolean {
+  const raw = (process.env.AUTH_ENABLE_LEGACY_SESSIONS || '').trim().toLowerCase();
+  if (raw === '1' || raw === 'true' || raw === 'yes') return true;
+  if (raw === '0' || raw === 'false' || raw === 'no') return false;
+  // default: enabled for backward compatibility until full session migration.
+  return true;
 }
 
 function toRequestAuthContext(
@@ -75,6 +85,8 @@ async function resolveSupabaseContext(): Promise<RequestAuthContext | null> {
 
   const payload = decodeJwtPayload(accessToken);
   if (!payload?.sub) return null;
+  const user = await getSupabaseUser(accessToken || '');
+  if (!user?.id || user.id !== payload.sub) return null;
   const roleContext = await resolveRoleContextByAuthUserId(payload.sub);
   if (!roleContext) return null;
   return toRequestAuthContext(roleContext, { iat: payload.iat, exp: payload.exp });
@@ -135,6 +147,7 @@ function resolveLegacyContext(): RequestAuthContext | null {
 export async function getRequestAuthContext(): Promise<RequestAuthContext | null> {
   const supabaseContext = await resolveSupabaseContext();
   if (supabaseContext) return supabaseContext;
+  if (!isLegacySessionAuthEnabled()) return null;
   return resolveLegacyContext();
 }
 
@@ -174,6 +187,7 @@ export async function getAdminSessionFromRequestCookies(): Promise<{
 export async function getTeacherSessionFromRequestCookies() {
   const context = await requireRequestRole(['teacher']);
   if (!context?.profileId) {
+    if (!isLegacySessionAuthEnabled()) return null;
     const token = cookies().get(TEACHER_SESSION_COOKIE)?.value;
     const parsed = parseTeacherSession(token);
     if (!parsed) return null;
@@ -195,6 +209,7 @@ export async function getStudentSessionFromRequestCookies() {
       const stream = deriveStudentStream(enrolledSubjects, parsed.classLevel);
       return {
         ...parsed,
+        mustChangePassword: parsed.mustChangePassword === true,
         enrolledSubjects,
         stream,
       };
@@ -211,6 +226,7 @@ export async function getStudentSessionFromRequestCookies() {
       schoolId: student.schoolId || parsed?.schoolId,
       schoolCode: context.schoolCode,
       batch: student.batch,
+      mustChangePassword: student.mustChangePassword === true || parsed?.mustChangePassword === true,
       enrolledSubjects,
       stream,
       role: 'student' as const,
@@ -218,6 +234,7 @@ export async function getStudentSessionFromRequestCookies() {
       expiresAt: parsed?.expiresAt || context.expiresAt || Date.now() + 60 * 60 * 1000,
     };
   }
+  if (!isLegacySessionAuthEnabled()) return null;
   const token = cookies().get(STUDENT_SESSION_COOKIE)?.value;
   const parsed = parseStudentSession(token);
   if (!parsed) return null;
@@ -229,6 +246,7 @@ export async function getStudentSessionFromRequestCookies() {
     ...parsed,
     schoolId: parsed.schoolId || student.schoolId,
     batch: parsed.batch || student.batch,
+    mustChangePassword: student.mustChangePassword === true || parsed.mustChangePassword === true,
     enrolledSubjects,
     stream,
   };

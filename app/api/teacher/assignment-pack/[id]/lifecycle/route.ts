@@ -1,6 +1,7 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { packLifecycleSchema } from '@/lib/schemas/teacher-pack';
 import { updateAssignmentPackLifecycle } from '@/lib/teacher-admin-db';
 import { recordAuditEvent } from '@/lib/security/audit';
 
@@ -19,28 +20,18 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       status: 400,
     });
   }
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, packLifecycleSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
-  const action =
-    bodyResult.value.action === 'extend' || bodyResult.value.action === 'close' || bodyResult.value.action === 'reopen'
-      ? bodyResult.value.action
-      : '';
-  if (!action) {
-    return errorJson({
-      requestId,
-      errorCode: 'invalid-lifecycle-action',
-      message: 'action must be extend, close, or reopen.',
-      status: 400,
-    });
-  }
-  const extendDays = Number(bodyResult.value.extendDays);
+  const { action, validUntil } = bodyResult.value;
+  const extendDays = validUntil ? undefined : undefined; // validUntil drives extension
   try {
     const pack = await updateAssignmentPackLifecycle({
       teacherId: session.teacher.id,

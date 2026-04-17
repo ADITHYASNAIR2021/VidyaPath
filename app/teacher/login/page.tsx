@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { KeyRound } from 'lucide-react';
+import { Eye, EyeOff, KeyRound } from 'lucide-react';
 
 export default function TeacherLoginPage() {
   const router = useRouter();
@@ -13,9 +13,15 @@ export default function TeacherLoginPage() {
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [schoolCode, setSchoolCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const reasonBanner: Record<string, string> = {
+    'auth-required': 'Teacher login is required to access that page.',
+    'password-updated': 'Password updated successfully. Please login with your new password.',
+  };
 
   async function login() {
     setLoading(true);
@@ -30,6 +36,10 @@ export default function TeacherLoginPage() {
       const data = await response.json().catch(() => null);
       if (!response.ok || !data) {
         setError(data?.message || data?.error || data?.hint || 'Login failed.');
+        return;
+      }
+      if (data?.data?.mustChangePassword === true) {
+        router.replace('/teacher/first-login');
         return;
       }
       router.replace(nextPath);
@@ -47,10 +57,10 @@ export default function TeacherLoginPage() {
           <KeyRound className="w-5 h-5 text-saffron-500" />
           Teacher Login
         </h1>
-        <p className="text-sm text-[#5F5A73] mt-2">Sign in with your teacher phone/staff code and key/PIN.</p>
-        {reason === 'auth-required' && (
-          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
-            Teacher login is required to access that page.
+        <p className="text-sm text-[#5F5A73] mt-2">Sign in with your teacher email and password.</p>
+        {reasonBanner[reason] && (
+          <p className={`mt-2 rounded-lg border px-2.5 py-1.5 text-xs ${reason === 'password-updated' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            {reasonBanner[reason]}
           </p>
         )}
 
@@ -64,16 +74,26 @@ export default function TeacherLoginPage() {
           <input
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}
-            placeholder="Phone or staff code"
+            placeholder="Teacher email"
             className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
           />
-          <input
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Key / PIN"
-            type="password"
-            className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
-          />
+          <div className="relative">
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Password"
+              type={showPassword ? 'text' : 'password'}
+              className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 pr-11"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((value) => !value)}
+              className="absolute inset-y-0 right-0 px-3 text-[#6A6580] hover:text-[#373347]"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
           <button
             onClick={login}
             disabled={loading}
@@ -88,6 +108,9 @@ export default function TeacherLoginPage() {
         </p>
         <p className="mt-4 text-xs text-[#7A7490]">
           Admin access: <Link href="/admin/login" className="font-semibold text-indigo-700 hover:text-indigo-800">/admin/login</Link>
+        </p>
+        <p className="mt-1 text-xs text-[#7A7490]">
+          Home: <Link href="/" className="font-semibold text-indigo-700 hover:text-indigo-800">Back to home</Link>
         </p>
       </div>
     </div>

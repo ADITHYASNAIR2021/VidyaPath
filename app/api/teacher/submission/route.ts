@@ -1,39 +1,16 @@
 import { addSubmission, getAssignmentPack, getAssignmentPackSchoolId } from '@/lib/teacher-admin-db';
 import { evaluateTeacherAssignmentSubmission } from '@/lib/teacher-assignment';
-import type { TeacherSubmissionAnswer } from '@/lib/teacher-types';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { teacherSubmissionCreateSchema } from '@/lib/schemas/teacher';
 import { logServerEvent } from '@/lib/observability';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { studentCanAccessChapter } from '@/lib/school-management-db';
+import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 
 export const dynamic = 'force-dynamic';
-
-interface SubmissionRequestBody {
-  packId: string;
-  answers: TeacherSubmissionAnswer[];
-}
-
-function parseSubmissionBody(value: unknown): SubmissionRequestBody | null {
-  if (!value || typeof value !== 'object') return null;
-  const body = value as Record<string, unknown>;
-  const packId = typeof body.packId === 'string' ? body.packId.trim() : '';
-  const answers: TeacherSubmissionAnswer[] = [];
-  if (Array.isArray(body.answers)) {
-    body.answers.forEach((item) => {
-      if (!item || typeof item !== 'object') return;
-      const entry = item as Record<string, unknown>;
-      const questionNo = typeof entry.questionNo === 'string' ? entry.questionNo.trim() : '';
-      const answerText = typeof entry.answerText === 'string' ? entry.answerText.trim() : '';
-      if (!questionNo || !answerText) return;
-      answers.push({ questionNo, answerText });
-    });
-  }
-  if (!packId || answers.length === 0) return null;
-  return { packId, answers };
-}
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
@@ -58,24 +35,17 @@ export async function POST(req: Request) {
         status: 401,
       });
     }
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 256 * 1024, teacherSubmissionCreateSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const parsed = parseSubmissionBody(bodyResult.value);
-    if (!parsed) {
-      return errorJson({
-        requestId,
-        errorCode: 'invalid-request-body',
-        message: 'Invalid request. Required: { packId, answers: [{ questionNo, answerText }] }',
-        status: 400,
-      });
-    }
+    const parsed = bodyResult.value;
 
     const pack = await getAssignmentPack(parsed.packId);
     if (!pack || pack.status !== 'published') {
@@ -134,18 +104,20 @@ export async function POST(req: Request) {
     }
 
     // Server-side duplicate guard: block re-submission for the same student + pack
-    const { supabaseSelect } = await import('@/lib/supabase-rest');
-    const existingRows = await supabaseSelect<{ id: string }>(
-      'teacher_submissions',
-      {
-        select: 'id',
-        filters: [
-          { column: 'pack_id', value: parsed.packId },
-          { column: 'submission_code', value: studentSession.rollCode.toUpperCase() },
-        ],
-        limit: 1,
-      }
-    ).catch(() => []);
+    const resolvedClient = resolveRequestSupabaseClient(req, 'user-first');
+    const existingRows = resolvedClient
+      ? await resolvedClient.client
+          .from('teacher_submissions')
+          .select('id')
+          .eq('pack_id', parsed.packId)
+          .eq('submission_code', studentSession.rollCode.toUpperCase())
+          .limit(1)
+          .then(({ data, error }) => {
+            if (error) throw new Error(error.message || 'Failed to check duplicate submission.');
+            return (data || []) as Array<{ id: string }>;
+          })
+          .then(undefined, () => [] as Array<{ id: string }>)
+      : [];
     if (existingRows.length > 0) {
       return errorJson({
         requestId,

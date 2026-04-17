@@ -59,6 +59,10 @@ const nextConfig = {
       },
     ];
   },
+  experimental: {
+    // Enable instrumentation.ts for startup env validation + logging
+    instrumentationHook: true,
+  },
 };
 
 const withSerwist = require('@serwist/next').default({

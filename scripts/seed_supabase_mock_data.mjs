@@ -224,6 +224,7 @@ async function assertTablesExist() {
     'teacher_weekly_plans',
     'exam_sessions',
     'exam_violations',
+    'identity_counters',
   ];
   for (const table of requiredTables) {
     await selectRows(table, { limit: 1 });
@@ -1376,6 +1377,122 @@ async function main() {
   ];
   await upsertRows('app_state', appStateRows, 'state_key');
 
+  // ── APS (Adithya Public School) — new roll-code format demo block ───────────
+  const APS_SCHOOL_ID = 'c0aps111-aps1-4ap1-8ap1-aps111111111';
+  const APS_TEACHER_ID = 'c0apt111-apt1-4ap1-8ap1-apt111111111';
+  const APS_SCOPE_ID   = 'c0aps222-aps2-4ap2-8ap2-aps222222222';
+
+  await upsertRows('schools', [
+    {
+      id: APS_SCHOOL_ID,
+      school_name: 'Adithya Public School',
+      school_code: 'APS',
+      board: 'CBSE',
+      city: 'Thiruvananthapuram',
+      state: 'Kerala',
+      contact_phone: '9800000001',
+      contact_email: 'admin@aps.edu',
+      status: 'active',
+    },
+  ]);
+
+  await upsertRows('teacher_profiles', [
+    {
+      id: APS_TEACHER_ID,
+      school_id: APS_SCHOOL_ID,
+      auth_user_id: null,
+      auth_email: null,
+      phone: '9800000002',
+      staff_code: 'APS.TC.00.X.2600001',
+      name: 'Adithya Nair',
+      pin_hash: hashPin('1111'),
+      must_change_password: false,
+      status: 'active',
+    },
+  ]);
+
+  await upsertRows('teacher_scopes', [
+    { id: APS_SCOPE_ID, school_id: APS_SCHOOL_ID, teacher_id: APS_TEACHER_ID, class_level: 10, subject: 'Physics', section: null, is_active: true },
+  ]);
+
+  // APS students — new composite roll-code format
+  await upsertRows('student_profiles', [
+    {
+      id: 'c0apss01-aps1-4ap1-8ap1-apsstud0001',
+      school_id: APS_SCHOOL_ID,
+      auth_user_id: null,
+      auth_email: null,
+      batch: '2026',
+      roll_no: '001',
+      name: 'Arjun Pillai',
+      roll_code: 'APS.STU.10.A.2600001',
+      class_level: 10,
+      section: 'A',
+      pin_hash: hashPin('0000'),
+      must_change_password: true,
+      status: 'active',
+    },
+    {
+      id: 'c0apss02-aps1-4ap1-8ap1-apsstud0002',
+      school_id: APS_SCHOOL_ID,
+      auth_user_id: null,
+      auth_email: null,
+      batch: '2026',
+      roll_no: '500',
+      name: 'Meena Krishnan',
+      roll_code: 'APS.STU.10.B.2600500',
+      class_level: 10,
+      section: 'B',
+      pin_hash: hashPin('0000'),
+      must_change_password: true,
+      status: 'active',
+    },
+    {
+      id: 'c0apss03-aps1-4ap1-8ap1-apsstud0003',
+      school_id: APS_SCHOOL_ID,
+      auth_user_id: null,
+      auth_email: null,
+      batch: '2026',
+      roll_no: '100',
+      name: 'Rohan Varma',
+      roll_code: 'APS.STU.12.A.2600100',
+      class_level: 12,
+      section: 'A',
+      pin_hash: hashPin('0000'),
+      must_change_password: true,
+      status: 'active',
+    },
+    {
+      id: 'c0apss04-aps1-4ap1-8ap1-apsstud0004',
+      school_id: APS_SCHOOL_ID,
+      auth_user_id: null,
+      auth_email: null,
+      batch: '2026',
+      roll_no: '500',
+      name: 'Priya Suresh',
+      roll_code: 'APS.STU.12.B.2600500',
+      class_level: 12,
+      section: 'B',
+      pin_hash: hashPin('0000'),
+      must_change_password: true,
+      status: 'active',
+    },
+  ]);
+
+  // APS identity counters (next_seq already advanced past seeded students)
+  await upsertRows(
+    'identity_counters',
+    [
+      { school_id: APS_SCHOOL_ID, role_code: 'STU', class_code: '10', batch_code: 'A', year_code: '26', next_seq: 2 },
+      { school_id: APS_SCHOOL_ID, role_code: 'STU', class_code: '10', batch_code: 'B', year_code: '26', next_seq: 501 },
+      { school_id: APS_SCHOOL_ID, role_code: 'STU', class_code: '12', batch_code: 'A', year_code: '26', next_seq: 101 },
+      { school_id: APS_SCHOOL_ID, role_code: 'STU', class_code: '12', batch_code: 'B', year_code: '26', next_seq: 501 },
+      { school_id: APS_SCHOOL_ID, role_code: 'TC',  class_code: '00', batch_code: 'X', year_code: '26', next_seq: 2 },
+    ],
+    'school_id,role_code,class_code,batch_code,year_code'
+  );
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const counts = await Promise.all([
     selectRows('schools', { limit: 10000 }),
     selectRows('school_admin_profiles', { limit: 10000 }),
@@ -1403,6 +1520,11 @@ async function main() {
   console.log('  rollCode=C12A001, pin=2244');
   console.log('  rollCode=C10A014, pin=3311');
   console.log('  rollCode=C12C021, pin=4455');
+  console.log('APS new-format student login (must change password on first login):');
+  console.log('  rollCode=APS.STU.10.A.2600001, password=apsstu10a2600001');
+  console.log('  rollCode=APS.STU.10.B.2600500, password=apsstu10b2600500');
+  console.log('  rollCode=APS.STU.12.A.2600100, password=apsstu12a2600100');
+  console.log('  rollCode=APS.STU.12.B.2600500, password=apsstu12b2600500');
   console.log('Admin login: use your ADMIN_PORTAL_KEY (bootstrap key mode).');
 }
 

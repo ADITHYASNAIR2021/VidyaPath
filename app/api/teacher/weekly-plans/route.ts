@@ -1,8 +1,9 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { teacherWeeklyPlanCreateSchema } from '@/lib/schemas/teacher';
 import { publishWeeklyPlan } from '@/lib/teacher-admin-db';
-import { isSupabaseServiceConfigured, supabaseSelect } from '@/lib/supabase-rest';
+import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 import type { TeacherWeeklyPlan, TeacherClassPreset } from '@/lib/teacher-types';
 
 export const dynamic = 'force-dynamic';
@@ -25,19 +26,19 @@ export async function GET(req: Request) {
   if (!session) return unauthorizedJson('Teacher session required.', requestId);
 
   try {
-    if (!isSupabaseServiceConfigured()) {
+    const resolvedClient = resolveRequestSupabaseClient(req, 'user-first');
+    if (!resolvedClient) {
       return dataJson({ requestId, data: { plans: [] } });
     }
-    const rows = await supabaseSelect<WeeklyPlanRow>('teacher_weekly_plans', {
-      select: 'id,class_level,subject,section,status,payload,created_at,updated_at',
-      filters: [
-        { column: 'teacher_id', value: session.teacher.id },
-        { column: 'status', value: 'active' },
-      ],
-      orderBy: 'created_at',
-      ascending: false,
-      limit: 50,
-    }).catch(() => [] as WeeklyPlanRow[]);
+    const { data, error } = await resolvedClient.client
+      .from('teacher_weekly_plans')
+      .select('id,class_level,subject,section,status,payload,created_at,updated_at')
+      .eq('teacher_id', session.teacher.id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw new Error(error.message || 'Failed to query weekly plans.');
+    const rows = (data || []) as WeeklyPlanRow[];
 
     const plans: TeacherWeeklyPlan[] = rows
       .map((row) => row.payload)
@@ -55,30 +56,21 @@ export async function POST(req: Request) {
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Teacher session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, teacherWeeklyPlanCreateSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 
   const { title, classPreset, classLevel, subject, focusChapterIds, planWeeks, dueDate, section } = bodyResult.value;
 
-  if (typeof title !== 'string' || !title.trim()) {
-    return errorJson({ requestId, errorCode: 'missing-title', message: 'title is required.', status: 400 });
-  }
-  if (!Array.isArray(focusChapterIds) || focusChapterIds.length === 0) {
-    return errorJson({ requestId, errorCode: 'missing-chapters', message: 'focusChapterIds is required.', status: 400 });
-  }
-  if (!Array.isArray(planWeeks) || planWeeks.length === 0) {
-    return errorJson({ requestId, errorCode: 'missing-weeks', message: 'planWeeks is required.', status: 400 });
-  }
-
   const resolvedClassLevel: 10 | 12 = Number(classLevel) === 10 ? 10 : 12;
-  const resolvedPreset: TeacherClassPreset = (classPreset as TeacherClassPreset) ?? 'standard';
+  const resolvedPreset: TeacherClassPreset = (classPreset as TeacherClassPreset) ?? 'custom';
 
   try {
     const plan = await publishWeeklyPlan(session.teacher.id, {
@@ -87,7 +79,7 @@ export async function POST(req: Request) {
       classLevel: resolvedClassLevel,
       subject: typeof subject === 'string' ? subject.trim() : undefined,
       focusChapterIds: (focusChapterIds as unknown[]).filter((id): id is string => typeof id === 'string'),
-      planWeeks: planWeeks as TeacherWeeklyPlan['planWeeks'],
+      planWeeks: planWeeks as unknown as TeacherWeeklyPlan['planWeeks'],
       dueDate: typeof dueDate === 'string' ? dueDate.trim() : undefined,
       section: typeof section === 'string' ? section.trim() : undefined,
     });

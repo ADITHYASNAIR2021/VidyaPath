@@ -1,8 +1,10 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { getSupabaseAccessTokenFromRequest } from '@/lib/auth/supabase-auth';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
-import { logTeacherActivity } from '@/lib/teacher-admin-db';
-import { isSupabaseServiceConfigured, supabaseSelect } from '@/lib/supabase-rest';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { saveAiHistorySchema } from '@/lib/schemas/teacher-history';
+import { logTeacherActivity } from '@/lib/teacher/auth.db';
+import { getUserClient, isSupabasePublicConfigured } from '@/lib/supabase-rest';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,19 +25,24 @@ export async function GET(req: Request) {
   if (!teacherSession) return unauthorizedJson('Teacher session required.', requestId);
 
   try {
-    if (!isSupabaseServiceConfigured()) {
+    if (!isSupabasePublicConfigured()) {
       return dataJson({ requestId, data: { entries: [] } });
     }
-    const rows = await supabaseSelect<ActivityRow>('teacher_activity', {
-      select: 'id,metadata,created_at',
-      filters: [
-        { column: 'teacher_id', value: teacherSession.teacher.id },
-        { column: 'action', value: ACTION },
-      ],
-      orderBy: 'created_at',
-      ascending: false,
-      limit: MAX_HISTORY,
-    }).catch(() => [] as ActivityRow[]);
+    const accessToken = getSupabaseAccessTokenFromRequest(req);
+    if (!accessToken) {
+      return dataJson({ requestId, data: { entries: [] } });
+    }
+
+    const client = getUserClient(accessToken);
+    const { data, error } = await client
+      .from('teacher_activity')
+      .select('id,metadata,created_at')
+      .eq('teacher_id', teacherSession.teacher.id)
+      .eq('action', ACTION)
+      .order('created_at', { ascending: false })
+      .limit(MAX_HISTORY);
+    if (error) throw new Error(error.message || 'Failed to read AI history.');
+    const rows = (data || []) as ActivityRow[];
 
     const entries = rows.map((row) => ({
       id: String(row.id),
@@ -59,13 +66,14 @@ export async function POST(req: Request) {
   const teacherSession = await getTeacherSessionFromRequestCookies();
   if (!teacherSession) return unauthorizedJson('Teacher session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, saveAiHistorySchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 

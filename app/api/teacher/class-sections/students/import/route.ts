@@ -1,7 +1,12 @@
 import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { isValidPin } from '@/lib/auth/pin';
+import {
+  buildInitialStudentPasswordFromLoginId,
+  generateLegacyPin,
+} from '@/lib/auth/password-policy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { importStudentsSchema } from '@/lib/schemas/teacher-roster';
 import { getClassSectionById, isTeacherClassTeacherForSection } from '@/lib/school-management-db';
 import { createStudent } from '@/lib/teacher-admin-db';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -18,10 +23,7 @@ function readString(value: unknown, max = 220): string {
 }
 
 function generatePin(seed: string): string {
-  const digits = seed.replace(/\D/g, '');
-  const fromSeed = digits.slice(-4);
-  if (fromSeed.length === 4) return fromSeed;
-  return `${Math.floor(1000 + Math.random() * 9000)}`;
+  return generateLegacyPin(seed, 6);
 }
 
 function parseRows(value: unknown): ImportRowRecord[] {
@@ -36,13 +38,14 @@ export async function POST(req: Request) {
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!teacherSession && !adminSession) return unauthorizedJson('Teacher session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 2 * 1024 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 2 * 1024 * 1024, importStudentsSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const body = bodyResult.value;
@@ -112,12 +115,11 @@ export async function POST(req: Request) {
       const name = readString(row.name, 120);
       const rollNo = readString(row.rollNo ?? row.roll_number ?? row.roll, 50).toUpperCase();
       const rollCode = readString(row.rollCode ?? row.roll_code, 80).toUpperCase();
-      if (!name || (!rollNo && !rollCode)) {
-        throw new Error('Required student fields: name and rollNo or rollCode.');
+      if (!name) {
+        throw new Error('Required student field missing: name.');
       }
       const pinInput = readString(row.pin, 16);
       const pin = pinInput && isValidPin(pinInput) ? pinInput : generatePin(rollNo || rollCode || name);
-      const password = readString(row.password, 120) || pin;
       const student = await createStudent({
         schoolId: classSection.schoolId,
         name,
@@ -127,7 +129,6 @@ export async function POST(req: Request) {
         section: classSection.section,
         batch: classSection.batch,
         pin,
-        password,
       });
       created.push({
         rowIndex: index + 1,
@@ -137,10 +138,10 @@ export async function POST(req: Request) {
         section: student.section,
         batch: student.batch,
         issuedCredentials: {
-          loginIdentifier: student.rollNo || student.rollCode,
-          alternateIdentifier: student.rollCode,
+          loginIdentifier: student.rollCode,
+          alternateIdentifier: student.rollNo,
           pin,
-          password,
+          password: buildInitialStudentPasswordFromLoginId(student.rollCode),
         },
       });
     } catch (error) {

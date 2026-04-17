@@ -34,6 +34,17 @@ const serwist = new Serwist({
 
 serwist.addEventListeners();
 
+function normalizeNotificationUrl(rawUrl: unknown): string {
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return '/';
+  try {
+    const url = new URL(rawUrl, self.location.origin);
+    if (url.origin !== self.location.origin) return '/';
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return '/';
+  }
+}
+
 /* Push notifications */
 self.addEventListener('push', (event: SWPushEvent) => {
   if (!event.data) return;
@@ -50,7 +61,7 @@ self.addEventListener('push', (event: SWPushEvent) => {
     body: payload.body || '',
     icon: payload.icon || '/icon.png',
     badge: '/favicon-32.png',
-    data: { url: payload.url || '/' },
+    data: { url: normalizeNotificationUrl(payload.url) },
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });

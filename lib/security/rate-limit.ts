@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
-import { isSupabaseServiceConfigured, supabaseInsert, supabaseSelect, supabaseUpdate } from '@/lib/supabase-rest';
+import {
+  isSupabaseServiceConfigured,
+  supabaseInsert,
+  supabaseRpc,
+  supabaseSelect,
+  supabaseUpdate,
+} from '@/lib/supabase-rest';
+import { checkRateLimitRedis, isRedisRateLimitConfigured } from '@/lib/security/redis-rate-limit';
 
 interface RequestThrottleRow {
   id: string;
@@ -28,6 +35,13 @@ interface RateLimitDecision {
   limit: number;
 }
 
+interface RateLimitRpcRow {
+  allowed: boolean;
+  retry_after_seconds: number;
+  remaining: number;
+  limit: number;
+}
+
 const TABLE = 'request_throttle';
 
 function normalizeKey(input: string): string {
@@ -50,6 +64,31 @@ function parseDateMs(value: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function shouldFailOpen(): boolean {
+  const configured = (process.env.RATE_LIMIT_FAIL_OPEN || '').trim().toLowerCase();
+  if (configured === '1' || configured === 'true' || configured === 'yes') return true;
+  if (configured === '0' || configured === 'false' || configured === 'no') return false;
+  // Local/dev default remains fail-open for smoother setup; production defaults fail-closed.
+  return process.env.NODE_ENV !== 'production';
+}
+
+function fallbackDecision(limit: number): RateLimitDecision {
+  if (shouldFailOpen()) {
+    return {
+      allowed: true,
+      retryAfterSeconds: 0,
+      remaining: Math.max(0, limit - 1),
+      limit,
+    };
+  }
+  return {
+    allowed: false,
+    retryAfterSeconds: 30,
+    remaining: 0,
+    limit,
+  };
+}
+
 export function buildRateLimitKey(prefix: string, parts: Array<string | undefined | null>): string {
   const cleanPrefix = normalizeKey(prefix || 'global');
   const cleanParts = parts
@@ -58,59 +97,72 @@ export function buildRateLimitKey(prefix: string, parts: Array<string | undefine
   return `${cleanPrefix}:${cleanParts.join(':')}`;
 }
 
-export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDecision> {
-  const limit = Math.max(1, Math.min(5000, Math.floor(input.maxRequests)));
-  const windowSeconds = Math.max(5, Math.min(86400, Math.floor(input.windowSeconds)));
-  const blockSeconds = Math.max(5, Math.min(86400, Math.floor(input.blockSeconds || windowSeconds)));
+async function checkRateLimitViaRpc(input: {
+  throttleKey: string;
+  bucketStart: string;
+  windowSeconds: number;
+  limit: number;
+  blockSeconds: number;
+  metadata?: Record<string, unknown>;
+}): Promise<RateLimitDecision | null> {
+  try {
+    const raw = await supabaseRpc<RateLimitRpcRow | RateLimitRpcRow[] | null>('check_rate_limit', {
+      p_throttle_key: input.throttleKey,
+      p_bucket_start: input.bucketStart,
+      p_window_seconds: input.windowSeconds,
+      p_limit: input.limit,
+      p_block_seconds: input.blockSeconds,
+      p_metadata: input.metadata ?? {},
+    });
+    const row = Array.isArray(raw) ? raw[0] : raw;
+    if (!row || typeof row.allowed !== 'boolean') return null;
+    return {
+      allowed: row.allowed,
+      retryAfterSeconds: Math.max(0, Math.floor(Number(row.retry_after_seconds) || 0)),
+      remaining: Math.max(0, Math.floor(Number(row.remaining) || 0)),
+      limit: Math.max(1, Math.floor(Number(row.limit) || input.limit)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function checkRateLimitLegacy(input: {
+  throttleKey: string;
+  bucketStart: string;
+  windowSeconds: number;
+  limit: number;
+  blockSeconds: number;
+  metadata?: Record<string, unknown>;
+}): Promise<RateLimitDecision> {
   const nowMs = Date.now();
-
-  if (!isSupabaseServiceConfigured()) {
-    return {
-      allowed: true,
-      retryAfterSeconds: 0,
-      remaining: limit - 1,
-      limit,
-    };
-  }
-
-  const key = normalizeKey(input.key);
-  if (!key) {
-    return {
-      allowed: true,
-      retryAfterSeconds: 0,
-      remaining: limit - 1,
-      limit,
-    };
-  }
-  const throttleKey = hashKey(key);
-  const bucketStart = bucketStartIso(windowSeconds, nowMs);
 
   const rows = await supabaseSelect<RequestThrottleRow>(TABLE, {
     select: '*',
     filters: [
-      { column: 'throttle_key', value: throttleKey },
-      { column: 'bucket_start', value: bucketStart },
+      { column: 'throttle_key', value: input.throttleKey },
+      { column: 'bucket_start', value: input.bucketStart },
     ],
     limit: 1,
-  }).catch(() => []);
+  });
   const existing = rows[0];
 
   if (!existing) {
     await supabaseInsert<RequestThrottleRow>(TABLE, {
-      throttle_key: throttleKey,
-      bucket_start: bucketStart,
-      window_seconds: windowSeconds,
+      throttle_key: input.throttleKey,
+      bucket_start: input.bucketStart,
+      window_seconds: input.windowSeconds,
       request_count: 1,
       first_seen_at: new Date(nowMs).toISOString(),
       last_seen_at: new Date(nowMs).toISOString(),
       blocked_until: null,
       metadata: input.metadata ?? null,
-    }).catch(() => undefined);
+    });
     return {
       allowed: true,
       retryAfterSeconds: 0,
-      remaining: Math.max(0, limit - 1),
-      limit,
+      remaining: Math.max(0, input.limit - 1),
+      limit: input.limit,
     };
   }
 
@@ -120,14 +172,13 @@ export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDe
       allowed: false,
       retryAfterSeconds: Math.ceil((blockedUntilMs - nowMs) / 1000),
       remaining: 0,
-      limit,
+      limit: input.limit,
     };
   }
 
   const nextCount = (Number(existing.request_count) || 0) + 1;
-  if (nextCount > limit) {
-    const retryAfter = blockSeconds;
-    const blockedUntil = new Date(nowMs + blockSeconds * 1000).toISOString();
+  if (nextCount > input.limit) {
+    const blockedUntil = new Date(nowMs + input.blockSeconds * 1000).toISOString();
     await supabaseUpdate<RequestThrottleRow>(
       TABLE,
       {
@@ -136,12 +187,12 @@ export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDe
         blocked_until: blockedUntil,
       },
       [{ column: 'id', value: existing.id }]
-    ).catch(() => undefined);
+    );
     return {
       allowed: false,
-      retryAfterSeconds: retryAfter,
+      retryAfterSeconds: input.blockSeconds,
       remaining: 0,
-      limit,
+      limit: input.limit,
     };
   }
 
@@ -153,12 +204,58 @@ export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDe
       blocked_until: null,
     },
     [{ column: 'id', value: existing.id }]
-  ).catch(() => undefined);
+  );
 
   return {
     allowed: true,
     retryAfterSeconds: 0,
-    remaining: Math.max(0, limit - nextCount),
-    limit,
+    remaining: Math.max(0, input.limit - nextCount),
+    limit: input.limit,
   };
+}
+
+export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDecision> {
+  const limit = Math.max(1, Math.min(5000, Math.floor(input.maxRequests)));
+  const windowSeconds = Math.max(5, Math.min(86400, Math.floor(input.windowSeconds)));
+  const blockSeconds = Math.max(5, Math.min(86400, Math.floor(input.blockSeconds || windowSeconds)));
+
+  const key = normalizeKey(input.key);
+  if (!key) {
+    return fallbackDecision(limit);
+  }
+
+  // ── Fast path: Redis/Upstash ────────────────────────────────────────────
+  if (isRedisRateLimitConfigured()) {
+    const redisDecision = await checkRateLimitRedis({
+      throttleKey: hashKey(key),
+      windowSeconds,
+      limit,
+      blockSeconds,
+    });
+    if (redisDecision) return redisDecision;
+    // null = Redis error → fall through to DB
+  }
+
+  // ── Slow path: Supabase DB ──────────────────────────────────────────────
+  if (!isSupabaseServiceConfigured()) {
+    return fallbackDecision(limit);
+  }
+
+  const rpcInput = {
+    throttleKey: hashKey(key),
+    bucketStart: bucketStartIso(windowSeconds, Date.now()),
+    windowSeconds,
+    limit,
+    blockSeconds,
+    metadata: input.metadata,
+  };
+
+  const rpcDecision = await checkRateLimitViaRpc(rpcInput);
+  if (rpcDecision) return rpcDecision;
+
+  try {
+    return await checkRateLimitLegacy(rpcInput);
+  } catch {
+    return fallbackDecision(limit);
+  }
 }

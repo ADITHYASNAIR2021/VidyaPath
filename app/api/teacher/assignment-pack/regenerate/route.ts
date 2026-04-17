@@ -1,6 +1,7 @@
 import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { regeneratePackSchema } from '@/lib/schemas/teacher-pack';
 import {
   canTeacherAccessAssignmentPack,
   getAssignmentPack,
@@ -27,28 +28,17 @@ export async function POST(req: Request) {
     }
     await assertTeacherStorageWritable();
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 24 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 24 * 1024, regeneratePackSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    const packId = typeof body.packId === 'string' ? body.packId.trim() : '';
-    const feedback = typeof body.feedback === 'string' ? body.feedback.trim() : '';
-    const requestedQuestionCount = Number(body.questionCount);
-    const requestedDifficultyMix = typeof body.difficultyMix === 'string' ? body.difficultyMix.trim() : '';
-    if (!packId) {
-      return errorJson({
-        requestId,
-        errorCode: 'missing-pack-id',
-        message: 'packId is required.',
-        status: 400,
-      });
-    }
+    const { packId, feedback = '', difficultyMix: requestedDifficultyMix = '', questionCount: requestedQuestionCount } = bodyResult.value;
 
     const pack = await getAssignmentPack(packId);
     if (!pack) {
@@ -74,7 +64,7 @@ export async function POST(req: Request) {
       chapterId: pack.chapterId,
       classLevel: pack.classLevel,
       subject: pack.subject,
-      questionCount: Number.isFinite(requestedQuestionCount) ? requestedQuestionCount : pack.questionCount,
+      questionCount: requestedQuestionCount ?? pack.questionCount,
       difficultyMix:
         requestedDifficultyMix.length > 0
           ? requestedDifficultyMix

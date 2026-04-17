@@ -391,14 +391,20 @@ export default function DeveloperSchoolDetailPage() {
         <div className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-violet-700">Edit School Details</p>
-            <button onClick={() => { setEditing(false); setSaveError(''); }} className="text-gray-400 hover:text-gray-600">
-              <X className="h-4 w-4" />
+            <button
+              onClick={() => { setEditing(false); setSaveError(''); }}
+              type="button"
+              aria-label="Discard changes"
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">School Name</label>
+              <label htmlFor="edit-school-name" className="mb-1 block text-xs font-medium text-gray-600">School Name</label>
               <input
+                id="edit-school-name"
                 type="text"
                 value={editForm.schoolName}
                 onChange={(e) => setEditForm((f) => ({ ...f, schoolName: e.target.value }))}
@@ -406,8 +412,9 @@ export default function DeveloperSchoolDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Board</label>
+              <label htmlFor="edit-board" className="mb-1 block text-xs font-medium text-gray-600">Board</label>
               <input
+                id="edit-board"
                 type="text"
                 value={editForm.board}
                 onChange={(e) => setEditForm((f) => ({ ...f, board: e.target.value }))}
@@ -415,8 +422,9 @@ export default function DeveloperSchoolDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">City</label>
+              <label htmlFor="edit-city" className="mb-1 block text-xs font-medium text-gray-600">City</label>
               <input
+                id="edit-city"
                 type="text"
                 value={editForm.city}
                 onChange={(e) => setEditForm((f) => ({ ...f, city: e.target.value }))}
@@ -424,8 +432,9 @@ export default function DeveloperSchoolDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">State</label>
+              <label htmlFor="edit-state" className="mb-1 block text-xs font-medium text-gray-600">State</label>
               <input
+                id="edit-state"
                 type="text"
                 value={editForm.state}
                 onChange={(e) => setEditForm((f) => ({ ...f, state: e.target.value }))}
@@ -433,8 +442,9 @@ export default function DeveloperSchoolDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Status</label>
+              <label htmlFor="edit-status" className="mb-1 block text-xs font-medium text-gray-600">Status</label>
               <select
+                id="edit-status"
                 value={editForm.status}
                 onChange={(e) =>
                   setEditForm((f) => ({

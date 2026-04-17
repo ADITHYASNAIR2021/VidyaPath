@@ -10,7 +10,8 @@ import {
   clearSupabaseSessionCookies,
   signInWithPassword,
 } from '@/lib/auth/supabase-auth';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { adminBootstrapSchema } from '@/lib/schemas/auth';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { logServerEvent } from '@/lib/observability';
 import { findAdminAuthIdentity, resolveRoleContextByAuthUserId } from '@/lib/platform-rbac-db';
@@ -63,14 +64,72 @@ export async function POST(req: Request) {
     });
   }
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 12 * 1024);
-  const body = bodyResult.ok ? bodyResult.value : null;
+  const bodyResult = await parseAndValidateJsonBody(req, 12 * 1024, adminBootstrapSchema);
+  if (!bodyResult.ok) {
+    return errorJson({
+      requestId,
+      errorCode: bodyResult.reason,
+      message: bodyResult.message,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
+    });
+  }
+  const body = bodyResult.value;
   const key = typeof body?.key === 'string' ? body.key.trim() : '';
   const schoolCode = typeof body?.schoolCode === 'string'
     ? body.schoolCode.trim()
     : (process.env.DEFAULT_SCHOOL_CODE || '').trim();
   const identifier = typeof body?.identifier === 'string' ? body.identifier.trim() : '';
   const password = typeof body?.password === 'string' ? body.password.trim() : '';
+
+  if (identifier.includes('@') && password) {
+    try {
+      const authSession = await signInWithPassword({
+        email: identifier.toLowerCase(),
+        password,
+      });
+      const roleContext = authSession.user?.id
+        ? await resolveRoleContextByAuthUserId(authSession.user.id)
+        : null;
+      if (!roleContext || (roleContext.role !== 'admin' && roleContext.role !== 'developer')) {
+        return errorJson({
+          requestId,
+          errorCode: 'admin-role-required',
+          message: 'Authenticated account does not have admin access.',
+          status: 403,
+        });
+      }
+      if (schoolCode && roleContext.schoolCode && schoolCode.toUpperCase() !== roleContext.schoolCode.toUpperCase()) {
+        return errorJson({
+          requestId,
+          errorCode: 'admin-school-mismatch',
+          message: 'Provided school code does not match this admin account.',
+          status: 403,
+        });
+      }
+      const response = dataJson({
+        requestId,
+        data: {
+          role: roleContext.role,
+          schoolId: roleContext.schoolId,
+          schoolCode: roleContext.schoolCode,
+          availableRoles: roleContext.availableRoles,
+          sessionExpiry: Date.now() + 8 * 60 * 60 * 1000,
+        },
+      });
+      attachSupabaseSessionCookies(response, authSession, roleContext.role);
+      clearAllRoleSessionCookies(response);
+      attachAdminSessionCookie(response, createAdminSessionToken());
+      return response;
+    } catch {
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-admin-credentials',
+        message: 'Invalid admin credentials.',
+        status: 401,
+      });
+    }
+  }
 
   if (schoolCode && identifier && password) {
     const scopedRateLimit = await checkRateLimit({

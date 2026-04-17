@@ -1,15 +1,9 @@
-﻿import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
-import { createMockExamSession, getMockExamSession } from '@/lib/study-enhancements-db';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { startMockExamSchema } from '@/lib/schemas/mock-exam';
 
 export const dynamic = 'force-dynamic';
-
-function toClassLevel(value: unknown): 10 | 12 | null {
-  const parsed = Number(value);
-  if (parsed === 10 || parsed === 12) return parsed;
-  return null;
-}
 
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
@@ -55,25 +49,27 @@ export async function GET(req: Request) {
   }
 }
 
+import { createMockExamSession, getMockExamSession } from '@/lib/study-enhancements-db';
+
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   const studentSession = await getStudentSessionFromRequestCookies();
   if (!studentSession) return unauthorizedJson('Student session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 128 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, startMockExamSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 
-  const classLevel = toClassLevel(bodyResult.value.classLevel) || studentSession.classLevel;
-  const subject = typeof bodyResult.value.subject === 'string' ? bodyResult.value.subject.trim() : '';
-  const durationMinutes = Number(bodyResult.value.durationMinutes);
-  const questionCount = Number(bodyResult.value.questionCount);
+  const { classLevel: rawClassLevel, subject = '', questionCount, timeLimit } = bodyResult.value;
+  // Prefer schema classLevel, fall back to session
+  const classLevel = rawClassLevel ?? studentSession.classLevel;
 
   if (!subject) {
     return errorJson({ requestId, errorCode: 'missing-subject', message: 'subject is required.', status: 400 });
@@ -85,8 +81,8 @@ export async function POST(req: Request) {
       schoolId: studentSession.schoolId,
       classLevel,
       subject,
-      durationMinutes: Number.isFinite(durationMinutes) ? durationMinutes : 60,
-      questionCount: Number.isFinite(questionCount) ? questionCount : 20,
+      durationMinutes: timeLimit ?? 60,
+      questionCount: questionCount ?? 20,
     });
     return dataJson({
       requestId,

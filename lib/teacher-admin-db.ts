@@ -2,8 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { ALL_CHAPTERS, getChapterById } from '@/lib/data';
 import { isSupportedSubject } from '@/lib/academic-taxonomy';
 import { getAnalyticsSummary } from '@/lib/analytics-store';
-import { hashPin, verifyPin } from '@/lib/auth/pin';
+import { hashPin, isValidPin, verifyPin } from '@/lib/auth/pin';
 import { createSupabaseAuthUser } from '@/lib/auth/supabase-auth';
+import { issueFriendlyIdentifier } from '@/lib/auth/friendly-ids';
+import {
+  assertPasswordPolicy,
+  buildInitialStudentPasswordFromLoginId,
+  generateLegacyPin,
+  generateStrongPassword,
+} from '@/lib/auth/password-policy';
 import type {
   ExamIntegritySummary,
   ExamSession,
@@ -183,6 +190,7 @@ interface StudentProfileRow {
   class_level: number;
   section: string | null;
   pin_hash: string | null;
+  must_change_password?: boolean | null;
   status: 'active' | 'inactive';
   created_at: string;
   updated_at: string;
@@ -197,11 +205,6 @@ interface PlatformUserRoleRow {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-}
-
-interface SchoolRow {
-  id: RowId;
-  school_code: string;
 }
 
 interface TeacherQuestionBankRow {
@@ -293,12 +296,21 @@ function normalizePhone(phone: string): string {
   return digits;
 }
 
+function buildSyntheticPhoneFromSeed(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  const suffix = String(hash % 10_000_000).padStart(7, '0');
+  return `900${suffix}`;
+}
+
 function normalizeSubmissionCode(value: string): string {
   return sanitizeText(value, 80).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
 }
 
 function normalizeRollCode(value: string): string {
-  return sanitizeText(value, 80).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  return sanitizeText(value, 120).toUpperCase().replace(/[^A-Z0-9._-]/g, '');
 }
 
 function normalizeRosterToken(value: string, max = 64): string {
@@ -312,58 +324,6 @@ function normalizeAuthLocalPart(value: string, max = 40): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, max);
   return cleaned || randomUUID().slice(0, 12);
-}
-
-function normalizeSchoolCodeForId(value: string): string {
-  const compact = normalizeRosterToken(value, 12).replace(/[_-]/g, '').slice(0, 6);
-  return compact || 'SCH';
-}
-
-function normalizePhoneForIdentifier(value: string): string {
-  const digits = normalizePhone(value).replace(/\D/g, '');
-  if (digits.length >= 10) return digits.slice(-10);
-  return digits;
-}
-
-async function getSchoolCodeById(schoolId: string): Promise<string | null> {
-  if (!isSupabaseServiceConfigured()) return null;
-  const cleanSchoolId = sanitizeText(schoolId, 80);
-  if (!cleanSchoolId) return null;
-  const rows = await supabaseSelect<SchoolRow>(TABLES.schools, {
-    select: 'id,school_code',
-    filters: [{ column: 'id', value: cleanSchoolId }],
-    limit: 1,
-  }).catch(() => []);
-  const schoolCode = rows[0]?.school_code;
-  if (typeof schoolCode !== 'string' || schoolCode.trim().length === 0) return null;
-  return normalizeAuthLocalPart(schoolCode, 30);
-}
-
-async function getSchoolCodeForIdentifiers(schoolId: string): Promise<string | null> {
-  if (!isSupabaseServiceConfigured()) return null;
-  const cleanSchoolId = sanitizeText(schoolId, 80);
-  if (!cleanSchoolId) return null;
-  const rows = await supabaseSelect<SchoolRow>(TABLES.schools, {
-    select: 'id,school_code',
-    filters: [{ column: 'id', value: cleanSchoolId }],
-    limit: 1,
-  }).catch(() => []);
-  const schoolCode = rows[0]?.school_code;
-  if (typeof schoolCode !== 'string' || schoolCode.trim().length === 0) return null;
-  return normalizeSchoolCodeForId(schoolCode);
-}
-
-async function resolveTeacherStaffCode(input: {
-  schoolId: string;
-  phone: string;
-}): Promise<string> {
-  const schoolId = sanitizeText(input.schoolId, 80);
-  const schoolCode = (await getSchoolCodeForIdentifiers(schoolId)) || normalizeSchoolCodeForId(schoolId);
-  const phoneToken = normalizePhoneForIdentifier(input.phone);
-  if (phoneToken.length !== 10) {
-    throw new Error('Teacher phone must include a valid 10-digit mobile number.');
-  }
-  return normalizeRosterToken(`${schoolCode}${phoneToken}`, 50);
 }
 
 function buildProvisionedAuthEmail(input: {
@@ -438,6 +398,7 @@ function toStudentProfile(row: StudentProfileRow): StudentProfile | null {
     section: row.section ?? undefined,
     status: row.status,
     hasPin: !!row.pin_hash,
+    mustChangePassword: row.must_change_password === true,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -640,7 +601,7 @@ export async function authenticateTeacherByIdentifier(
   const normalizedPhone = normalizePhone(cleanIdentifier);
   // Also try matching after stripping a leading country code (e.g. +91 or 0091 prefix)
   const strippedPhone = normalizedPhone.replace(/^\+91|^0091/, '');
-  const normalizedStaff = normalizeRosterToken(cleanIdentifier, 50);
+  const normalizedStaff = normalizeRollCode(cleanIdentifier);
   const schoolFilter = schoolId ? [{ column: 'school_id', value: sanitizeText(schoolId, 80) }] : [];
 
   // Run targeted queries in parallel instead of full table scan
@@ -686,7 +647,7 @@ export async function authenticateTeacherByIdentifier(
       storedPhone === strippedPhone ||
       storedPhone.replace(/^\+91|^0091/, '') === normalizedPhone ||
       storedPhone.replace(/^\+91|^0091/, '') === strippedPhone;
-    const staffMatch = normalizeRosterToken(row.staff_code || '', 50) === normalizedStaff;
+    const staffMatch = normalizeRollCode(row.staff_code || '') === normalizedStaff;
     return phoneMatch || (!!normalizedStaff && staffMatch);
   });
   if (matched_candidates.length === 0) {
@@ -821,26 +782,36 @@ export async function createStudent(input: {
   }
   const schoolId = input.schoolId ? sanitizeText(input.schoolId, 80) : '';
   const name = sanitizeText(input.name, 120);
-  const rollNo = normalizeRosterToken(input.rollNo || input.rollCode || '', 50);
-  const rollCode = normalizeRollCode(
-    input.rollCode ||
-      `${input.classLevel}${input.section ? `-${sanitizeText(input.section, 20)}` : ''}-${rollNo || randomUUID().slice(0, 8)}`
-  );
-  const batch = input.batch ? sanitizeText(input.batch, 40) : null;
   const section = input.section ? sanitizeText(input.section, 40) : null;
   if (!schoolId) throw new Error('schoolId is required to create student.');
-  if (!name || !rollCode || !rollNo) throw new Error('Valid student name, rollCode, and rollNo are required.');
+  const identity = await issueFriendlyIdentifier({
+    schoolId,
+    roleCode: 'STU',
+    classLevel: input.classLevel,
+    batch: input.batch || section || 'X',
+  });
+  const rollNo = identity.sequenceToken;
+  const rollCode = normalizeRollCode(identity.identifier);
+  const batch = input.batch ? sanitizeText(input.batch, 40) : identity.batchCode;
+  if (!name || !rollCode || !rollNo) throw new Error('Valid student name and generated identifier are required.');
   const studentId = randomUUID();
-  const schoolCodeToken = (await getSchoolCodeById(schoolId)) || normalizeAuthLocalPart(schoolId, 30);
+  const schoolCodeToken = normalizeAuthLocalPart(identity.schoolCode, 30);
+  const userToken = normalizeAuthLocalPart(`${identity.classCode}${identity.batchCode}${identity.yearCode}${identity.sequenceToken}`, 30);
+  const password = buildInitialStudentPasswordFromLoginId(rollCode);
+  if (!password || password.length < 6) {
+    throw new Error('Unable to generate a valid initial password for student.');
+  }
+  const providedPin = typeof input.pin === 'string' ? input.pin.trim() : '';
+  const legacyPin = providedPin && isValidPin(providedPin) ? providedPin : generateLegacyPin(identity.sequenceToken, 6);
   const authEmail = buildProvisionedAuthEmail({
     role: 'student',
     schoolToken: schoolCodeToken,
-    userToken: rollNo,
+    userToken,
     profileId: studentId,
   });
   const authUser = await createSupabaseAuthUser({
     email: authEmail,
-    password: input.password?.trim() || input.pin?.trim() || rollNo,
+    password,
     emailConfirm: true,
     userMetadata: {
       role: 'student',
@@ -854,7 +825,7 @@ export async function createStudent(input: {
       name,
     },
   });
-  const pinHash = input.pin ? hashPin(input.pin) : null;
+  const pinHash = hashPin(legacyPin);
   const [row] = await supabaseInsert<StudentProfileRow>(TABLES.students, {
     id: studentId,
     school_id: schoolId,
@@ -867,6 +838,7 @@ export async function createStudent(input: {
     class_level: input.classLevel,
     section,
     pin_hash: pinHash,
+    must_change_password: true,
     status: 'active',
   });
   if (!row) throw new Error('Failed to create student.');
@@ -989,6 +961,7 @@ export async function authenticateStudent(rollCode: string, pin?: string, school
     rollCode: row.roll_code,
     classLevel: row.class_level,
     section: row.section ?? undefined,
+    mustChangePassword: row.must_change_password === true,
   };
 }
 
@@ -1024,15 +997,17 @@ export async function authenticateStudentByRollNo(input: {
       rollCode: row.roll_code,
       classLevel: row.class_level,
       section: row.section ?? undefined,
+      mustChangePassword: row.must_change_password === true,
     },
   };
 }
 
 export async function createTeacher(input: {
   schoolId?: string;
-  phone: string;
+  email: string;
+  phone?: string;
   name: string;
-  pin: string;
+  pin?: string;
   staffCode?: string;
   password?: string;
   scopes?: Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }>;
@@ -1041,14 +1016,18 @@ export async function createTeacher(input: {
     throw new Error('Supabase is not configured.');
   }
   const schoolId = input.schoolId ? sanitizeText(input.schoolId, 80) : '';
-  const phone = normalizePhone(input.phone);
+  const email = sanitizeText(input.email || '', 180).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Valid teacher email is required.');
   const name = sanitizeText(input.name, 120);
   if (!schoolId) throw new Error('schoolId is required to create teacher.');
-  if (!phone || !name) throw new Error('Valid phone and name are required.');
-  const staffCode = await resolveTeacherStaffCode({
+  if (!name) throw new Error('Valid teacher name is required.');
+  const identity = await issueFriendlyIdentifier({
     schoolId,
-    phone,
+    roleCode: 'TC',
   });
+  const staffCode = normalizeRollCode(identity.identifier);
+  let phone = normalizePhone(input.phone || '');
+  if (!phone) phone = buildSyntheticPhoneFromSeed(`${schoolId}:${staffCode}:${email}`);
   const duplicateTeacher = await supabaseSelect<Pick<TeacherProfileRow, 'id'>>(TABLES.profiles, {
     select: 'id',
     filters: [
@@ -1058,22 +1037,16 @@ export async function createTeacher(input: {
     limit: 1,
   }).catch(() => []);
   if (duplicateTeacher[0]) {
-    throw new Error('Teacher identifier already exists for this school. Use a different phone number.');
+    throw new Error('Teacher identifier already exists for this school. Please retry.');
   }
   const teacherId = randomUUID();
-  const schoolCodeToken = (await getSchoolCodeById(schoolId)) || normalizeAuthLocalPart(schoolId, 30);
-  const authEmail = buildProvisionedAuthEmail({
-    role: 'teacher',
-    schoolToken: schoolCodeToken,
-    userToken: staffCode,
-    profileId: teacherId,
-  });
-  const teacherPassword = (input.password?.trim() || input.pin || '').trim();
-  if (teacherPassword.length !== 6) {
-    throw new Error('Teacher password must be exactly 6 characters.');
-  }
+  const providedPassword = typeof input.password === 'string' ? input.password.trim() : '';
+  const teacherPassword = providedPassword || generateStrongPassword(12);
+  assertPasswordPolicy(teacherPassword);
+  const providedPin = typeof input.pin === 'string' ? input.pin.trim() : '';
+  const teacherPin = providedPin && isValidPin(providedPin) ? providedPin : generateLegacyPin(identity.sequenceToken, 6);
   const authUser = await createSupabaseAuthUser({
-    email: authEmail,
+    email,
     password: teacherPassword,
     emailConfirm: true,
     userMetadata: {
@@ -1089,11 +1062,11 @@ export async function createTeacher(input: {
     id: teacherId,
     school_id: schoolId,
     auth_user_id: authUser.id,
-    auth_email: authUser.email ?? authEmail,
+    auth_email: authUser.email ?? email,
     phone,
     staff_code: staffCode,
     name,
-    pin_hash: hashPin(input.pin),
+    pin_hash: hashPin(teacherPin),
     status: 'active',
   });
   if (!row) throw new Error('Failed to create teacher.');
@@ -1113,11 +1086,22 @@ export async function createTeacher(input: {
     actorType: 'admin',
     action: 'create-teacher',
     teacherId: row.id,
-    metadata: { phone, name },
+    metadata: { phone, name, email },
   });
   const teacher = await getTeacherById(row.id);
   if (!teacher) throw new Error('Teacher created but unavailable.');
   return teacher;
+}
+
+export async function markStudentPasswordChangeCompleted(studentId: string): Promise<void> {
+  if (!isSupabaseServiceConfigured()) return;
+  const cleanStudentId = sanitizeText(studentId, 80);
+  if (!cleanStudentId) return;
+  await supabaseUpdate<StudentProfileRow>(
+    TABLES.students,
+    { must_change_password: false },
+    [{ column: 'id', value: cleanStudentId }]
+  ).catch(() => []);
 }
 
 export async function updateTeacher(

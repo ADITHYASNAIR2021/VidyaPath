@@ -1,6 +1,17 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { z } from 'zod';
+const createResourceSchema = z.object({
+  title: z.string().trim().min(1).max(180),
+  type: z.enum(['pdf', 'link', 'video', 'image']),
+  url: z.string().trim().url().max(1500),
+  description: z.string().trim().max(1000).optional(),
+  classLevel: z.union([z.literal(10), z.literal(12)]).optional(),
+  section: z.string().trim().max(40).optional(),
+  chapterId: z.string().trim().max(90).optional(),
+  subject: z.string().trim().max(80).optional(),
+});
 import { createResource, deleteResource, listResources } from '@/lib/school-ops-db';
 import { recordAuditEvent } from '@/lib/security/audit';
 
@@ -82,25 +93,19 @@ export async function POST(req: Request) {
     });
   }
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 128 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 128 * 1024, createResourceSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
-  const body = bodyResult.value;
-  const title = toText(body.title, 180);
-  const type = toText(body.type, 20);
-  const url = toText(body.url, 1500);
-  const description = toText(body.description, 1000);
-  const classLevel = toClassLevel(body.classLevel);
-  const section = toText(body.section, 40).toUpperCase();
-  const chapterId = toText(body.chapterId, 90);
-  const subject = toText(body.subject, 80);
-  if (!title || !url || !isResourceType(type)) {
+  const { title, type, url, description, classLevel, section: rawSection, chapterId, subject } = bodyResult.value;
+  const section = rawSection?.toUpperCase() ?? '';
+  if (!title || !url || !type) {
     return errorJson({
       requestId,
       errorCode: 'invalid-resource-payload',

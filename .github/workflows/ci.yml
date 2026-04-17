@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  quality:
+    name: Type-check · Lint · Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript — check
+        run: npm run typecheck
+
+      - name: ESLint — check
+        run: npm run lint
+
+      - name: Vitest — unit tests
+        run: npm run test
+        env:
+          NODE_ENV: test
+
+      - name: Security guards smoke-test
+        run: npm run test:security-guards
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm audit (production deps, high+)
+        run: npm audit --omit=dev --audit-level=high
+
+  build-check:
+    name: Next.js build check
+    runs-on: ubuntu-latest
+    # Only run on PRs targeting main to avoid unnecessary builds on pushes
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (dry-run — validates compilation)
+        run: npm run build
+        env:
+          SESSION_SIGNING_SECRET: ci-build-only-secret-not-real
+          TEACHER_PORTAL_KEY: ci-build-only
+          ADMIN_PORTAL_KEY: ci-build-only
+          GROQ_API_KEY: ci-build-only
+          GEMINI_API_KEY: ci-build-only
+          # Ensure no Supabase calls during build-time
+          SKIP_ENV_VALIDATION: '1'

@@ -1,6 +1,7 @@
 import { isSupabaseServiceConfigured, supabaseInsert, supabaseSelect, supabaseUpdate } from '@/lib/supabase-rest';
 import { chooseHighestRole, isPlatformRole, type PlatformRole } from '@/lib/auth/roles';
 import type { SupportedSubject } from '@/lib/academic-taxonomy';
+import { generateUniqueThreeLetterSchoolCode } from '@/lib/auth/friendly-ids';
 
 export interface SchoolProfile {
   id: string;
@@ -130,6 +131,10 @@ function normalizeSchoolCode(value: string): string {
   return sanitize(value, 40).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
 }
 
+function normalizeThreeLetterSchoolCode(value: string): string {
+  return sanitize(value, 8).toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+}
+
 function normalizePhoneIdentifier(value: string): string {
   const digits = sanitize(value, 40).replace(/[^\d]/g, '');
   if (digits.length >= 10) return digits.slice(-10);
@@ -189,7 +194,7 @@ export async function listSchools(status?: 'active' | 'inactive' | 'archived'): 
 
 export async function createSchool(input: {
   schoolName: string;
-  schoolCode: string;
+  schoolCode?: string;
   board?: string;
   city?: string;
   state?: string;
@@ -198,20 +203,35 @@ export async function createSchool(input: {
 }): Promise<SchoolProfile> {
   if (!isSupabaseServiceConfigured()) throw new Error('Supabase is not configured.');
   const schoolName = sanitize(input.schoolName, 140);
-  const schoolCode = normalizeSchoolCode(input.schoolCode);
-  if (!schoolName || !schoolCode) throw new Error('Valid schoolName and schoolCode are required.');
-  const [created] = await supabaseInsert<SchoolRow>(TABLES.schools, {
-    school_name: schoolName,
-    school_code: schoolCode,
-    board: sanitize(input.board || 'CBSE', 40),
-    city: input.city ? sanitize(input.city, 80) : null,
-    state: input.state ? sanitize(input.state, 80) : null,
-    contact_phone: input.contactPhone ? sanitize(input.contactPhone, 30) : null,
-    contact_email: input.contactEmail ? sanitize(input.contactEmail, 140) : null,
-    status: 'active',
-  });
-  if (!created) throw new Error('Failed to create school.');
-  return toSchoolProfile(created);
+  if (!schoolName) throw new Error('Valid schoolName is required.');
+  const preferredCode = normalizeThreeLetterSchoolCode(input.schoolCode || '');
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const schoolCode = await generateUniqueThreeLetterSchoolCode({
+      schoolName,
+      preferredCode: attempt === 0 ? (preferredCode || undefined) : undefined,
+    });
+    try {
+      const [created] = await supabaseInsert<SchoolRow>(TABLES.schools, {
+        school_name: schoolName,
+        school_code: schoolCode,
+        board: sanitize(input.board || 'CBSE', 40),
+        city: input.city ? sanitize(input.city, 80) : null,
+        state: input.state ? sanitize(input.state, 80) : null,
+        contact_phone: input.contactPhone ? sanitize(input.contactPhone, 30) : null,
+        contact_email: input.contactEmail ? sanitize(input.contactEmail, 140) : null,
+        status: 'active',
+      });
+      if (created) return toSchoolProfile(created);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (!/duplicate|conflict|409|unique/i.test(message)) {
+        throw error;
+      }
+      if (attempt === 4) throw new Error('Unable to allocate unique school code. Please retry.');
+      continue;
+    }
+  }
+  throw new Error('Failed to create school.');
 }
 
 export async function updateSchool(
@@ -230,7 +250,11 @@ export async function updateSchool(
   if (!isSupabaseServiceConfigured()) throw new Error('Supabase is not configured.');
   const patch: Record<string, unknown> = {};
   if (typeof updates.schoolName === 'string') patch.school_name = sanitize(updates.schoolName, 140);
-  if (typeof updates.schoolCode === 'string') patch.school_code = normalizeSchoolCode(updates.schoolCode);
+  if (typeof updates.schoolCode === 'string') {
+    const schoolCode = normalizeThreeLetterSchoolCode(updates.schoolCode);
+    if (schoolCode.length !== 3) throw new Error('schoolCode must be exactly 3 letters.');
+    patch.school_code = schoolCode;
+  }
   if (typeof updates.board === 'string') patch.board = sanitize(updates.board, 40);
   if (typeof updates.city === 'string') patch.city = sanitize(updates.city, 80);
   if (typeof updates.state === 'string') patch.state = sanitize(updates.state, 80);
@@ -367,6 +391,7 @@ export async function findTeacherAuthIdentity(input: {
   if (!school || school.status !== 'active') return null;
   const identifier = sanitize(input.identifier, 80);
   const normalizedIdentifier = identifier.toUpperCase();
+  const normalizedEmail = identifier.toLowerCase();
   const normalizedPhone = normalizePhoneIdentifier(identifier);
   if (!identifier) return null;
   const rows = await supabaseSelect<Array<{
@@ -384,7 +409,8 @@ export async function findTeacherAuthIdentity(input: {
   const matched = rows.find((row) => {
     const phone = normalizePhoneIdentifier(row.phone || '');
     const staff = sanitize(row.staff_code || '', 80).toUpperCase();
-    return (normalizedPhone ? phone === normalizedPhone : false) || staff === normalizedIdentifier;
+    const authEmail = sanitize(row.auth_email || '', 160).toLowerCase();
+    return (normalizedPhone ? phone === normalizedPhone : false) || staff === normalizedIdentifier || authEmail === normalizedEmail;
   });
   if (!matched || !matched.auth_email) return null;
   return { authEmail: matched.auth_email, teacherId: matched.id, schoolId: school.id };
@@ -397,6 +423,7 @@ export async function findTeacherAuthIdentities(input: {
   if (!isSupabaseServiceConfigured()) return [];
   const identifier = sanitize(input.identifier, 80);
   const normalizedIdentifier = identifier.toUpperCase();
+  const normalizedEmail = identifier.toLowerCase();
   const normalizedPhone = normalizePhoneIdentifier(identifier);
   if (!identifier) return [];
   const school = input.schoolCode ? await getSchoolByCode(input.schoolCode) : null;
@@ -418,7 +445,8 @@ export async function findTeacherAuthIdentities(input: {
     .filter((row) => {
       const phone = normalizePhoneIdentifier(row.phone || '');
       const staff = sanitize(row.staff_code || '', 80).toUpperCase();
-      return ((normalizedPhone ? phone === normalizedPhone : false) || staff === normalizedIdentifier) && !!row.auth_email && !!row.school_id;
+      const authEmail = sanitize(row.auth_email || '', 160).toLowerCase();
+      return ((normalizedPhone ? phone === normalizedPhone : false) || staff === normalizedIdentifier || authEmail === normalizedEmail) && !!row.auth_email && !!row.school_id;
     })
     .map((row) => ({
       authEmail: String(row.auth_email),
@@ -506,6 +534,7 @@ export async function findAdminAuthIdentity(input: {
   if (!school || school.status !== 'active') return null;
   const identifier = sanitize(input.identifier, 90);
   const normalizedIdentifier = identifier.toUpperCase();
+  const normalizedEmail = identifier.toLowerCase();
   const normalizedPhone = normalizePhoneIdentifier(identifier);
   if (!identifier) return null;
   const rows = await supabaseSelect<Array<{
@@ -523,7 +552,8 @@ export async function findAdminAuthIdentity(input: {
   const matched = rows.find((row) => {
     const adminIdentifier = sanitize(row.admin_identifier || '', 90).toUpperCase();
     const phone = normalizePhoneIdentifier(row.phone || '');
-    return adminIdentifier === normalizedIdentifier || (normalizedPhone ? phone === normalizedPhone : false);
+    const authEmail = sanitize(row.auth_email || '', 160).toLowerCase();
+    return adminIdentifier === normalizedIdentifier || (normalizedPhone ? phone === normalizedPhone : false) || authEmail === normalizedEmail;
   });
   if (!matched || !matched.auth_email) return null;
   return { authEmail: matched.auth_email, adminId: matched.id, schoolId: school.id };

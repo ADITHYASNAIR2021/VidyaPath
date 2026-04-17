@@ -20,6 +20,7 @@ export interface TeacherProfile {
   phone: string;
   name: string;
   staffCode?: string;
+  mustChangePassword?: boolean;
   status: TeacherStatus;
   createdAt: string;
   updatedAt: string;
@@ -401,6 +402,7 @@ export interface StudentProfile {
   section?: string;
   status: 'active' | 'inactive';
   hasPin: boolean;
+  mustChangePassword?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -414,6 +416,7 @@ export interface StudentSession {
   schoolId?: string;
   schoolCode?: string;
   batch?: string;
+  mustChangePassword?: boolean;
   stream?: 'Science' | 'Commerce' | 'Humanities';
   enrolledSubjects?: Subject[];
 }

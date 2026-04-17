@@ -3,6 +3,7 @@ import { ALL_PAPERS } from '@/lib/papers';
 import { getPYQData } from '@/lib/pyq';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import {
   cleanTextList,
   isPaperEvaluateResponse,
@@ -12,7 +13,8 @@ import {
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { paperEvaluateRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 interface AnswerInput {
@@ -107,16 +109,32 @@ export async function POST(req: Request) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 128 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 128 * 1024, paperEvaluateRequestSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
+    const body = bodyResult.value as Record<string, unknown>;
+    const tokenBudget = await checkAiTokenBudget({
+      context,
+      endpoint: '/api/paper-evaluate',
+      projectedInputText: JSON.stringify(body),
+      projectedOutputTokens: 1800,
+    });
+    if (!tokenBudget.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: tokenBudget.reason || 'token-cap-exceeded',
+        message: 'AI usage limit reached for paper evaluation.',
+        status: 429,
+        hint: `Retry after ${tokenBudget.retryAfterSeconds ?? 300}s`,
+      });
+    }
     const parsed = parseRequest(body);
     if (!parsed) {
       return errorJson({

@@ -1,7 +1,9 @@
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { imageSolveRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 interface ImageSolveRequest {
@@ -42,24 +44,17 @@ export async function POST(req: Request) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<ImageSolveRequest>(req, 8 * 1024 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 8 * 1024 * 1024, imageSolveRequestSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value as ImageSolveRequest | null;
-    if (!body || typeof body !== 'object') {
-      return errorJson({
-        requestId,
-        errorCode: 'invalid-request-payload',
-        message: 'Invalid request payload.',
-        status: 400,
-      });
-    }
+    const body = bodyResult.value;
 
     const rawBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64 : '';
     const imageBase64 = cleanBase64(rawBase64);
@@ -76,6 +71,27 @@ export async function POST(req: Request) {
         errorCode: 'missing-image',
         message: 'imageBase64 is required.',
         status: 400,
+      });
+    }
+    const tokenBudget = await checkAiTokenBudget({
+      context,
+      endpoint: '/api/image-solve',
+      projectedInputText: JSON.stringify({
+        prompt,
+        classLevel,
+        subject,
+        mimeType,
+        imageSizeBytesApprox: Math.round((imageBase64.length * 3) / 4),
+      }),
+      projectedOutputTokens: 1800,
+    });
+    if (!tokenBudget.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: tokenBudget.reason || 'token-cap-exceeded',
+        message: 'AI usage limit reached for image solving.',
+        status: 429,
+        hint: `Retry after ${tokenBudget.retryAfterSeconds ?? 300}s`,
       });
     }
 

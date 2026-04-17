@@ -1,6 +1,7 @@
 import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { sheetsImportSchema } from '@/lib/schemas/sheets-integration';
 import { gradeSubmission, releaseSubmissionResults } from '@/lib/teacher-admin-db';
 import { importFromSheets } from '@/lib/sheets-bridge';
 
@@ -59,25 +60,24 @@ export async function POST(req: Request) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 256 * 1024, sheetsImportSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    let rows = normalizeRows((body as { rows?: unknown } | null)?.rows);
-
-    if (rows.length === 0) {
-      const pulled = await importFromSheets({
-        mode: 'grades',
-        teacherId: teacher.teacher.id,
-      });
-      rows = normalizeRows((pulled as { rows?: unknown } | null)?.rows);
-    }
+    const { dryRun = false, ...importParams } = bodyResult.value;
+    // Pull rows from Sheets using typed import params
+    const pulled = await importFromSheets({
+      mode: 'grades',
+      teacherId: teacher.teacher.id,
+      ...importParams,
+    } as Parameters<typeof importFromSheets>[0]);
+    const rows = normalizeRows((pulled as { rows?: unknown } | null)?.rows);
 
     let gradedCount = 0;
     const packIdsToRelease = new Set<string>();

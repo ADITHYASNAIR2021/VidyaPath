@@ -1,8 +1,9 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { isValidPin } from '@/lib/auth/pin';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
-import { getTeacherById, resetTeacherPin } from '@/lib/teacher-admin-db';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { resetPinSchema } from '@/lib/schemas/admin-management';
+import { getTeacherById, resetTeacherPin } from '@/lib/teacher/auth.db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 
@@ -21,13 +22,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       status: 400,
     });
   }
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 8 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 8 * 1024, resetPinSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const pin = typeof bodyResult.value.pin === 'string' ? bodyResult.value.pin.trim() : '';

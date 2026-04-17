@@ -3,7 +3,12 @@ import { buildTeacherAssignmentPackDraft, buildTeacherPackUrls, sanitizePackTitl
 import { getStudentSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { z } from 'zod';
+// Strict on 'action' field; payload varies per-action (validated inline below)
+const teacherActionBaseSchema = z.object({
+  action: z.enum(['set-important-topics', 'set-quiz-link', 'add-announcement', 'remove-announcement', 'create-assignment-pack']),
+}).passthrough();
 import {
   addAnnouncement,
   getPrivateTeacherConfig,
@@ -170,13 +175,14 @@ export async function POST(req: Request) {
     }
     await assertTeacherStorageWritable();
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 128 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 128 * 1024, teacherActionBaseSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
     const body = bodyResult.value;

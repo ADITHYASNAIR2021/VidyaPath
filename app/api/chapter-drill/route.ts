@@ -2,6 +2,7 @@ import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import {
   cleanTextList,
   isChapterDrillResponse,
@@ -15,7 +16,8 @@ import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/varia
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { chapterDrillRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 interface ChapterDrillRequest {
@@ -179,16 +181,17 @@ export async function POST(req: Request) {
       });
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, chapterDrillRequestSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
+    const body = bodyResult.value as Record<string, unknown>;
     const parsed = parseRequest(body);
     if (!parsed) {
       return errorJson({
@@ -196,6 +199,22 @@ export async function POST(req: Request) {
         errorCode: 'invalid-chapter-drill-input',
         message: 'Invalid request. Required: { chapterId, questionCount?, difficulty? }',
         status: 400,
+      });
+    }
+    const projectedOutputTokens = Math.min(3600, 900 + parsed.questionCount * 170);
+    const tokenBudget = await checkAiTokenBudget({
+      context,
+      endpoint: '/api/chapter-drill',
+      projectedInputText: JSON.stringify(body),
+      projectedOutputTokens,
+    });
+    if (!tokenBudget.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: tokenBudget.reason || 'token-cap-exceeded',
+        message: 'AI usage limit reached for chapter drill generation.',
+        status: 429,
+        hint: `Retry after ${tokenBudget.retryAfterSeconds ?? 300}s`,
       });
     }
 
@@ -270,7 +289,7 @@ ${buildVariationInstruction(variation)}`;
 - Output JSON only.`,
         userPrompt: promptWithVariation,
         temperature: 0.18,
-        maxOutputTokens: Math.min(3600, 900 + parsed.questionCount * 170),
+        maxOutputTokens: projectedOutputTokens,
         validate: isChapterDrillResponse,
       });
 

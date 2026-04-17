@@ -43,7 +43,25 @@
       "Bash(claude-flow doctor:*)",
       "Bash(claude-flow memory:*)",
       "Bash(claude-flow daemon:*)",
-      "Bash(claude-flow hooks:*)"
+      "Bash(claude-flow hooks:*)",
+      "Bash(supabase --version)",
+      "Bash(npx supabase *)",
+      "Bash(mkdir -p D:/VidyaPath/supabase/migrations D:/VidyaPath/lib/schemas)",
+      "Bash(cp D:/VidyaPath/scripts/sql/supabase_init.sql D:/VidyaPath/supabase/migrations/0001_baseline.sql)",
+      "Bash(cp D:/VidyaPath/scripts/sql/reset_and_seed_three_schools_friendly_ids.sql D:/VidyaPath/supabase/seed.sql)",
+      "Bash(npm list *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(node scripts/migrate-body-parser.mjs)",
+      "Bash(dir /s /b D:\\\\VidyaPath\\\\app\\\\*login*)",
+      "Bash(dir /s /b D:\\\\VidyaPath\\\\app\\\\*signin*)",
+      "Bash(exist \"D:\\\\VidyaPath\\\\lib\\\\teacher\" dir \"D:\\\\VidyaPath\\\\lib\\\\teacher\" /b)",
+      "Bash(grep -r \"import.*from.*\\\\\\\\.\\\\\\\\.\" /d/VidyaPath/app --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(find /d/VidyaPath/app/api -name route.ts -exec sh -c 'lines=$\\(wc -l < \"$1\"\\); if [ \"$lines\" -lt 3 ]; then echo \"$1: EMPTY/STUB\"; fi' _ '{}' ';')",
+      "Bash(sed 's|/d/VidyaPath/app/api||; s|/route.ts||')",
+      "Read(//tmp/**)",
+      "Bash(xargs ls *)",
+      "Bash(grep -v \"//\")"
     ]
   }
 }

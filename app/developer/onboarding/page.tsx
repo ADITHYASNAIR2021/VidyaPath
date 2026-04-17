@@ -136,8 +136,8 @@ export default function DeveloperOnboardingPage() {
     setSuccess('');
     setIssuedCredentials(null);
     try {
-      if (!adminForm.schoolId || !adminForm.name) {
-        setError('School and admin name are required.');
+      if (!adminForm.schoolId || !adminForm.name || !adminForm.authEmail) {
+        setError('School, admin name, and admin email are required.');
         return;
       }
       const response = await fetch(`/api/developer/schools/${adminForm.schoolId}/admins`, {
@@ -298,7 +298,7 @@ export default function DeveloperOnboardingPage() {
             <input
               value={adminForm.authEmail}
               onChange={(event) => setAdminForm((prev) => ({ ...prev, authEmail: event.target.value }))}
-              placeholder="Admin email (optional)"
+              placeholder="Admin email *"
               className="rounded-lg border border-[#E8E4DC] px-2.5 py-2 text-sm"
             />
             <input

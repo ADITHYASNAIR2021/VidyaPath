@@ -1,34 +1,13 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
-import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
-import { recordAuditEvent } from '@/lib/security/audit';
-import { gradeSubmission } from '@/lib/teacher-admin-db';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { gradeSubmissionSchema } from '@/lib/schemas/teacher-submission';
 
 export const dynamic = 'force-dynamic';
 
-type QuestionGradeInput = {
-  questionNo: string;
-  scoreAwarded: number;
-  maxScore: number;
-  feedback?: string;
-};
-
-function parseQuestionGrades(value: unknown): QuestionGradeInput[] {
-  if (!Array.isArray(value)) return [];
-  const rows: QuestionGradeInput[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== 'object') continue;
-    const row = item as Record<string, unknown>;
-    const questionNo = typeof row.questionNo === 'string' ? row.questionNo.trim() : '';
-    const scoreAwarded = Number(row.scoreAwarded);
-    const maxScore = Number(row.maxScore);
-    const feedback = typeof row.feedback === 'string' ? row.feedback.trim() : undefined;
-    if (!questionNo || !Number.isFinite(scoreAwarded) || !Number.isFinite(maxScore)) continue;
-    rows.push({ questionNo, scoreAwarded, maxScore, feedback });
-  }
-  return rows;
-}
+import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
+import { recordAuditEvent } from '@/lib/security/audit';
+import { gradeSubmission } from '@/lib/teacher-admin-db';
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
@@ -37,24 +16,23 @@ export async function POST(req: Request) {
     if (!session) return unauthorizedJson('Unauthorized teacher access.', requestId);
     await assertTeacherStorageWritable();
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, gradeSubmissionSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    const submissionId = typeof body.submissionId === 'string' ? body.submissionId.trim() : '';
-    const questionGrades = parseQuestionGrades(body.questionGrades);
+    const { submissionId, grades: questionGrades } = bodyResult.value;
 
     if (!submissionId || questionGrades.length === 0) {
       return errorJson({
         requestId,
         errorCode: 'invalid-grade-payload',
-        message: 'Required: submissionId and questionGrades[]',
+        message: 'Required: submissionId and grades[]',
         status: 400,
       });
     }

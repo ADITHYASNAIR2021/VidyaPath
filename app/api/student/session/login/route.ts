@@ -10,16 +10,23 @@ import {
   signInWithPassword,
 } from '@/lib/auth/supabase-auth';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { studentLoginSchema } from '@/lib/schemas/auth';
 import {
   findStudentAuthIdentitiesByRollNo,
   findStudentAuthIdentity,
+  resolveRoleContextByAuthUserId,
 } from '@/lib/platform-rbac-db';
 import { logServerEvent } from '@/lib/observability';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { recordStudentActivity } from '@/lib/study-enhancements-db';
-import { authenticateStudent, authenticateStudentByRollNo, getStudentById } from '@/lib/teacher-admin-db';
+import {
+  authenticateStudent,
+  authenticateStudentByRollNo,
+  getStudentById,
+  getStudentByRollCode,
+} from '@/lib/teacher-admin-db';
 
 const SESSION_EXPIRY_MS = 8 * 60 * 60 * 1000;
 
@@ -31,6 +38,7 @@ function buildSessionPayload(student: {
   section?: string;
   schoolId?: string;
   batch?: string;
+  mustChangePassword?: boolean;
 }) {
   return {
     studentId: student.id,
@@ -40,6 +48,7 @@ function buildSessionPayload(student: {
     section: student.section,
     schoolId: student.schoolId,
     batch: student.batch,
+    mustChangePassword: student.mustChangePassword === true,
   };
 }
 
@@ -54,13 +63,14 @@ export async function POST(req: Request) {
     });
   }
   const ip = getClientIp(req);
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 16 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 16 * 1024, studentLoginSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 
@@ -93,13 +103,13 @@ export async function POST(req: Request) {
   const rollNo = typeof body.rollNo === 'string' ? body.rollNo.trim().toUpperCase() : '';
   const rollCode =
     typeof body.rollCode === 'string'
-      ? body.rollCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 80)
+      ? body.rollCode.trim().toUpperCase().replace(/[^A-Z0-9._-]/g, '').slice(0, 80)
       : '';
   const pin = typeof body.pin === 'string' ? body.pin.trim().slice(0, 64) : '';
   const password = typeof body.password === 'string' ? body.password.trim().slice(0, 128) : (pin || '');
   const secret = password || pin;
   const normalizedRollNo = (rollNo || rollNoFromInput).trim().toUpperCase();
-  const normalizedRollCode = (rollCode || rollCodeFromInput).trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 80);
+  const normalizedRollCode = (rollCode || rollCodeFromInput).trim().toUpperCase().replace(/[^A-Z0-9._-]/g, '').slice(0, 80);
   const identityToken = normalizedRollNo || normalizedRollCode || 'unknown';
 
   const identityLimit = await checkRateLimit({
@@ -122,7 +132,7 @@ export async function POST(req: Request) {
     return errorJson({
       requestId,
       errorCode: 'missing-student-secret',
-      message: 'Key/PIN is required for student login.',
+      message: 'Password is required for student login.',
       status: 400,
     });
   }
@@ -132,6 +142,15 @@ export async function POST(req: Request) {
     (classLevel === 10 || classLevel === 12) &&
     !!normalizedRollNo;
 
+  if (rollInput.includes('@')) {
+    return errorJson({
+      requestId,
+      errorCode: 'invalid-student-identifier-format',
+      message: 'Student login accepts only Student ID and password.',
+      status: 400,
+    });
+  }
+
   const buildSuccessResponse = async (data: {
     studentId: string;
     studentName: string;
@@ -140,6 +159,7 @@ export async function POST(req: Request) {
     section?: string;
     schoolId?: string;
     batch?: string;
+    mustChangePassword?: boolean;
     auth: 'supabase' | 'legacy-roll' | 'legacy';
   }) => {
     await recordStudentActivity(data.studentId, new Date()).catch(() => undefined);
@@ -150,6 +170,7 @@ export async function POST(req: Request) {
         role: 'student',
         schoolCode: schoolCode || undefined,
         schoolId: data.schoolId,
+        mustChangePassword: data.mustChangePassword === true,
         availableRoles: ['student'],
         sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
       },
@@ -167,6 +188,7 @@ export async function POST(req: Request) {
         schoolId: data.schoolId,
         schoolCode: schoolCode || undefined,
         batch: data.batch,
+        mustChangePassword: data.mustChangePassword === true,
       })
     );
     return response;
@@ -356,9 +378,88 @@ export async function POST(req: Request) {
     return errorJson({
       requestId,
       errorCode: 'missing-student-identifier',
-      message: 'Required: roll number and key, or legacy rollCode and key.',
+      message: 'Required: student ID and password.',
       status: 400,
     });
+  }
+
+  const authCandidate = await getStudentByRollCode(normalizedRollCode);
+  if (authCandidate?.auth_email) {
+    try {
+      const authSession = await signInWithPassword({
+        email: authCandidate.auth_email,
+        password: secret,
+      });
+      const roleContext = authSession.user?.id
+        ? await resolveRoleContextByAuthUserId(authSession.user.id)
+        : null;
+      if (roleContext && roleContext.role !== 'student') {
+        return errorJson({
+          requestId,
+          errorCode: 'student-role-required',
+          message: 'Authenticated account does not have student access.',
+          status: 403,
+        });
+      }
+      if (schoolCode && roleContext?.schoolCode && schoolCode.toUpperCase() !== roleContext.schoolCode.toUpperCase()) {
+        return errorJson({
+          requestId,
+          errorCode: 'student-school-mismatch',
+          message: 'Provided school code does not match this student account.',
+          status: 403,
+        });
+      }
+      const student = await getStudentById(authCandidate.id);
+      if (!student) {
+        return errorJson({
+          requestId,
+          errorCode: 'student-profile-not-found',
+          message: 'Student profile not found.',
+          status: 404,
+        });
+      }
+      await recordStudentActivity(student.id, new Date()).catch(() => undefined);
+      const resolvedSchoolCode = roleContext?.schoolCode || schoolCode || undefined;
+      const resolvedSchoolId = roleContext?.schoolId || student.schoolId;
+      const response = dataJson({
+        requestId,
+        data: {
+          ...buildSessionPayload(student),
+          role: 'student',
+          schoolCode: resolvedSchoolCode,
+          schoolId: resolvedSchoolId,
+          auth: 'supabase-roll-code',
+          mustChangePassword: student.mustChangePassword === true,
+          availableRoles: roleContext?.availableRoles || ['student'],
+          sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
+        },
+      });
+      clearSupabaseSessionCookies(response);
+      clearAllRoleSessionCookies(response);
+      attachStudentSessionCookie(
+        response,
+        createStudentSessionToken({
+          studentId: student.id,
+          studentName: student.name,
+          rollCode: student.rollCode,
+          classLevel: student.classLevel,
+          section: student.section,
+          schoolId: resolvedSchoolId,
+          schoolCode: resolvedSchoolCode,
+          batch: student.batch,
+          mustChangePassword: student.mustChangePassword === true,
+        })
+      );
+      attachSupabaseSessionCookies(response, authSession, 'student');
+      return response;
+    } catch {
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-student-credentials',
+        message: 'Invalid student credentials.',
+        status: 401,
+      });
+    }
   }
 
   const session = await authenticateStudent(normalizedRollCode, secret || undefined);
@@ -366,7 +467,7 @@ export async function POST(req: Request) {
     return errorJson({
       requestId,
       errorCode: 'invalid-student-credentials',
-      message: 'Invalid roll code or PIN.',
+      message: 'Invalid student ID or password.',
       status: 401,
     });
   }

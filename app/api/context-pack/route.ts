@@ -3,7 +3,8 @@ import { getChapterById } from '@/lib/data';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { contextPackRequestSchema } from '@/lib/schemas/ai';
 
 const ALLOWED_TASKS: ContextTask[] = [
   'chat',
@@ -24,16 +25,17 @@ export async function POST(req: Request) {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 32 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, contextPackRequestSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+        issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
+    const body = bodyResult.value as Record<string, unknown>;
 
     const classLevel = Number((body as Record<string, unknown>).classLevel);
     const subject = typeof (body as Record<string, unknown>).subject === 'string'

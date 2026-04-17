@@ -20,14 +20,7 @@ export interface ParentSession {
 }
 
 function getSessionSecret(): string {
-  const explicit = process.env.SESSION_SIGNING_SECRET?.trim();
-  if (explicit) return explicit;
-  if (process.env.NODE_ENV === 'production') return '';
-  return (
-    process.env.ADMIN_PORTAL_KEY?.trim() ||
-    process.env.TEACHER_PORTAL_KEY?.trim() ||
-    'vidyapath-dev-session-secret'
-  );
+  return (process.env.SESSION_SIGNING_SECRET || '').trim();
 }
 
 function encodeBase64Url(input: string): string {

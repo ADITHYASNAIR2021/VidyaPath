@@ -1,7 +1,10 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { createSupabaseAuthUser } from '@/lib/auth/supabase-auth';
 import { createSchool, getSchoolByCode, type SchoolProfile } from '@/lib/platform-rbac-db';
 import { isSupabaseServiceConfigured, supabaseInsert, supabaseSelect, supabaseUpdate } from '@/lib/supabase-rest';
+import { issueFriendlyIdentifier } from '@/lib/auth/friendly-ids';
+import { assertPasswordPolicy, generateStrongPassword } from '@/lib/auth/password-policy';
+import { sendCredentialMail } from '@/lib/notifications/credential-email';
 
 type AffiliateRequestStatus = 'pending' | 'approved' | 'rejected';
 
@@ -118,38 +121,6 @@ function normalizePhone(value: string): string {
   const digits = sanitize(value, 24).replace(/[^\d]/g, '');
   if (digits.length >= 10) return digits.slice(-10);
   return digits;
-}
-
-function normalizeSchoolCodeForId(value: string): string {
-  const code = normalizeSchoolCode(value).replace(/[_-]/g, '').slice(0, 6);
-  return code || 'SCH';
-}
-
-function normalizePhoneForIdentifier(value: string): string {
-  const digits = normalizePhone(value).replace(/\D/g, '');
-  if (digits.length >= 10) return digits.slice(-10);
-  return digits;
-}
-
-function buildDefaultPassword(_seed: string): string {
-  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-  const digits = '23456789';
-  const specials = '!@#$%^&*()';
-  const all = `${letters}${digits}${specials}`;
-  const bytes = randomBytes(8);
-  const chars = [
-    letters[bytes[0] % letters.length],
-    digits[bytes[1] % digits.length],
-    specials[bytes[2] % specials.length],
-    all[bytes[3] % all.length],
-    all[bytes[4] % all.length],
-    all[bytes[5] % all.length],
-  ];
-  for (let i = chars.length - 1; i > 0; i -= 1) {
-    const j = bytes[(6 + i) % bytes.length] % (i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join('');
 }
 
 function toAffiliateRequest(row: AffiliateRequestRow): AffiliateSchoolRequest {
@@ -298,30 +269,15 @@ async function createApprovedSchoolForRequest(input: {
     const existing = await getSchoolByCode(explicitSchoolCode);
     if (existing) return existing;
   }
-  const fallbackBase = normalizeSchoolCode(
-    input.request.school_name
-      .split(/\s+/)
-      .map((part) => part[0] || '')
-      .join('')
-      .slice(0, 6)
-  );
-  const attemptBase = explicitSchoolCode || fallbackBase || 'VPSCH';
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const suffix = attempt === 0 ? '' : `${Math.floor(100 + Math.random() * 900)}`;
-    const schoolCode = normalizeSchoolCode(`${attemptBase}${suffix}`).slice(0, 16);
-    const existing = await getSchoolByCode(schoolCode);
-    if (existing) continue;
-    return createSchool({
-      schoolName: input.request.school_name,
-      schoolCode,
-      board: preferredBoard,
-      city: city || undefined,
-      state: state || undefined,
-      contactPhone: input.request.contact_phone || undefined,
-      contactEmail: input.request.contact_email || undefined,
-    });
-  }
-  throw new Error('Unable to generate a unique school code for approval.');
+  return createSchool({
+    schoolName: input.request.school_name,
+    schoolCode: explicitSchoolCode || undefined,
+    board: preferredBoard,
+    city: city || undefined,
+    state: state || undefined,
+    contactPhone: input.request.contact_phone || undefined,
+    contactEmail: input.request.contact_email || undefined,
+  });
 }
 
 export async function reviewAffiliateRequest(input: {
@@ -441,16 +397,14 @@ export async function provisionSchoolAdminByDeveloper(input: {
   const name = sanitize(input.name, 120);
   if (!name) throw new Error('Admin name is required.');
   const phone = input.phone ? normalizePhone(input.phone) : '';
-  const phoneToken = normalizePhoneForIdentifier(phone);
-  if (phoneToken.length !== 10) {
-    throw new Error('Admin phone must include a valid 10-digit mobile number.');
-  }
-  const adminIdentifier = `${normalizeSchoolCodeForId(school.school_code)}${phoneToken}`;
+  const identity = await issueFriendlyIdentifier({
+    schoolId: school.id,
+    roleCode: 'AD',
+  });
+  const adminIdentifier = identity.identifier;
   const providedPassword = typeof input.password === 'string' ? input.password.trim() : '';
-  if (providedPassword && providedPassword.length !== 6) {
-    throw new Error('Admin password must be exactly 6 characters.');
-  }
-  const password = providedPassword || buildDefaultPassword(adminIdentifier || phone || name);
+  const password = providedPassword || generateStrongPassword(12);
+  assertPasswordPolicy(password);
   const existingIdentifier = await supabaseSelect<Pick<SchoolAdminProfileRow, 'id'>>(TABLES.schoolAdmins, {
     select: 'id',
     filters: [
@@ -460,10 +414,12 @@ export async function provisionSchoolAdminByDeveloper(input: {
     limit: 1,
   }).catch(() => []);
   if (existingIdentifier[0]) {
-    throw new Error('Admin identifier already exists for this school. Use a different phone number.');
+    throw new Error('Admin identifier already exists for this school. Please retry.');
   }
-  const emailFallback = `${adminIdentifier.toLowerCase()}.${school.school_code.toLowerCase()}@vidyapath.local`;
-  const authEmail = sanitize(input.authEmail || emailFallback, 160).toLowerCase();
+  const authEmail = sanitize(input.authEmail || '', 160).toLowerCase();
+  if (!authEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authEmail)) {
+    throw new Error('Valid admin authEmail is required.');
+  }
 
   const authUser = await createSupabaseAuthUser({
     email: authEmail,
@@ -495,6 +451,16 @@ export async function provisionSchoolAdminByDeveloper(input: {
     profileId: created.id,
   });
 
+  await sendCredentialMail({
+    to: authUser.email ?? authEmail,
+    recipientName: created.name,
+    role: 'admin',
+    schoolName: school.school_name,
+    loginId: authUser.email ?? authEmail,
+    password,
+    mustChangePassword: true,
+  }).catch(() => undefined);
+
   return {
     admin: {
       id: created.id,
@@ -513,7 +479,7 @@ export async function provisionSchoolAdminByDeveloper(input: {
       schoolId: school.id,
       schoolCode: school.school_code,
       schoolName: school.school_name,
-      loginIdentifier: created.admin_identifier,
+      loginIdentifier: created.auth_email ?? authEmail,
       password,
       authEmail: created.auth_email ?? authEmail,
     },

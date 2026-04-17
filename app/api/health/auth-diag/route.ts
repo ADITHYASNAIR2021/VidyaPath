@@ -13,12 +13,7 @@ import { isSupabaseServiceConfigured, supabaseSelect } from '@/lib/supabase-rest
 export const dynamic = 'force-dynamic';
 
 function getConfiguredDiagKey(): string {
-  return (
-    process.env.ADMIN_PORTAL_KEY?.trim() ||
-    process.env.TEACHER_PORTAL_KEY?.trim() ||
-    process.env.SESSION_SIGNING_SECRET?.trim() ||
-    ''
-  );
+  return process.env.SESSION_SIGNING_SECRET?.trim() || '';
 }
 
 function isAuthorizedByHeader(req: Request): boolean {

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createParentSessionToken, attachParentSessionCookie } from '@/lib/auth/parent-session';
 import { errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { parentLoginSchema } from '@/lib/schemas/auth';
 import { authenticateParent } from '@/lib/parent-portal-db';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
@@ -10,13 +11,14 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   const ip = getClientIp(req);
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, parentLoginSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 

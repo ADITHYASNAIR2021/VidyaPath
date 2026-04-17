@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import Sidebar from '@/components/Sidebar';
 import { TEACHER_SESSION_COOKIE, parseTeacherSession } from '@/lib/auth/session';
-import { getTeacherById } from '@/lib/teacher-admin-db';
+import { getTeacherById } from '@/lib/teacher/auth.db';
 
 export default async function TeacherLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = cookies();

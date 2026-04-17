@@ -1,6 +1,7 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { markAttendanceSchema } from '@/lib/schemas/teacher-attendance';
 import { listClassSectionsForTeacher } from '@/lib/school-management-db';
 import { listAttendanceBySection, listStudentsBySection, markAttendanceBulk } from '@/lib/school-ops-db';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -110,30 +111,26 @@ export async function POST(req: Request) {
   const teacherSession = await getTeacherSessionFromRequestCookies();
   if (!teacherSession) return unauthorizedJson('Teacher session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 256 * 1024, markAttendanceSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 
-  const body = bodyResult.value;
-  const classLevel = toClassLevel(body.classLevel);
-  const section = toSection(body.section);
-  const date = toIsoDate(typeof body.date === 'string' ? body.date : undefined);
-  const recordsRaw = Array.isArray(body.records) ? body.records : [];
+  const { classLevel, section, date: dateRaw, records: recordsRaw } = bodyResult.value;
+  const date = toIsoDate(dateRaw);
   const validStatus = new Set<AttendanceStatus>(['present', 'absent', 'late', 'excused']);
   const records = recordsRaw
     .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      const row = item as Record<string, unknown>;
-      const studentId = typeof row.studentId === 'string' ? row.studentId.trim().slice(0, 90) : '';
-      const status = typeof row.status === 'string' ? row.status : '';
-      if (!studentId || !validStatus.has(status as AttendanceStatus)) return null;
-      return { studentId, status: status as AttendanceStatus };
+      const studentId = String(item.studentId).trim().slice(0, 90);
+      const status = item.status as AttendanceStatus;
+      if (!studentId || !validStatus.has(status)) return null;
+      return { studentId, status };
     })
     .filter((item): item is { studentId: string; status: AttendanceStatus } => !!item);
 

@@ -1,8 +1,9 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { isSupportedSubject } from '@/lib/academic-taxonomy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
-import { addTeacherScope, getTeacherById } from '@/lib/teacher-admin-db';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { updateTeacherScopesSchema } from '@/lib/schemas/admin-management';
+import { addTeacherScope, getTeacherById } from '@/lib/teacher/auth.db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 import type { TeacherScope } from '@/lib/teacher-types';
@@ -42,13 +43,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       status: 400,
     });
   }
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 8 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, updateTeacherScopesSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const parsed = parseScope(bodyResult.value);

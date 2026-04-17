@@ -42,6 +42,7 @@ export interface StudentSession {
   schoolId?: string;
   schoolCode?: string;
   batch?: string;
+  mustChangePassword?: boolean;
   stream?: 'Science' | 'Commerce' | 'Humanities';
   enrolledSubjects?: string[];
   issuedAt: number;
@@ -51,14 +52,7 @@ export interface StudentSession {
 type SessionPayload = AdminSession | TeacherSession | StudentSession | DeveloperSession;
 
 function getSessionSecret(): string {
-  const explicit = process.env.SESSION_SIGNING_SECRET?.trim();
-  if (explicit) return explicit;
-  if (process.env.NODE_ENV === 'production') return '';
-  const devFallback =
-    process.env.ADMIN_PORTAL_KEY?.trim() ||
-    process.env.TEACHER_PORTAL_KEY?.trim() ||
-    'vidyapath-dev-session-secret';
-  return devFallback;
+  return (process.env.SESSION_SIGNING_SECRET || '').trim();
 }
 
 export function isSessionSigningConfigured(): boolean {
@@ -68,7 +62,7 @@ export function isSessionSigningConfigured(): boolean {
 function requireSessionSecret(): string {
   const secret = getSessionSecret();
   if (!secret) {
-    throw new Error('SESSION_SIGNING_SECRET is required in production.');
+    throw new Error('SESSION_SIGNING_SECRET is required.');
   }
   return secret;
 }
@@ -122,7 +116,8 @@ function verifyToken(token: string): SessionPayload | null {
       parsed.studentName.trim() &&
       typeof parsed.rollCode === 'string' &&
       parsed.rollCode.trim() &&
-      (parsed.classLevel === 10 || parsed.classLevel === 12)
+      (parsed.classLevel === 10 || parsed.classLevel === 12) &&
+      (parsed.mustChangePassword === undefined || typeof parsed.mustChangePassword === 'boolean')
     ) {
       return parsed;
     }
@@ -171,6 +166,7 @@ export function createStudentSessionToken(
     schoolId?: string;
     schoolCode?: string;
     batch?: string;
+    mustChangePassword?: boolean;
     stream?: 'Science' | 'Commerce' | 'Humanities';
     enrolledSubjects?: string[];
   },
@@ -187,6 +183,7 @@ export function createStudentSessionToken(
     schoolId: student.schoolId,
     schoolCode: student.schoolCode,
     batch: student.batch,
+    mustChangePassword: student.mustChangePassword === true,
     stream: student.stream,
     enrolledSubjects: Array.isArray(student.enrolledSubjects) ? student.enrolledSubjects : undefined,
     issuedAt,

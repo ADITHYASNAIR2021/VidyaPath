@@ -1,6 +1,6 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { deleteTeacherScope, getTeacherById } from '@/lib/teacher-admin-db';
+import { deleteTeacherScope, getTeacherById } from '@/lib/teacher/auth.db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 

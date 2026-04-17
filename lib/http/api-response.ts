@@ -8,6 +8,8 @@ export interface ApiErrorBody {
   error?: string;
   requestId: string;
   hint?: string;
+  /** Populated for schema-validation failures (reason = 'validation-failed'). */
+  issues?: Array<{ path: string; message: string }>;
 }
 
 export interface ApiSuccessBody<T> {
@@ -54,6 +56,7 @@ export function errorJson(input: {
   message: string;
   status?: number;
   hint?: string;
+  issues?: Array<{ path: string; message: string }>;
 }): NextResponse {
   const status = Number.isFinite(input.status) ? Number(input.status) : 400;
   const body: ApiErrorBody = {
@@ -63,6 +66,7 @@ export function errorJson(input: {
     error: input.message,
     requestId: input.requestId,
     hint: input.hint,
+    issues: input.issues,
   };
   return withRequestIdHeader(NextResponse.json(body, { status }), input.requestId);
 }

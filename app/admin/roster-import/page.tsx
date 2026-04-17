@@ -69,41 +69,10 @@ function toCsv(preview: ParsedPreview): string {
   return [headerLine, ...rowLines].join('\n');
 }
 
-function normalizeRowsFromSheet(rows: Array<Record<string, unknown>>): ParsedPreview {
-  if (rows.length === 0) return { headers: [], rows: [] };
-  const headers = Array.from(
-    rows.reduce((set, row) => {
-      Object.keys(row).forEach((key) => {
-        const trimmed = key.trim();
-        if (trimmed) set.add(trimmed);
-      });
-      return set;
-    }, new Set<string>())
-  );
-  const normalizedRows = rows.map((row) => {
-    const entry: Record<string, string> = {};
-    headers.forEach((header) => {
-      const value = row[header];
-      entry[header] = value === null || value === undefined ? '' : String(value).trim();
-    });
-    return entry;
-  });
-  return { headers, rows: normalizedRows };
-}
-
 async function parseSpreadsheetFile(file: File): Promise<ParsedPreview> {
   const lowerName = file.name.toLowerCase();
   if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
-    const [{ read, utils }, buffer] = await Promise.all([
-      import('xlsx'),
-      file.arrayBuffer(),
-    ]);
-    const workbook = read(buffer, { type: 'array' });
-    const sheetName = workbook.SheetNames[0];
-    if (!sheetName) return { headers: [], rows: [] };
-    const sheet = workbook.Sheets[sheetName];
-    const rows = utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
-    return normalizeRowsFromSheet(rows);
+    throw new Error('XLSX import has been disabled. Export as CSV/TSV and retry.');
   }
 
   const text = await file.text().catch(() => '');
@@ -227,8 +196,8 @@ export default function AdminRosterImportPage() {
               <option value="teachers">Teachers import</option>
             </select>
             <label className="rounded-xl border border-[#E8E4DC] px-3 py-2.5 text-sm">
-              Upload CSV/XLSX
-              <input type="file" accept=".csv,.tsv,.xlsx,.xls,text/csv" onChange={onFileSelect} className="mt-1 block w-full text-xs" />
+              Upload CSV/TSV
+              <input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" onChange={onFileSelect} className="mt-1 block w-full text-xs" />
             </label>
             <button
               type="button"
@@ -271,7 +240,7 @@ export default function AdminRosterImportPage() {
           />
 
           <p className="mt-2 text-xs text-[#7A7490]">
-            Supported files: CSV, TSV, XLSX, XLS.
+            Supported files: CSV, TSV.
             Supported columns for students: `name, rollNo, rollCode, classLevel, section, batch, pin, password`.
             Supported columns for teachers: `name, phone, staffCode, scopeClassLevel, scopeSubject, scopeSection, pin, password`.
           </p>

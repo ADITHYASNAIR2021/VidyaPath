@@ -2,7 +2,8 @@ import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage'
 import { getAssignmentPack, getAssignmentPackSchoolId, startExamSession } from '@/lib/teacher-admin-db';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { startExamSessionSchema } from '@/lib/schemas/exam-session';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { studentCanAccessChapter } from '@/lib/school-management-db';
 
@@ -13,17 +14,18 @@ export async function POST(req: Request) {
   const endpoint = '/api/exam/session/start';
   try {
     await assertTeacherStorageWritable();
-    const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 16 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 16 * 1024, startExamSessionSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
       });
     }
     const body = bodyResult.value;
-    const packId = typeof body?.packId === 'string' ? body.packId.trim() : '';
+    const { packId } = bodyResult.value;
     const studentSession = await getStudentSessionFromRequestCookies();
     if (!studentSession) {
       return errorJson({

@@ -1,6 +1,7 @@
-﻿import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { saveNoteSchema } from '@/lib/schemas/student-notes';
 import { getChapterNote, saveChapterNote } from '@/lib/study-enhancements-db';
 
 export const dynamic = 'force-dynamic';
@@ -34,26 +35,18 @@ export async function POST(req: Request) {
   const studentSession = await getStudentSessionFromRequestCookies();
   if (!studentSession) return unauthorizedJson('Student session required.', requestId);
 
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 256 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 256 * 1024, saveNoteSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
 
-  const chapterId = typeof bodyResult.value.chapterId === 'string' ? bodyResult.value.chapterId.trim() : '';
-  const content = typeof bodyResult.value.content === 'string' ? bodyResult.value.content : '';
-  if (!chapterId) {
-    return errorJson({
-      requestId,
-      errorCode: 'missing-chapter-id',
-      message: 'chapterId is required.',
-      status: 400,
-    });
-  }
+  const { chapterId, content } = bodyResult.value;
 
   try {
     const saved = await saveChapterNote(studentSession.studentId, chapterId, content);

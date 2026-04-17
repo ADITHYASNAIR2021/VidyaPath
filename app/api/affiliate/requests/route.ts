@@ -1,5 +1,6 @@
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { createAffiliateRequestSchema } from '@/lib/schemas/affiliate';
 import { createAffiliateRequest } from '@/lib/onboarding-db';
 import { logServerEvent } from '@/lib/observability';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -25,29 +26,30 @@ export async function POST(req: Request) {
       status: 429,
     });
   }
-  const bodyResult = await parseJsonBodyWithLimit<Record<string, unknown>>(req, 64 * 1024);
+  const bodyResult = await parseAndValidateJsonBody(req, 64 * 1024, createAffiliateRequestSchema);
   if (!bodyResult.ok) {
     return errorJson({
       requestId,
       errorCode: bodyResult.reason,
       message: bodyResult.message,
-      status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+      status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
     });
   }
   const body = bodyResult.value;
   try {
     const request = await createAffiliateRequest({
-      schoolName: typeof body.schoolName === 'string' ? body.schoolName : '',
-      schoolCodeHint: typeof body.schoolCodeHint === 'string' ? body.schoolCodeHint : undefined,
-      board: typeof body.board === 'string' ? body.board : undefined,
-      state: typeof body.state === 'string' ? body.state : undefined,
-      city: typeof body.city === 'string' ? body.city : undefined,
-      affiliateNo: typeof body.affiliateNo === 'string' ? body.affiliateNo : undefined,
-      websiteUrl: typeof body.websiteUrl === 'string' ? body.websiteUrl : undefined,
-      contactName: typeof body.contactName === 'string' ? body.contactName : '',
-      contactPhone: typeof body.contactPhone === 'string' ? body.contactPhone : '',
-      contactEmail: typeof body.contactEmail === 'string' ? body.contactEmail : undefined,
-      notes: typeof body.notes === 'string' ? body.notes : undefined,
+      schoolName: body.schoolName,
+      schoolCodeHint: body.schoolCodeHint,
+      board: body.board,
+      state: body.state,
+      city: body.city,
+      affiliateNo: body.affiliateNo,
+      websiteUrl: body.websiteUrl || undefined,
+      contactName: body.contactName,
+      contactPhone: body.contactPhone,
+      contactEmail: body.contactEmail || undefined,
+      notes: body.notes,
     });
     await recordAuditEvent({
       requestId,

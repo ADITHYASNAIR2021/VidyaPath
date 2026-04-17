@@ -1,6 +1,7 @@
 import { trackAiQuestion, trackChapterView, trackSearchNoResult } from '@/lib/analytics-store';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
-import { parseJsonBodyWithLimit } from '@/lib/http/request-body';
+import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
+import { trackEventSchema } from '@/lib/schemas/analytics';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 interface TrackPayload {
@@ -23,25 +24,17 @@ export async function POST(req: Request) {
       return dataJson({ requestId, data: { ok: true } }); // silent drop — don't expose rate limit to trackers
     }
 
-    const bodyResult = await parseJsonBodyWithLimit<TrackPayload>(req, 8 * 1024);
+    const bodyResult = await parseAndValidateJsonBody(req, 8 * 1024, trackEventSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
         errorCode: bodyResult.reason,
         message: bodyResult.message,
-        status: bodyResult.reason === 'payload-too-large' ? 413 : 400,
+        status: bodyReasonToStatus(bodyResult.reason),
+      issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value as TrackPayload | null;
-    if (!body || typeof body !== 'object' || typeof body.eventName !== 'string') {
-      return errorJson({
-        requestId,
-        errorCode: 'invalid-analytics-payload',
-        message: 'Invalid analytics payload.',
-        status: 400,
-      });
-    }
-
+    const body = bodyResult.value;
     const eventName = body.eventName.trim();
     if (eventName === 'chapter_view' && body.chapterId) {
       await trackChapterView(body.chapterId);

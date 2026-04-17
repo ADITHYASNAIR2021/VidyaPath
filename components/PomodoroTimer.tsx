@@ -106,7 +106,7 @@ export default function PomodoroTimer({ chapterTitle, pyqStats }: PomodoroTimerP
         <button
           onClick={() => switchMode('focus')}
           type="button"
-          aria-pressed={mode === 'focus'}
+          aria-pressed={mode === 'focus' ? 'true' : 'false'}
           className={clsx(
             'flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors',
             mode === 'focus' ? 'text-saffron-600 bg-saffron-50 border-b-2 border-saffron-500' : 'text-[#8A8AAA] hover:bg-gray-50'
@@ -117,7 +117,7 @@ export default function PomodoroTimer({ chapterTitle, pyqStats }: PomodoroTimerP
         <button
           onClick={() => switchMode('break')}
           type="button"
-          aria-pressed={mode === 'break'}
+          aria-pressed={mode === 'break' ? 'true' : 'false'}
           className={clsx(
             'flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors',
             mode === 'break' ? 'text-emerald-600 bg-emerald-50 border-b-2 border-emerald-500' : 'text-[#8A8AAA] hover:bg-gray-50'
@@ -173,7 +173,7 @@ export default function PomodoroTimer({ chapterTitle, pyqStats }: PomodoroTimerP
                   setTimeLeft(minutes * 60);
                 }}
                 type="button"
-                aria-pressed={focusMinutes === minutes}
+                aria-pressed={focusMinutes === minutes ? 'true' : 'false'}
                 className={clsx(
                   'text-xs font-semibold py-1.5 rounded-lg border transition-colors',
                   focusMinutes === minutes

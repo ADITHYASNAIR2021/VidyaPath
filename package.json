@@ -7,6 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "lint:strict": "next lint --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "check:all": "npm run typecheck && npm run lint && npm run test",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:security-guards": "node scripts/security_assertions.mjs",
     "build:context": "python scripts/build_context_index.py --max-files 0",
     "build:context:node": "node scripts/build_context_index.mjs",
     "build:context:python": "python scripts/build_context_index.py --max-files 0",
@@ -21,12 +28,24 @@
     "check:supabase-teacher": "node scripts/check_supabase_teacher_setup.mjs",
     "reset:supabase-soft": "node scripts/soft_reset_supabase.mjs",
     "seed:supabase-mock": "node scripts/seed_supabase_mock_data.mjs",
+    "seed:auth-users": "node scripts/seed_auth_users.mjs",
+    "db:clear": "node scripts/clear_supabase_db.mjs",
+    "db:reset-full": "node scripts/clear_supabase_db.mjs && node scripts/seed_supabase_mock_data.mjs && node scripts/seed_auth_users.mjs",
     "fix:pin-hashes": "node scripts/fix_plain_pin_hashes.mjs",
-    "fix:pin-hashes:apply": "node scripts/fix_plain_pin_hashes.mjs --apply"
+    "fix:pin-hashes:apply": "node scripts/fix_plain_pin_hashes.mjs --apply",
+    "db:push": "npx supabase db push",
+    "db:diff": "npx supabase db diff",
+    "db:reset": "npx supabase db reset",
+    "db:new": "npx supabase migration new",
+    "db:pull": "npx supabase db pull",
+    "db:status": "npx supabase migration list",
+    "db:lint": "npx supabase db lint"
   },
   "dependencies": {
     "@serwist/next": "^9.5.7",
+    "@supabase/supabase-js": "^2.103.3",
     "@types/web-push": "^3.6.4",
+    "@upstash/redis": "^1.37.0",
     "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
     "fuse.js": "^7.3.0",
@@ -34,14 +53,16 @@
     "lucide-react": "^0.400.0",
     "mermaid": "^11.14.0",
     "next": "14.2.5",
+    "pino": "^10.3.1",
     "react": "^18",
     "react-dom": "^18",
     "react-katex": "^3.1.0",
     "serwist": "^9.5.7",
+    "swr": "^2.4.1",
     "ts-fsrs": "^5.3.2",
     "use-debounce": "^10.1.1",
     "web-push": "^3.6.7",
-    "xlsx": "^0.18.5",
+    "zod": "^4.3.6",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
@@ -55,6 +76,10 @@
     "eslint-config-next": "14.2.5",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.4"
+  },
+  "overrides": {
+    "xlsx": "npm:@e965464e/xlsx@^0.20.3"
   }
 }
