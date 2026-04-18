@@ -262,10 +262,9 @@ export default function Navbar() {
               </div>
             ) : (
               <div className="flex items-center gap-1.5">
-                <Link href="/student/login"  className="text-xs font-semibold px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors">Student</Link>
-                <Link href="/teacher/login"  className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors">Teacher</Link>
-                <Link href="/admin/login"    className="text-xs font-semibold px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors">Admin</Link>
-                <Link href="/developer/login" className="text-xs font-semibold px-3 py-2 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors">Developer</Link>
+                <Link href="/login" className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors">
+                  Login
+                </Link>
               </div>
             )}
           </div>
@@ -313,11 +312,14 @@ export default function Navbar() {
                 {loggingOut ? 'Signing out…' : 'Logout'}
               </button>
             ) : (
-              <div className="pt-2 grid grid-cols-2 gap-2">
-                <Link href="/student/login"   onClick={() => setMobileOpen(false)} className="text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700">Student</Link>
-                <Link href="/teacher/login"   onClick={() => setMobileOpen(false)} className="text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700">Teacher</Link>
-                <Link href="/admin/login"     onClick={() => setMobileOpen(false)} className="text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700">Admin</Link>
-                <Link href="/developer/login" onClick={() => setMobileOpen(false)} className="text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-violet-200 bg-violet-50 text-violet-700">Developer</Link>
+              <div className="pt-2">
+                <Link
+                  href="/login"
+                  onClick={() => setMobileOpen(false)}
+                  className="block text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700"
+                >
+                  Login
+                </Link>
               </div>
             )}
           </div>

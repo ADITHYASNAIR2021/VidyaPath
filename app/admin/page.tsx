@@ -12,6 +12,8 @@ import {
 interface AdminOverviewResponse {
   totalTeachers: number;
   activeTeachers: number;
+  totalStudents: number;
+  activeStudents: number;
   scopesByClass: Array<{ classLevel: 10 | 12; count: number }>;
   topWeakTopics: Array<{ topic: string; count: number }>;
   assignmentCompletionsThisWeek: number;
@@ -86,10 +88,11 @@ export default function AdminOverviewPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
         {[
           { label: 'Total Teachers', value: overview?.totalTeachers ?? '—', icon: Users, color: 'text-indigo-600 bg-indigo-50' },
           { label: 'Active Teachers', value: overview?.activeTeachers ?? '—', icon: TrendingUp, color: 'text-emerald-600 bg-emerald-50' },
+          { label: 'Total Students', value: overview?.totalStudents ?? '—', icon: GraduationCap, color: 'text-cyan-600 bg-cyan-50' },
           { label: 'Completions (Week)', value: overview?.assignmentCompletionsThisWeek ?? '—', icon: BarChart2, color: 'text-amber-600 bg-amber-50' },
           { label: 'High Risk Sessions', value: overview?.highRiskExamSessions ?? 0, icon: AlertCircle, color: 'text-rose-600 bg-rose-50' },
         ].map(({ label, value, icon: Icon, color }) => (

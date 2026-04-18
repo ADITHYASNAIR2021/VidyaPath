@@ -33,7 +33,7 @@ grant select on public.daily_school_submission_stats to service_role;
 -- If pg_cron is not available, comment out the SELECT below and refresh via
 -- a Supabase edge function cron or call REFRESH MATERIALIZED VIEW CONCURRENTLY
 -- daily_school_submission_stats from a scheduled server action.
-do $$
+do $do$
 begin
   if exists (
     select 1 from pg_extension where extname = 'pg_cron'
@@ -41,8 +41,8 @@ begin
     perform cron.schedule(
       'refresh-daily-school-submission-stats',
       '*/30 * * * *',
-      $$REFRESH MATERIALIZED VIEW CONCURRENTLY public.daily_school_submission_stats$$
+      $cmd$REFRESH MATERIALIZED VIEW CONCURRENTLY public.daily_school_submission_stats$cmd$
     );
   end if;
 end
-$$;
+$do$;

@@ -49,10 +49,10 @@ const OFFICIAL_PORTALS = [
   { name: 'JEE Main', url: 'https://jeemain.nta.nic.in' },
   { name: 'JEE Advanced', url: 'https://jeeadv.ac.in' },
   { name: 'NEET-UG', url: 'https://neet.nta.nic.in' },
-  { name: 'CUET-UG (NTA)', url: 'https://exams.nta.ac.in/CUET-UG' },
+  { name: 'CUET-UG (NTA)', url: 'https://cuet.nta.nic.in' },
   { name: 'CA Foundation (ICAI)', url: 'https://boslive.icai.org/announcement_details.php?id=484' },
   { name: 'CSEET (ICSI)', url: 'https://www.icsi.edu/' },
-  { name: 'CMA Foundation (ICMAI)', url: 'https://icmai.in/studentswebsite/mgmtaccexam.php' },
+  { name: 'CMA Foundation (ICMAI)', url: 'https://icmai.in/studentswebsite/exam.php' },
   { name: 'IPM AT (IIM Indore)', url: 'https://iimidr.ac.in/programmes/academic-programmes/five-year-integrated-programme-in-management-ipm/ipm-admissions-details/' },
   { name: 'IIM Ranchi IPM', url: 'https://app.iimranchi.ac.in/admission/ipm.html' },
   { name: 'NISM Certifications', url: 'https://www.nism.ac.in/depository-operations-cpe/' },
@@ -73,8 +73,8 @@ const SCIENCE_RESOURCES = [
 const COMMERCE_RESOURCES = [
   { name: 'ICAI BoS', desc: 'Official CA announcements and updates', url: 'https://boslive.icai.org/announcement_details.php?id=484' },
   { name: 'ICSI', desc: 'Official CS pathway and CSEET updates', url: 'https://www.icsi.edu/' },
-  { name: 'ICMAI', desc: 'Official CMA foundation information', url: 'https://icmai.in/studentswebsite/mgmtaccexam.php' },
-  { name: 'National Career Service', desc: 'Government career pathways', url: 'https://www.ncs.gov.in/pages/about-us.aspx' },
+  { name: 'ICMAI', desc: 'Official CMA foundation information', url: 'https://icmai.in/studentswebsite/exam.php' },
+  { name: 'National Career Service', desc: 'Government career pathways', url: 'https://www.ncs.gov.in/Pages/about-us.aspx' },
 ];
 
 function ExamAccordion({ exam }: { exam: (typeof ENTRANCE_EXAMS)[0] }) {

@@ -33,7 +33,7 @@ export interface ChapterCareerRelevance {
   verificationOwner: string;
 }
 
-const VERIFIED_AT = '2026-04-10';
+const VERIFIED_AT = '2026-04-18';
 const OWNER = 'VidyaPath Content Ops';
 
 const TRACKS: CareerTrack[] = [
@@ -42,7 +42,7 @@ const TRACKS: CareerTrack[] = [
     stream: 'commerce',
     title: 'Commerce Core (CA/CMA/CS/BBA Finance)',
     description: 'Structured pathway for students targeting accountancy, management, taxation, and finance careers.',
-    sourceUrl: 'https://www.ncs.gov.in/pages/about-us.aspx',
+    sourceUrl: 'https://www.ncs.gov.in/Pages/about-us.aspx',
     lastVerifiedAt: VERIFIED_AT,
     verificationOwner: OWNER,
   },
@@ -80,8 +80,8 @@ const EXAMS: CareerExam[] = [
     summary: 'Entry route for Cost and Management Accounting pathway.',
     eligibility: 'As per ICMAI admission eligibility criteria.',
     schedule: 'Term-wise schedule announced by ICMAI.',
-    officialUrl: 'https://icmai.in/studentswebsite/mgmtaccexam.php',
-    sourceUrl: 'https://icmai.in/studentswebsite/mgmtaccexam.php',
+    officialUrl: 'https://icmai.in/studentswebsite/exam.php',
+    sourceUrl: 'https://icmai.in/studentswebsite/exam.php',
     lastVerifiedAt: VERIFIED_AT,
     verificationOwner: OWNER,
   },
@@ -92,8 +92,8 @@ const EXAMS: CareerExam[] = [
     summary: 'Commerce domain admissions for central and participating universities.',
     eligibility: 'Class 12 pass/appearing per NTA CUET bulletin.',
     schedule: 'Annual window as published on NTA CUET portal.',
-    officialUrl: 'https://exams.nta.ac.in/CUET-UG',
-    sourceUrl: 'https://exams.nta.ac.in/CUET-UG',
+    officialUrl: 'https://cuet.nta.nic.in',
+    sourceUrl: 'https://cuet.nta.nic.in',
     lastVerifiedAt: VERIFIED_AT,
     verificationOwner: OWNER,
   },
@@ -150,7 +150,7 @@ const CHAPTER_MAP: ChapterCareerRelevance[] = [
     track: 'commerce',
     pathways: ['CA Foundation', 'CMA Foundation', 'BBA Finance'],
     relevance: 'Ratio and financial analysis are core for financial statement interpretation in higher studies.',
-    sourceUrl: 'https://icmai.in/studentswebsite/mgmtaccexam.php',
+    sourceUrl: 'https://icmai.in/studentswebsite/exam.php',
     lastVerifiedAt: VERIFIED_AT,
     verificationOwner: OWNER,
   },
@@ -168,7 +168,7 @@ const CHAPTER_MAP: ChapterCareerRelevance[] = [
     track: 'commerce',
     pathways: ['CUET UG Commerce', 'BCom Economics', 'BBA Finance'],
     relevance: 'National income and macro foundations support commerce entrance domain sections.',
-    sourceUrl: 'https://exams.nta.ac.in/CUET-UG',
+    sourceUrl: 'https://cuet.nta.nic.in',
     lastVerifiedAt: VERIFIED_AT,
     verificationOwner: OWNER,
   },
@@ -177,7 +177,7 @@ const CHAPTER_MAP: ChapterCareerRelevance[] = [
     track: 'commerce',
     pathways: ['CUET UG Commerce', 'IPM', 'Finance careers'],
     relevance: 'Open economy and BOP concepts map to management and finance program readiness.',
-    sourceUrl: 'https://www.ncs.gov.in/pages/about-us.aspx',
+    sourceUrl: 'https://www.ncs.gov.in/Pages/about-us.aspx',
     lastVerifiedAt: VERIFIED_AT,
     verificationOwner: OWNER,
   },
@@ -190,7 +190,7 @@ function inferCommerceMap(chapterId: string): ChapterCareerRelevance | null {
       track: 'commerce',
       pathways: ['CA Foundation', 'CMA Foundation', 'BCom Accounts'],
       relevance: 'Accounting chapters directly support accountancy and cost-management pathways.',
-      sourceUrl: 'https://icmai.in/studentswebsite/mgmtaccexam.php',
+      sourceUrl: 'https://icmai.in/studentswebsite/exam.php',
       lastVerifiedAt: VERIFIED_AT,
       verificationOwner: OWNER,
     };
@@ -212,7 +212,7 @@ function inferCommerceMap(chapterId: string): ChapterCareerRelevance | null {
       track: 'commerce',
       pathways: ['CUET UG Commerce', 'Economics majors', 'Finance pathways'],
       relevance: 'Economics chapters strengthen domain readiness for commerce and management admissions.',
-      sourceUrl: 'https://exams.nta.ac.in/CUET-UG',
+      sourceUrl: 'https://cuet.nta.nic.in',
       lastVerifiedAt: VERIFIED_AT,
       verificationOwner: OWNER,
     };

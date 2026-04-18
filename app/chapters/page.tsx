@@ -21,6 +21,7 @@ import { ALL_CHAPTERS } from '@/lib/data';
 import type { Subject, ClassLevel } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { fetchClientStudentSession } from '@/lib/client-student-session';
+import { getSubjectsForAcademicTrack, type AcademicStream } from '@/lib/academic-taxonomy';
 import ChapterCard from '@/components/ChapterCard';
 import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
 import { useProgressStore } from '@/lib/store';
@@ -37,7 +38,7 @@ const SUBJECTS: { label: string; value: Subject | 'All'; icon: React.ElementType
   { label: 'English Core', value: 'English Core', icon: BookOpen },
 ];
 
-const CLASS10_ALLOWED_SUBJECTS = new Set<Subject>(['Physics', 'Chemistry', 'Biology', 'Math', 'English Core']);
+const CLASS10_PUBLIC_SUBJECTS = new Set<Subject>(['Physics', 'Chemistry', 'Biology', 'Math', 'English Core']);
 
 const CLASSES: { label: string; value: ClassLevel | 0 }[] = [
   { label: 'All Classes', value: 0 },
@@ -82,6 +83,7 @@ function ChaptersContent() {
   const [studentSession, setStudentSession] = useState<{
     isStudent: boolean;
     classLevel?: ClassLevel;
+    stream?: AcademicStream;
     enrolledSubjects: Subject[];
   }>({
     isStudent: false,
@@ -100,12 +102,13 @@ function ChaptersContent() {
           const sessionClass = session.classLevel === 10 || session.classLevel === 12
             ? session.classLevel
             : undefined;
-          if (initialClass === 0 && sessionClass) {
+          if (sessionClass) {
             setSelectedClass(sessionClass);
           }
           setStudentSession({
             isStudent: true,
             classLevel: sessionClass,
+            stream: session.stream,
             enrolledSubjects: session.enrolledSubjects,
           });
         } else {
@@ -132,8 +135,27 @@ function ChaptersContent() {
 
   const enrolledSubjectSet = useMemo(() => {
     if (!studentSession.isStudent) return null;
-    return new Set<Subject>(studentSession.enrolledSubjects);
-  }, [studentSession.enrolledSubjects, studentSession.isStudent]);
+    if (studentSession.classLevel === 10) {
+      // Class 10 uses fixed public subject scope; no enrollment gating.
+      return null;
+    }
+    if (studentSession.enrolledSubjects.length > 0) {
+      return new Set<Subject>(studentSession.enrolledSubjects);
+    }
+    if (studentSession.classLevel === 12) {
+      return new Set<Subject>(
+        getSubjectsForAcademicTrack(studentSession.classLevel, studentSession.stream) as Subject[]
+      );
+    }
+    return null;
+  }, [studentSession.classLevel, studentSession.enrolledSubjects, studentSession.isStudent, studentSession.stream]);
+
+  const classTabs = useMemo(() => {
+    if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
+      return CLASSES.filter((item) => item.value === studentSession.classLevel);
+    }
+    return CLASSES;
+  }, [studentSession.classLevel, studentSession.isStudent]);
 
   const availableSubjects = useMemo(() => {
     const classScoped = ALL_CHAPTERS.filter((chapter) => (selectedClass === 0 ? chapter.classLevel !== 11 : chapter.classLevel === selectedClass));
@@ -147,7 +169,7 @@ function ChaptersContent() {
     }
     if (selectedClass === 10) {
       for (const subject of Array.from(subjectSet)) {
-        if (!CLASS10_ALLOWED_SUBJECTS.has(subject)) {
+        if (!CLASS10_PUBLIC_SUBJECTS.has(subject)) {
           subjectSet.delete(subject);
         }
       }
@@ -203,6 +225,10 @@ function ChaptersContent() {
 
   const filtered = useMemo(() => {
     const base = ALL_CHAPTERS.filter((ch) => {
+      if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
+        if (ch.classLevel !== studentSession.classLevel) return false;
+      }
+      if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(ch.subject)) return false;
       if (selectedClass !== 0 && ch.classLevel !== selectedClass) return false;
       if (selectedSubject !== 'All' && ch.subject !== selectedSubject) return false;
       if (enrolledSubjectSet && !enrolledSubjectSet.has(ch.subject)) return false;
@@ -214,7 +240,40 @@ function ChaptersContent() {
 
     const filteredBySearch = base.filter((chapter) => searchOrder.has(chapter.id));
     return filteredBySearch.sort((a, b) => (searchOrder.get(a.id) ?? 9999) - (searchOrder.get(b.id) ?? 9999));
-  }, [enrolledSubjectSet, searchOrder, searchQuery, selectedClass, selectedSubject]);
+  }, [enrolledSubjectSet, searchOrder, searchQuery, selectedClass, selectedSubject, studentSession.classLevel, studentSession.isStudent]);
+
+  const headerScope = useMemo(() => {
+    if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
+      return `Class ${studentSession.classLevel} chapter workspace with PYQ insights, NCERT links, and guided practice.`;
+    }
+    return 'Class 10 and Class 12 chapter workspace with PYQ insights, NCERT links, and guided practice.';
+  }, [studentSession.classLevel, studentSession.isStudent]);
+
+  const headerTotalChapters = useMemo(() => {
+    if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
+      return ALL_CHAPTERS.filter((chapter) => {
+        if (chapter.classLevel !== studentSession.classLevel) return false;
+        if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(chapter.subject)) return false;
+        if (enrolledSubjectSet && !enrolledSubjectSet.has(chapter.subject)) return false;
+        return true;
+      }).length;
+    }
+    return ALL_CHAPTERS.length;
+  }, [enrolledSubjectSet, studentSession.classLevel, studentSession.isStudent]);
+
+  const studiedInScopeCount = useMemo(() => {
+    const allowedIds = new Set(
+      ALL_CHAPTERS.filter((chapter) => {
+        if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
+          if (chapter.classLevel !== studentSession.classLevel) return false;
+          if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(chapter.subject)) return false;
+          if (enrolledSubjectSet && !enrolledSubjectSet.has(chapter.subject)) return false;
+        }
+        return true;
+      }).map((chapter) => chapter.id)
+    );
+    return studiedChapterIds.filter((id) => allowedIds.has(id)).length;
+  }, [enrolledSubjectSet, studiedChapterIds, studentSession.classLevel, studentSession.isStudent]);
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -256,22 +315,22 @@ function ChaptersContent() {
         <div className="max-w-5xl mx-auto">
           <h1 className="font-fraunces text-3xl sm:text-4xl font-bold mb-2">Chapter Library</h1>
           <p className="text-navy-200 text-base">
-            Class 10 and Class 12 chapter workspace with PYQ insights, NCERT links, and guided practice.
+            {headerScope}
           </p>
           <div className="mt-4 flex items-center gap-4 flex-wrap">
             <div className="text-sm text-navy-300">
-              <span className="font-semibold text-white">{ALL_CHAPTERS.length}</span> chapters total
+              <span className="font-semibold text-white">{headerTotalChapters}</span> chapters total
             </div>
             {studiedChapterIds.length > 0 && (
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-semibold px-3 py-1.5 rounded-full">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  {studiedChapterIds.length} / {ALL_CHAPTERS.length} studied
+                  {studiedInScopeCount} / {headerTotalChapters} studied
                 </div>
                 <div className="w-24 h-2 bg-white/10 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-emerald-400 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.round((studiedChapterIds.length / ALL_CHAPTERS.length) * 100)}%` }}
+                    style={{ width: `${headerTotalChapters > 0 ? Math.round((studiedInScopeCount / headerTotalChapters) * 100) : 0}%` }}
                   />
                 </div>
               </div>
@@ -297,7 +356,7 @@ function ChaptersContent() {
 
           {/* Class Tabs */}
           <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
-            {CLASSES.map(({ label, value }) => (
+            {classTabs.map(({ label, value }) => (
               <button
                 key={value}
                 onClick={() => setSelectedClass(value)}
@@ -356,7 +415,9 @@ function ChaptersContent() {
             </p>
             {sessionLoaded && studentSession.isStudent && (
               <p className="mb-4 text-xs font-semibold text-indigo-700">
-                Showing only your enrolled subjects: {studentSession.enrolledSubjects.join(', ') || 'None assigned yet'}.
+                {studentSession.classLevel === 10
+                  ? `Showing Class 10 core subjects: ${Array.from(CLASS10_PUBLIC_SUBJECTS).join(', ')}.`
+                  : `Showing only your enrolled subjects: ${Array.from(enrolledSubjectSet ?? []).join(', ') || 'None assigned yet'}.`}
               </p>
             )}
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -96,12 +96,15 @@ const CACHE_TTL_MS = 45_000;
 const EMBEDDING_DIM = 192;
 const DEFAULT_NVIDIA_RERANK_MODEL = 'nvidia/llama-nemotron-rerank-1b-v2';
 const VECTOR_INDEX_PATH = path.join(CONTEXT_DIR, 'chunk_vectors.jsonl');
+const PGVECTOR_UNAVAILABLE_COOLDOWN_MS = 5 * 60 * 1000;
 
 let cacheLoadedAt = 0;
 let cachedChunks: ContextChunk[] = [];
 let cachedIndex: ChapterIndexPayload = {};
 const chunkEmbeddingCache = new Map<string, Float32Array>();
 const persistedEmbeddingCache = new Map<string, Float32Array>();
+let pgvectorUnavailableUntilMs = 0;
+let pgvectorMissingHintLogged = false;
 
 function normalizeSubject(classLevel: number, subject: string): string {
   const s = subject.trim().toLowerCase();
@@ -469,6 +472,24 @@ function shouldUseNvidiaRerank(query: ContextQuery): boolean {
   return isUsableNvidiaApiKey(process.env.NVIDIA_API_KEY);
 }
 
+function isPgvectorEnabled(): boolean {
+  return process.env.AI_ENABLE_PGVECTOR_RAG === '1';
+}
+
+function isPgvectorMissingError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /match_document_embeddings|document_embeddings|42P01|does not exist|PGRST|HTTP 404/i.test(message);
+}
+
+function markPgvectorTemporarilyUnavailable(reason: string): void {
+  pgvectorUnavailableUntilMs = Date.now() + PGVECTOR_UNAVAILABLE_COOLDOWN_MS;
+  if (pgvectorMissingHintLogged) return;
+  pgvectorMissingHintLogged = true;
+  console.warn(
+    `[context-retriever] pgvector unavailable (${reason}). Retrying after ${Math.round(PGVECTOR_UNAVAILABLE_COOLDOWN_MS / 60000)} minutes.`,
+  );
+}
+
 function coerceRerankCandidates(value: unknown): RerankIndexCandidate[] {
   if (!Array.isArray(value)) return [];
   const out: RerankIndexCandidate[] = [];
@@ -719,6 +740,9 @@ interface PgvectorRow {
 }
 
 async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[] | null> {
+  if (!isPgvectorEnabled()) return null;
+  if (Date.now() < pgvectorUnavailableUntilMs) return null;
+
   const nvidiaKey = process.env.NVIDIA_API_KEY?.trim();
   if (!isUsableNvidiaApiKey(nvidiaKey)) return null;
 
@@ -775,8 +799,16 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
       });
       if (snippets.length >= topK) break;
     }
-    return snippets.length > 0 ? snippets : null;
-  } catch {
+    if (snippets.length > 0) {
+      pgvectorUnavailableUntilMs = 0;
+      pgvectorMissingHintLogged = false;
+      return snippets;
+    }
+    return null;
+  } catch (error) {
+    if (isPgvectorMissingError(error)) {
+      markPgvectorTemporarilyUnavailable('missing table or RPC function');
+    }
     return null;
   }
 }

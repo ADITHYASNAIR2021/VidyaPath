@@ -1,9 +1,9 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
-import { isValidPin } from '@/lib/auth/pin';
+import { generateStrongPassword, validatePasswordPolicy } from '@/lib/auth/password-policy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { resetPinSchema } from '@/lib/schemas/admin-management';
-import { getTeacherById, resetTeacherPin } from '@/lib/teacher/auth.db';
+import { getTeacherById, resetTeacherPassword } from '@/lib/teacher/auth.db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 
@@ -32,20 +32,24 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       issues: bodyResult.issues,
     });
   }
-  const pin = typeof bodyResult.value.pin === 'string' ? bodyResult.value.pin.trim() : '';
-  if (!pin) {
+  const requestedPassword = typeof bodyResult.value.newPassword === 'string'
+    ? bodyResult.value.newPassword.trim()
+    : (typeof bodyResult.value.password === 'string' ? bodyResult.value.password.trim() : '');
+  const issuedPassword = bodyResult.value.generateRandom === true ? generateStrongPassword(12) : requestedPassword;
+  if (!issuedPassword) {
     return errorJson({
       requestId,
-      errorCode: 'missing-pin',
-      message: 'pin is required.',
+      errorCode: 'missing-password',
+      message: 'newPassword is required unless generateRandom=true.',
       status: 400,
     });
   }
-  if (!isValidPin(pin)) {
+  const policy = validatePasswordPolicy(issuedPassword);
+  if (!policy.ok) {
     return errorJson({
       requestId,
-      errorCode: 'invalid-pin-format',
-      message: 'PIN must be 4 to 8 digits.',
+      errorCode: 'invalid-password-format',
+      message: policy.message,
       status: 400,
     });
   }
@@ -60,7 +64,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         status: 404,
       });
     }
-    const ok = await resetTeacherPin(teacherId, pin);
+    const ok = await resetTeacherPassword(teacherId, issuedPassword);
     if (!ok) {
       return errorJson({
         requestId,
@@ -73,7 +77,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     await recordAuditEvent({
       requestId,
       endpoint: '/api/admin/teachers/[id]/reset-pin',
-      action: 'admin-reset-teacher-pin',
+      action: 'admin-reset-teacher-password',
       statusCode: 200,
       actorRole: adminSession.role,
       actorAuthUserId: adminSession.authUserId,
@@ -82,15 +86,22 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     });
     return dataJson({
       requestId,
-      data: { ok: true },
+      data: {
+        ok: true,
+        issuedCredentials: {
+          loginIdentifier: teacher.phone || teacher.staffCode || teacher.id,
+          password: issuedPassword,
+          mustChangePassword: true,
+        },
+      },
       meta: { committedAt },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to reset PIN.';
+    const message = error instanceof Error ? error.message : 'Failed to reset password.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
     return errorJson({
       requestId,
-      errorCode: 'reset-teacher-pin-failed',
+      errorCode: 'reset-teacher-password-failed',
       message,
       status,
     });

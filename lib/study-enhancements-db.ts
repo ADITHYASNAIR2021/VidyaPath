@@ -685,7 +685,7 @@ export async function getStudentCertificateSummary(input: {
   studentName: string;
   classLevel: 10 | 12;
   rollCode: string;
-  schoolId?: string;
+  schoolId: string;
 }): Promise<{
   studentName: string;
   classLevel: 10 | 12;
@@ -699,6 +699,7 @@ export async function getStudentCertificateSummary(input: {
   longestStreak: number;
   badges: string[];
 }> {
+  if (!input.schoolId) throw new Error('Student school context is required for certificate summary.');
   const grades = await listStudentGrades({
     studentId: input.studentId,
     rollCode: input.rollCode,

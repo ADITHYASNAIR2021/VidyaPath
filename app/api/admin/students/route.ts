@@ -1,22 +1,19 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { normalizeAcademicStream } from '@/lib/academic-taxonomy';
 import {
-  buildInitialStudentPasswordFromLoginId,
-  generateLegacyPin,
+  generateStrongPassword,
+  validatePasswordPolicy,
 } from '@/lib/auth/password-policy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { createStudentSchema } from '@/lib/schemas/admin-management';
+import { isSubjectInCatalog } from '@/lib/subject-catalog-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { createStudent, listStudents } from '@/lib/teacher-admin-db';
 
 export const dynamic = 'force-dynamic';
-
-function generatePin(seed: string): string {
-  return generateLegacyPin(seed, 6);
-}
 
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
@@ -64,7 +61,11 @@ export async function POST(req: Request) {
     const classLevel = Number(body.classLevel);
     const stream = normalizeAcademicStream(body.stream);
     const section = typeof body.section === 'string' ? body.section.trim() : undefined;
-    const pin = typeof body.pin === 'string' ? body.pin.trim() : undefined;
+    const providedPassword = typeof body.password === 'string' ? body.password.trim() : '';
+    const subjects = Array.isArray(body.subjects)
+      ? body.subjects.map((item) => String(item || '').trim()).filter((item) => item.length > 0)
+      : [];
+    const yearOfEnrollment = Number(body.yearOfEnrollment);
     const schoolId = adminSession.role === 'developer'
       ? (typeof body.schoolId === 'string' ? body.schoolId.trim() : undefined)
       : adminSession.schoolId;
@@ -84,6 +85,32 @@ export async function POST(req: Request) {
         status: 400,
       });
     }
+    for (const subject of subjects) {
+      const allowed = await isSubjectInCatalog({
+        schoolId,
+        classLevel: classLevel as 10 | 12,
+        subject,
+      });
+      if (!allowed) {
+        return errorJson({
+          requestId,
+          errorCode: 'unsupported-student-subject',
+          message: `Unsupported subject for Class ${classLevel}: ${subject}.`,
+          status: 400,
+        });
+      }
+    }
+    if (providedPassword) {
+      const policy = validatePasswordPolicy(providedPassword);
+      if (!policy.ok) {
+        return errorJson({
+          requestId,
+          errorCode: 'invalid-student-password',
+          message: policy.message,
+          status: 400,
+        });
+      }
+    }
     const limit = await checkRateLimit({
       key: buildRateLimitKey('admin:students:bulk-write', [schoolId]),
       windowSeconds: 60,
@@ -100,7 +127,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const issuedPin = pin && /^\d{4,8}$/.test(pin) ? pin : generatePin(rollNo || rollCode || name);
+    const issuedPassword = providedPassword || generateStrongPassword(12);
     const student = await createStudent({
       schoolId,
       name,
@@ -110,9 +137,11 @@ export async function POST(req: Request) {
       classLevel: classLevel as 10 | 12,
       stream,
       section,
-      pin: issuedPin,
+      password: issuedPassword,
+      subjects,
+      yearOfEnrollment: Number.isFinite(yearOfEnrollment) ? Math.trunc(yearOfEnrollment) : undefined,
+      forcePasswordChangeOnFirstLogin: true,
     });
-    const issuedPassword = buildInitialStudentPasswordFromLoginId(student.rollCode);
     const committedAt = new Date().toISOString();
     await recordAuditEvent({
       requestId,
@@ -131,7 +160,6 @@ export async function POST(req: Request) {
         issuedCredentials: {
           loginIdentifier: student.rollCode,
           alternateIdentifier: student.rollNo,
-          pin: issuedPin,
           password: issuedPassword,
         },
       },

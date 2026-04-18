@@ -1,14 +1,12 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
-import { isSupportedSubject } from '@/lib/academic-taxonomy';
-import { isValidPin } from '@/lib/auth/pin';
 import {
-  generateLegacyPin,
   generateStrongPassword,
   validatePasswordPolicy,
 } from '@/lib/auth/password-policy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { createTeacherSchema } from '@/lib/schemas/admin-management';
+import { isSubjectInCatalog } from '@/lib/subject-catalog-db';
 import { sendCredentialMail } from '@/lib/notifications/credential-email';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -21,7 +19,6 @@ interface CreateTeacherRequest {
   email: string;
   phone?: string;
   name: string;
-  pin?: string;
   staffCode?: string;
   password?: string;
   sendCredentialEmail: boolean;
@@ -34,13 +31,11 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   const phone = typeof body.phone === 'string' ? body.phone.trim() : undefined;
   const name = typeof body.name === 'string' ? body.name.trim() : '';
-  const pin = typeof body.pin === 'string' ? body.pin.trim() : undefined;
   const staffCode = typeof body.staffCode === 'string' ? body.staffCode.trim() : undefined;
   const password = typeof body.password === 'string' ? body.password.trim() : undefined;
   const sendCredentialEmail = body.sendCredentialEmail !== false;
   if (!email || !name) return null;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
-  if (pin && !isValidPin(pin)) return null;
   if (password) {
     const passwordPolicy = validatePasswordPolicy(password);
     if (!passwordPolicy.ok) return null;
@@ -53,15 +48,11 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
       const classLevel = Number(scope.classLevel);
       const subject = typeof scope.subject === 'string' ? scope.subject.trim() : '';
       const section = typeof scope.section === 'string' ? scope.section.trim() : undefined;
-      if ((classLevel !== 10 && classLevel !== 12) || !subject || !isSupportedSubject(subject)) return;
+      if ((classLevel !== 10 && classLevel !== 12) || !subject) return;
       scopes.push({ classLevel: classLevel as 10 | 12, subject: subject as TeacherScope['subject'], section });
     });
   }
-  return { email, phone, name, pin, staffCode, password, sendCredentialEmail, scopes };
-}
-
-function generatePin(seed: string): string {
-  return generateLegacyPin(seed, 6);
+  return { email, phone, name, staffCode, password, sendCredentialEmail, scopes };
 }
 
 export async function GET(req: Request) {
@@ -93,7 +84,7 @@ export async function POST(req: Request) {
     return errorJson({
       requestId,
       errorCode: 'invalid-create-teacher-payload',
-      message: 'Invalid request. Required: { email, name } and optional { phone, pin(4-8), password(6-18 with upper/lower/number/symbol), scopes?, sendCredentialEmail }.',
+      message: 'Invalid request. Required: { email, name } and optional { phone, password(6-18 with upper/lower/number/symbol), scopes?, sendCredentialEmail }.',
       status: 400,
     });
   }
@@ -110,7 +101,21 @@ export async function POST(req: Request) {
         status: 400,
       });
     }
-    const issuedPin = parsed.pin || generatePin(parsed.phone || parsed.email);
+    for (const scope of parsed.scopes ?? []) {
+      const allowed = await isSubjectInCatalog({
+        schoolId,
+        classLevel: scope.classLevel,
+        subject: scope.subject,
+      });
+      if (!allowed) {
+        return errorJson({
+          requestId,
+          errorCode: 'unsupported-teacher-scope-subject',
+          message: `Unsupported scope subject for Class ${scope.classLevel}: ${scope.subject}. Add it in school subject catalog first.`,
+          status: 400,
+        });
+      }
+    }
     const issuedPassword = (parsed.password && parsed.password.trim()) || generateStrongPassword(12);
     const teacher = await createTeacher({
       schoolId,
@@ -118,9 +123,10 @@ export async function POST(req: Request) {
       phone: parsed.phone,
       name: parsed.name,
       staffCode: parsed.staffCode,
-      pin: issuedPin,
       password: issuedPassword,
       scopes: parsed.scopes,
+      forcePasswordChangeOnFirstLogin: true,
+      rotatePasswordIfExisting: true,
     });
     const mailDelivery = parsed.sendCredentialEmail
       ? await sendCredentialMail({
@@ -157,7 +163,6 @@ export async function POST(req: Request) {
           staffIdentifier: teacher.staffCode,
           phone: teacher.phone,
           email: parsed.email,
-          pin: issuedPin,
           password: issuedPassword,
         },
         delivery: mailDelivery,
@@ -166,7 +171,7 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create teacher.';
-    const status = /required|valid|pin|password|subject/i.test(message)
+    const status = /required|valid|password|subject/i.test(message)
       ? 400
       : /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message)
         ? 503

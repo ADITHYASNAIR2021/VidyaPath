@@ -37,6 +37,14 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         status: 404,
       });
     }
+    if (!student.schoolId) {
+      return errorJson({
+        requestId,
+        errorCode: 'student-school-missing',
+        message: 'Student school mapping is required for grades lookup.',
+        status: 400,
+      });
+    }
     const grades = await listStudentGrades({
       studentId: student.id,
       rollCode: student.rollCode,

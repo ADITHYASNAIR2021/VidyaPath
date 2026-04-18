@@ -68,7 +68,10 @@
       "Bash(powershell -Command \"Select-String -Path 'D:\\\\VidyaPath\\\\.env.example' -Pattern 'embeddings|ingest|pgvector|document_embed'\")",
       "Bash(node -e \"const s=require\\('fs'\\).readFileSync\\('scripts/ingest_embeddings.mjs','utf8'\\); console.log\\('withRetry found:', s.includes\\('withRetry'\\)\\); console.log\\('retry lines:', s.split\\('\\\\n'\\).filter\\(l=>l.includes\\('withRetry'\\)\\).length\\)\")",
       "Bash(node scripts/gen-test-data.mjs)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(sed 's/create table.*public\\\\.//')",
+      "Bash(grep -E \"\\\\.ts$|^d\")",
+      "Bash(awk '{print $NF}')"
     ]
   }
 }

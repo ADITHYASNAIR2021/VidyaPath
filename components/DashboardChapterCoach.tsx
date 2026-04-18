@@ -133,10 +133,10 @@ export default function DashboardChapterCoach({
           Chapter coach AI is available only for logged-in student accounts.
         </p>
         <Link
-          href="/student/login?next=/dashboard"
-          className="mt-3 inline-flex rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+          href="/login?portal=student&next=/dashboard"
+          className="mt-3 inline-flex rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
         >
-          Login as Student
+          Login
         </Link>
       </div>
     );

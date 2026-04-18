@@ -1,4 +1,4 @@
-import { isSupabaseServiceConfigured, supabaseInsert, supabaseSelect } from '@/lib/supabase-rest';
+import { isSupabaseServiceConfigured, supabaseInsert, supabaseSelect, supabaseUpdate } from '@/lib/supabase-rest';
 
 export interface CareerSourceTarget {
   id: string;
@@ -25,14 +25,20 @@ interface DataQualityIssueRow {
 
 const CAREER_SOURCE_TARGETS: CareerSourceTarget[] = [
   { id: 'icsi', title: 'ICSI Official', url: 'https://www.icsi.edu/' },
-  { id: 'cuet-ug', title: 'NTA CUET-UG', url: 'https://exams.nta.ac.in/CUET-UG' },
+  { id: 'cuet-ug', title: 'NTA CUET-UG', url: 'https://cuet.nta.nic.in' },
   { id: 'iim-indore-ipm', title: 'IIM Indore IPM Admissions', url: 'https://iimidr.ac.in/programmes/academic-programmes/five-year-integrated-programme-in-management-ipm/ipm-admissions-details/' },
   { id: 'iim-ranchi-ipm', title: 'IIM Ranchi IPM Admissions', url: 'https://app.iimranchi.ac.in/admission/ipm.html' },
   { id: 'nism', title: 'NISM Certifications', url: 'https://www.nism.ac.in/depository-operations-cpe/' },
   { id: 'icai-bos', title: 'ICAI BoS Announcements', url: 'https://boslive.icai.org/announcement_details.php?id=484' },
-  { id: 'icmai', title: 'ICMAI Students', url: 'https://icmai.in/studentswebsite/mgmtaccexam.php' },
-  { id: 'ncs', title: 'National Career Service', url: 'https://www.ncs.gov.in/pages/about-us.aspx' },
+  { id: 'icmai', title: 'ICMAI Students', url: 'https://icmai.in/studentswebsite/exam.php' },
+  { id: 'ncs', title: 'National Career Service', url: 'https://www.ncs.gov.in/Pages/about-us.aspx' },
 ];
+
+const LEGACY_SOURCE_URL_ALIASES: Record<string, string[]> = {
+  'cuet-ug': ['https://exams.nta.ac.in/CUET-UG'],
+  icmai: ['https://icmai.in/studentswebsite/mgmtaccexam.php'],
+  ncs: ['https://www.ncs.gov.in/pages/about-us.aspx'],
+};
 
 async function fetchWithTimeout(url: string, method: 'HEAD' | 'GET', timeoutMs = 9000): Promise<Response> {
   const controller = new AbortController();
@@ -42,6 +48,11 @@ async function fetchWithTimeout(url: string, method: 'HEAD' | 'GET', timeoutMs =
       method,
       redirect: 'follow',
       cache: 'no-store',
+      headers: {
+        'user-agent': 'VidyaPathCareerHealthBot/1.0 (+https://github.com/ADITHYASNAIR2021/VidyaPath)',
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9',
+      },
       signal: controller.signal,
     });
   } finally {
@@ -53,7 +64,9 @@ async function runCheck(target: CareerSourceTarget): Promise<CareerSourceCheckRe
   const checkedAt = new Date().toISOString();
   try {
     let response = await fetchWithTimeout(target.url, 'HEAD');
-    if (response.status === 405 || response.status === 403) {
+    // Some government / legacy portals mis-handle HEAD and return non-200
+    // even when GET works, so retry with GET for any non-OK HEAD result.
+    if (!response.ok) {
       response = await fetchWithTimeout(target.url, 'GET');
     }
     const ok = response.ok && response.status < 400;
@@ -109,6 +122,26 @@ async function writeIssueForFailure(result: CareerSourceCheckResult): Promise<vo
   }).catch(() => undefined);
 }
 
+async function resolveOpenIssueForSuccess(result: CareerSourceCheckResult): Promise<void> {
+  if (!isSupabaseServiceConfigured() || !result.ok) return;
+  const urlsToResolve = [result.url, ...(LEGACY_SOURCE_URL_ALIASES[result.id] || [])];
+  await Promise.all(
+    urlsToResolve.map((sourceUrl) =>
+      supabaseUpdate(
+        'data_quality_issues',
+        {
+          status: 'resolved',
+        },
+        [
+          { column: 'issue_type', value: 'career_source_unreachable' },
+          { column: 'source_path', value: sourceUrl },
+          { column: 'status', op: 'in', value: ['open', 'acknowledged'] },
+        ],
+      ).catch(() => undefined)
+    ),
+  );
+}
+
 export function listCareerSourceTargets(): CareerSourceTarget[] {
   return CAREER_SOURCE_TARGETS;
 }
@@ -118,6 +151,7 @@ export async function runCareerSourceVerification(input?: { persistIssues?: bool
   const checks = await Promise.all(CAREER_SOURCE_TARGETS.map((target) => runCheck(target)));
   if (persistIssues) {
     await Promise.all(checks.filter((check) => !check.ok).map((check) => writeIssueForFailure(check)));
+    await Promise.all(checks.filter((check) => check.ok).map((check) => resolveOpenIssueForSuccess(check)));
   }
   const failed = checks.filter((check) => !check.ok);
   return {

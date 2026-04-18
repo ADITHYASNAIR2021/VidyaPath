@@ -33,11 +33,6 @@ const REQUIRED_SPECS: EnvSpec[] = [
     required: true,
     description: 'Shared secret for teacher portal login.',
   },
-  {
-    key: 'ADMIN_PORTAL_KEY',
-    required: true,
-    description: 'Shared secret for admin portal login.',
-  },
 ];
 
 const RECOMMENDED_SPECS: EnvSpec[] = [

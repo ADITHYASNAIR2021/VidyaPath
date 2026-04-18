@@ -23,6 +23,7 @@ const SUPPORTED_SUBJECTS: Subject[] = [
   'Business Studies',
   'Economics',
   'English Core',
+  'Social Science',
 ];
 
 function isSupportedSubject(value: string): value is Subject {

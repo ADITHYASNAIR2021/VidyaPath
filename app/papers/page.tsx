@@ -243,8 +243,11 @@ export default function PapersPage() {
 
   const enrolledSubjectSet = useMemo(() => {
     if (!studentSession.isStudent) return null;
+    // Class 10 has public subject scope — no enrollment gating
+    if (studentSession.classLevel === 10) return null;
+    if (studentSession.enrolledSubjects.length === 0) return null;
     return new Set<Subject>(studentSession.enrolledSubjects);
-  }, [studentSession.enrolledSubjects, studentSession.isStudent]);
+  }, [studentSession.classLevel, studentSession.enrolledSubjects, studentSession.isStudent]);
 
   // Derive available subjects for selected class
   const classPapers = useMemo(
@@ -397,9 +400,9 @@ export default function PapersPage() {
         </motion.div>
 
         {/* ── Results summary ── */}
-        {sessionLoaded && studentSession.isStudent && (
+        {sessionLoaded && studentSession.isStudent && studentSession.classLevel !== 10 && studentSession.enrolledSubjects.length > 0 && (
           <p className="mb-4 text-xs font-semibold text-indigo-700">
-            Showing only your enrolled subjects: {studentSession.enrolledSubjects.join(', ') || 'None assigned yet'}.
+            Showing only your enrolled subjects: {studentSession.enrolledSubjects.join(', ')}.
           </p>
         )}
         <div className="flex items-center justify-between mb-5">

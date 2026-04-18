@@ -8,11 +8,10 @@ import {
 } from '@/lib/academic-taxonomy';
 import { getAnalyticsSummary } from '@/lib/analytics-store';
 import { hashPin, isValidPin, verifyPin } from '@/lib/auth/pin';
-import { createSupabaseAuthUser } from '@/lib/auth/supabase-auth';
+import { createSupabaseAuthUser, updateSupabaseAuthUser } from '@/lib/auth/supabase-auth';
 import { issueFriendlyIdentifier } from '@/lib/auth/friendly-ids';
 import {
   assertPasswordPolicy,
-  buildInitialStudentPasswordFromLoginId,
   generateLegacyPin,
   generateStrongPassword,
 } from '@/lib/auth/password-policy';
@@ -61,7 +60,7 @@ import {
   supabaseUpdate,
 } from '@/lib/supabase-rest';
 import { getTeacherStorageStatus } from '@/lib/persistence/teacher-storage';
-import { ensureDefaultEnrollmentsForStudent } from '@/lib/school-management-db';
+import { ensureDefaultEnrollmentsForStudent, setStudentSubjectEnrollmentsForStudent } from '@/lib/school-management-db';
 import { logServerEvent } from '@/lib/observability';
 
 type RowId = string;
@@ -147,6 +146,7 @@ interface TeacherActivityRow {
 interface TeacherAssignmentPackRow {
   id: RowId;
   teacher_id: RowId;
+  school_id?: RowId | null;
   scope_id: RowId | null;
   class_level: number;
   subject: string;
@@ -435,15 +435,12 @@ function toQuestionBankItem(row: TeacherQuestionBankRow): TeacherQuestionBankIte
 }
 
 function isSubjectAllowedForClass(classLevel: 10 | 12, subject: string): boolean {
-  if (classLevel === 10) {
-    return ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'].includes(subject);
-  }
-  return ['Physics', 'Chemistry', 'Biology', 'Math', 'Accountancy', 'Business Studies', 'Economics', 'English Core'].includes(subject);
+  void classLevel;
+  return sanitizeText(subject, 80).length > 0;
 }
 
 function toScope(row: TeacherScopeRow): TeacherScope | null {
   if (row.class_level !== 10 && row.class_level !== 12) return null;
-  if (!isSupportedSubject(row.subject)) return null;
   return {
     id: row.id,
     teacherId: row.teacher_id,
@@ -783,8 +780,10 @@ export async function createStudent(input: {
   classLevel: 10 | 12;
   stream?: AcademicStream;
   section?: string;
-  pin?: string;
   password?: string;
+  subjects?: string[];
+  yearOfEnrollment?: number;
+  forcePasswordChangeOnFirstLogin?: boolean;
 }): Promise<StudentProfile> {
   if (!isSupabaseServiceConfigured()) {
     throw new Error('Supabase is not configured.');
@@ -803,19 +802,19 @@ export async function createStudent(input: {
     classLevel: input.classLevel,
     batch: input.batch || section || 'X',
   });
-  const rollNo = identity.sequenceToken;
-  const rollCode = normalizeRollCode(identity.identifier);
-  const batch = input.batch ? sanitizeText(input.batch, 40) : identity.batchCode;
+  const rollNo = normalizeRosterToken(input.rollNo || identity.sequenceToken, 50);
+  const rollCode = normalizeRollCode(input.rollCode || identity.identifier);
+  const enrollmentYear = Number(input.yearOfEnrollment);
+  const enrollmentBatch = Number.isFinite(enrollmentYear) ? String(Math.trunc(enrollmentYear)) : '';
+  const batch = input.batch ? sanitizeText(input.batch, 40) : (enrollmentBatch || identity.batchCode);
   if (!name || !rollCode || !rollNo) throw new Error('Valid student name and generated identifier are required.');
   const studentId = randomUUID();
   const schoolCodeToken = normalizeAuthLocalPart(identity.schoolCode, 30);
   const userToken = normalizeAuthLocalPart(`${identity.classCode}${identity.batchCode}${identity.yearCode}${identity.sequenceToken}`, 30);
-  const password = buildInitialStudentPasswordFromLoginId(rollCode);
-  if (!password || password.length < 6) {
-    throw new Error('Unable to generate a valid initial password for student.');
-  }
-  const providedPin = typeof input.pin === 'string' ? input.pin.trim() : '';
-  const legacyPin = providedPin && isValidPin(providedPin) ? providedPin : generateLegacyPin(identity.sequenceToken, 6);
+  const providedPassword = typeof input.password === 'string' ? input.password.trim() : '';
+  const password = providedPassword || generateStrongPassword(12);
+  assertPasswordPolicy(password);
+  const legacyPin = generateLegacyPin(identity.sequenceToken, 6);
   const authEmail = buildProvisionedAuthEmail({
     role: 'student',
     schoolToken: schoolCodeToken,
@@ -830,11 +829,11 @@ export async function createStudent(input: {
       role: 'student',
       school_id: schoolId,
       profile_id: studentId,
-      class_level: input.classLevel,
-      academic_stream: academicStream,
-      section: section ?? undefined,
-      roll_no: rollNo,
-      roll_code: rollCode,
+    class_level: input.classLevel,
+    academic_stream: academicStream,
+    section: section ?? undefined,
+    roll_no: rollNo,
+    roll_code: rollCode,
       batch: batch ?? undefined,
       name,
     },
@@ -850,10 +849,10 @@ export async function createStudent(input: {
     name,
     roll_code: rollCode,
     class_level: input.classLevel,
-    academic_stream: academicStream,
+    academic_stream: academicStream ?? null,
     section,
     pin_hash: pinHash,
-    must_change_password: true,
+    must_change_password: input.forcePasswordChangeOnFirstLogin !== false,
     status: 'active',
   });
   if (!row) throw new Error('Failed to create student.');
@@ -868,8 +867,19 @@ export async function createStudent(input: {
     studentId: row.id,
     classLevel: input.classLevel,
     stream: academicStream,
-    replaceExisting: true,
+    replaceExisting: !Array.isArray(input.subjects) || input.subjects.length === 0,
   });
+  if (Array.isArray(input.subjects) && input.subjects.length > 0) {
+    await setStudentSubjectEnrollmentsForStudent({
+      schoolId,
+      studentId: row.id,
+      classLevel: input.classLevel,
+      section: section ?? undefined,
+      subjects: input.subjects,
+      replaceExisting: true,
+      assignedByTeacherId: null,
+    });
+  }
   await logTeacherActivity({
     actorType: 'admin',
     action: 'create-student',
@@ -880,6 +890,7 @@ export async function createStudent(input: {
       stream: academicStream,
       section: section ?? undefined,
       batch: batch ?? undefined,
+      subjectCount: Array.isArray(input.subjects) ? input.subjects.length : undefined,
     },
   });
   const student = toStudentProfile(row);
@@ -898,7 +909,8 @@ export async function updateStudent(
     stream: AcademicStream;
     section?: string;
     status: 'active' | 'inactive';
-    pin?: string;
+    password?: string;
+    subjects?: string[];
   }>,
   schoolId?: string
 ): Promise<StudentProfile | null> {
@@ -927,9 +939,9 @@ export async function updateStudent(
   if (updates.classLevel === 10 || updates.classLevel === 12) {
     patch.class_level = updates.classLevel;
     if (updates.classLevel === 10) {
-      patch.academic_stream = 'foundation';
-    } else if (updates.stream) {
-      patch.academic_stream = enforceAcademicStreamForClass(12, normalizeAcademicStream(updates.stream));
+      patch.academic_stream = null;
+    } else if (updates.stream !== undefined) {
+      patch.academic_stream = enforceAcademicStreamForClass(12, normalizeAcademicStream(updates.stream)) ?? null;
     }
   }
   if (updates.stream !== undefined) {
@@ -938,13 +950,13 @@ export async function updateStudent(
         ? updates.classLevel
         : undefined;
     if (classLevel) {
-      patch.academic_stream = enforceAcademicStreamForClass(classLevel, normalizeAcademicStream(updates.stream));
+      if (classLevel === 10 && normalizeAcademicStream(updates.stream)) {
+        throw new Error('Class 10 does not use stream.');
+      }
+      patch.academic_stream = enforceAcademicStreamForClass(classLevel, normalizeAcademicStream(updates.stream)) ?? null;
     } else {
       const stream = normalizeAcademicStream(updates.stream);
-      if (!stream || stream === 'foundation') {
-        throw new Error('Class 12 stream must be one of: pcm, pcb, commerce, interdisciplinary.');
-      }
-      patch.academic_stream = stream;
+      patch.academic_stream = stream ?? null;
     }
   }
   if (updates.section !== undefined) {
@@ -953,23 +965,44 @@ export async function updateStudent(
   if (updates.status === 'active' || updates.status === 'inactive') {
     patch.status = updates.status;
   }
-  if (typeof updates.pin === 'string') {
-    patch.pin_hash = updates.pin.trim().length > 0 ? hashPin(updates.pin) : null;
+  if (typeof updates.password === 'string') {
+    const password = updates.password.trim();
+    if (!password) throw new Error('Valid password is required.');
+    assertPasswordPolicy(password);
   }
-  if (Object.keys(patch).length === 0) return getStudentById(studentId, schoolId);
+  const hasPasswordUpdate = typeof updates.password === 'string';
+  const hasSubjectsUpdate = Array.isArray(updates.subjects);
+  if (Object.keys(patch).length === 0 && !hasPasswordUpdate && !hasSubjectsUpdate) {
+    return getStudentById(studentId, schoolId);
+  }
 
   const filters: Array<{ column: string; op?: string; value: string | number | boolean | null }> = [
     { column: 'id', value: sanitizeText(studentId, 80) },
   ];
   if (schoolId) filters.push({ column: 'school_id', value: sanitizeText(schoolId, 80) });
-  const rows = await supabaseUpdate<StudentProfileRow>(
-    TABLES.students,
-    patch,
-    filters
-  ).catch(() => []);
-  const row = rows[0];
+  const rows = Object.keys(patch).length > 0
+    ? await supabaseUpdate<StudentProfileRow>(
+        TABLES.students,
+        patch,
+        filters
+      ).catch(() => [])
+    : [];
+  const fallbackRows = rows[0]
+    ? []
+    : await supabaseSelect<StudentProfileRow>(TABLES.students, {
+        select: '*',
+        filters,
+        limit: 1,
+      }).catch(() => []);
+  const row = rows[0] ?? fallbackRows[0] ?? null;
   if (!row) return null;
-  if (row.school_id && (updates.classLevel !== undefined || updates.stream !== undefined)) {
+  if (typeof updates.password === 'string' && row.auth_user_id) {
+    await updateSupabaseAuthUser({
+      id: row.auth_user_id,
+      password: updates.password.trim(),
+    }).catch(() => undefined);
+  }
+  if (row.school_id && (updates.classLevel !== undefined || updates.stream !== undefined || hasSubjectsUpdate)) {
     const classLevel = row.class_level === 10 || row.class_level === 12 ? row.class_level : null;
     if (classLevel) {
     await ensureDefaultEnrollmentsForStudent({
@@ -977,8 +1010,19 @@ export async function updateStudent(
       studentId: row.id,
       classLevel,
       stream: normalizeAcademicStream(row.academic_stream),
-      replaceExisting: true,
+      replaceExisting: !Array.isArray(updates.subjects) || updates.subjects.length === 0,
     });
+    if (Array.isArray(updates.subjects) && updates.subjects.length > 0) {
+      await setStudentSubjectEnrollmentsForStudent({
+        schoolId: row.school_id,
+        studentId: row.id,
+        classLevel,
+        section: row.section ?? undefined,
+        subjects: updates.subjects,
+        replaceExisting: true,
+        assignedByTeacherId: null,
+      });
+    }
     }
   }
   await logTeacherActivity({
@@ -1084,7 +1128,8 @@ export async function createTeacher(input: {
     schoolId,
     roleCode: 'TC',
   });
-  const staffCode = normalizeRollCode(identity.identifier);
+  const staffCode = normalizeRollCode(input.staffCode || identity.identifier);
+  if (!staffCode) throw new Error('Valid staffCode is required.');
   let phone = normalizePhone(input.phone || '');
   if (!phone) phone = buildSyntheticPhoneFromSeed(`${schoolId}:${staffCode}:${email}`);
   const duplicateTeacher = await supabaseSelect<Pick<TeacherProfileRow, 'id'>>(TABLES.profiles, {
@@ -1204,9 +1249,6 @@ export async function addTeacherScope(
 ): Promise<TeacherScope | null> {
   if (!isSupabaseServiceConfigured()) {
     throw new Error('Supabase is not configured.');
-  }
-  if (!isSupportedSubject(scope.subject)) {
-    throw new Error('Unsupported subject for scope.');
   }
   if (!isSubjectAllowedForClass(scope.classLevel, scope.subject)) {
     throw new Error(`Subject ${scope.subject} is not allowed for Class ${scope.classLevel}.`);
@@ -2180,6 +2222,8 @@ export async function upsertAssignmentPack(
   if (!chapter) throw new Error('Invalid chapterId for assignment pack.');
   const scope = await resolveTeacherScopeForChapter(teacherId, chapter.id, payload.section);
   if (!scope) throw new Error('Teacher does not have scope for this chapter.');
+  const schoolId = await getTeacherSchoolId(teacherId);
+  if (!schoolId) throw new Error('Teacher school context is required for assignment pack writes.');
   const packId = sanitizeText(payload.packId, 80) || randomUUID();
   const now = new Date().toISOString();
   const nextStatus: TeacherPackStatus =
@@ -2232,6 +2276,7 @@ export async function upsertAssignmentPack(
         reopened_count: packData.reopenedCount || 0,
         extended_count: packData.extendedCount || 0,
         scope_id: scope.id,
+        school_id: schoolId,
         class_level: chapter.classLevel,
         subject: chapter.subject,
         section: scope.section ?? null,
@@ -2243,6 +2288,7 @@ export async function upsertAssignmentPack(
     await supabaseInsert<TeacherAssignmentPackRow>(TABLES.assignmentPacks, {
       id: packId,
       teacher_id: teacherId,
+      school_id: schoolId,
       scope_id: scope.id,
       class_level: chapter.classLevel,
       subject: chapter.subject,
@@ -2286,6 +2332,8 @@ export async function getTeacherPackOwnerId(packId: string): Promise<string | nu
 export async function getAssignmentPackSchoolId(packId: string): Promise<string | null> {
   const row = await getAssignmentPackRowById(packId);
   if (!row) return null;
+  const rowSchoolId = normalizeOptionalId(row.school_id ?? null);
+  if (rowSchoolId) return rowSchoolId;
   return getTeacherSchoolId(row.teacher_id);
 }
 
@@ -3093,6 +3141,8 @@ export async function completeExamSession(sessionId: string): Promise<ExamIntegr
 export async function getAdminOverview(schoolId?: string): Promise<{
   totalTeachers: number;
   activeTeachers: number;
+  totalStudents: number;
+  activeStudents: number;
   scopesByClass: Array<{ classLevel: 10 | 12; count: number }>;
   scopesBySubject: Array<{ subject: string; count: number }>;
   scopesBySection: Array<{ section: string; count: number }>;
@@ -3108,6 +3158,8 @@ export async function getAdminOverview(schoolId?: string): Promise<{
     return {
       totalTeachers: 0,
       activeTeachers: 0,
+      totalStudents: 0,
+      activeStudents: 0,
       scopesByClass: [],
       scopesBySubject: [],
       scopesBySection: [],
@@ -3120,11 +3172,16 @@ export async function getAdminOverview(schoolId?: string): Promise<{
     };
   }
   const scopedSchoolId = schoolId ? sanitizeText(schoolId, 80) : undefined;
-  const [teachers, scopes, submissions, packs, analytics, examSessions] = await Promise.all([
+  const [teachers, students, scopes, submissions, packs, analytics, examSessions] = await Promise.all([
     supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
       select: '*',
       filters: scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : undefined,
       limit: 500,
+    }).catch(() => []),
+    supabaseSelect<StudentProfileRow>(TABLES.students, {
+      select: '*',
+      filters: scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : undefined,
+      limit: 20000,
     }).catch(() => []),
     supabaseSelect<TeacherScopeRow>(TABLES.scopes, {
       select: '*',
@@ -3182,6 +3239,8 @@ export async function getAdminOverview(schoolId?: string): Promise<{
   return {
     totalTeachers: teachers.length,
     activeTeachers: teachers.filter((teacher) => teacher.status === 'active').length,
+    totalStudents: students.length,
+    activeStudents: students.filter((student) => student.status === 'active').length,
     scopesByClass: [10, 12].map((level) => ({ classLevel: level as 10 | 12, count: classMap.get(level as 10 | 12) ?? 0 })),
     scopesBySubject: [...subjectMap.entries()].sort((a, b) => b[1] - a[1]).map(([subject, count]) => ({ subject, count })),
     scopesBySection: [...sectionMap.entries()].sort((a, b) => b[1] - a[1]).map(([section, count]) => ({ section, count })),

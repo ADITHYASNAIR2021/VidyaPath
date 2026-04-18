@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { getChapterById } from '@/lib/data';
-import { isSupportedSubject } from '@/lib/academic-taxonomy';
 import { hashPin, isValidPin, verifyPin } from '@/lib/auth/pin';
-import { createSupabaseAuthUser } from '@/lib/auth/supabase-auth';
+import { createSupabaseAuthUser, updateSupabaseAuthUser } from '@/lib/auth/supabase-auth';
 import { issueFriendlyIdentifier } from '@/lib/auth/friendly-ids';
 import {
   assertPasswordPolicy,
   generateLegacyPin,
+  generateStrongPassword,
 } from '@/lib/auth/password-policy';
 import type {
   TeacherProfile,
@@ -219,6 +219,34 @@ export async function authenticateTeacherByIdentifier(
   };
 }
 
+async function findExistingAuthIdentityByEmail(email: string): Promise<{ authUserId: string; authEmail?: string } | null> {
+  const normalized = sanitizeText(email, 180).toLowerCase();
+  if (!normalized) return null;
+  const [teacherRows, adminRows, studentRows] = await Promise.all([
+    supabaseSelect<Array<{ auth_user_id: string | null; auth_email: string | null }>[number]>(TABLES.profiles, {
+      select: 'auth_user_id,auth_email',
+      filters: [{ column: 'auth_email', value: normalized }],
+      limit: 1,
+    }).catch(() => []),
+    supabaseSelect<Array<{ auth_user_id: string | null; auth_email: string | null }>[number]>('school_admin_profiles', {
+      select: 'auth_user_id,auth_email',
+      filters: [{ column: 'auth_email', value: normalized }],
+      limit: 1,
+    }).catch(() => []),
+    supabaseSelect<Array<{ auth_user_id: string | null; auth_email: string | null }>[number]>('student_profiles', {
+      select: 'auth_user_id,auth_email',
+      filters: [{ column: 'auth_email', value: normalized }],
+      limit: 1,
+    }).catch(() => []),
+  ]);
+  const match = [...teacherRows, ...adminRows, ...studentRows].find((row) => !!row.auth_user_id);
+  if (!match || !match.auth_user_id) return null;
+  return {
+    authUserId: String(match.auth_user_id),
+    authEmail: typeof match.auth_email === 'string' ? match.auth_email : normalized,
+  };
+}
+
 export async function createTeacher(input: {
   schoolId?: string;
   email: string;
@@ -228,6 +256,8 @@ export async function createTeacher(input: {
   staffCode?: string;
   password?: string;
   scopes?: Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }>;
+  forcePasswordChangeOnFirstLogin?: boolean;
+  rotatePasswordIfExisting?: boolean;
 }): Promise<TeacherProfile> {
   if (!isSupabaseServiceConfigured()) {
     throw new Error('Supabase is not configured.');
@@ -242,7 +272,8 @@ export async function createTeacher(input: {
     schoolId,
     roleCode: 'TC',
   });
-  const staffCode = normalizeRollCode(identity.identifier);
+  const staffCode = normalizeRollCode(input.staffCode || identity.identifier);
+  if (!staffCode) throw new Error('Valid staffCode is required.');
   let phone = normalizePhone(input.phone || '');
   if (!phone) phone = buildSyntheticPhoneFromSeed(`${schoolId}:${staffCode}:${email}`);
   const duplicateTeacher = await supabaseSelect<Pick<TeacherProfileRow, 'id'>>(TABLES.profiles, {
@@ -258,24 +289,43 @@ export async function createTeacher(input: {
   }
   const teacherId = randomUUID();
   const providedPassword = typeof input.password === 'string' ? input.password.trim() : '';
-  // Initial password = teacher's own email (verbatim). Policy only enforced on explicit override.
-  const teacherPassword = providedPassword || email;
-  if (providedPassword) assertPasswordPolicy(providedPassword);
+  const teacherPassword = providedPassword || generateStrongPassword(12);
+  assertPasswordPolicy(teacherPassword);
   const providedPin = typeof input.pin === 'string' ? input.pin.trim() : '';
   const teacherPin = providedPin && isValidPin(providedPin) ? providedPin : generateLegacyPin(identity.sequenceToken, 6);
-  const authUser = await createSupabaseAuthUser({
-    email,
-    password: teacherPassword,
-    emailConfirm: true,
-    userMetadata: {
-      role: 'teacher',
-      school_id: schoolId,
-      profile_id: teacherId,
-      phone,
-      staff_code: staffCode ?? undefined,
-      name,
-    },
-  });
+  const existingAuth = await findExistingAuthIdentityByEmail(email);
+  const authUser = existingAuth
+    ? {
+        id: existingAuth.authUserId,
+        email: existingAuth.authEmail ?? email,
+      }
+    : await createSupabaseAuthUser({
+        email,
+        password: teacherPassword,
+        emailConfirm: true,
+        userMetadata: {
+          role: 'teacher',
+          school_id: schoolId,
+          profile_id: teacherId,
+          phone,
+          staff_code: staffCode ?? undefined,
+          name,
+        },
+      });
+  if (existingAuth && input.rotatePasswordIfExisting === true) {
+    await updateSupabaseAuthUser({
+      id: existingAuth.authUserId,
+      password: teacherPassword,
+      userMetadata: {
+        role: 'teacher',
+        school_id: schoolId,
+        profile_id: teacherId,
+        phone,
+        staff_code: staffCode ?? undefined,
+        name,
+      },
+    });
+  }
   const [row] = await supabaseInsert<TeacherProfileRow>(TABLES.profiles, {
     id: teacherId,
     school_id: schoolId,
@@ -285,7 +335,7 @@ export async function createTeacher(input: {
     staff_code: staffCode,
     name,
     pin_hash: hashPin(teacherPin),
-    must_change_password: !providedPassword,
+    must_change_password: input.forcePasswordChangeOnFirstLogin !== false,
     status: 'active',
   });
   if (!row) throw new Error('Failed to create teacher.');
@@ -353,9 +403,6 @@ export async function addTeacherScope(
 ): Promise<TeacherScope | null> {
   if (!isSupabaseServiceConfigured()) {
     throw new Error('Supabase is not configured.');
-  }
-  if (!isSupportedSubject(scope.subject)) {
-    throw new Error('Unsupported subject for scope.');
   }
   if (!isSubjectAllowedForClass(scope.classLevel, scope.subject)) {
     throw new Error(`Subject ${scope.subject} is not allowed for Class ${scope.classLevel}.`);
@@ -435,6 +482,31 @@ export async function resetTeacherPin(teacherId: string, pin: string): Promise<b
     });
   }
   return ok;
+}
+
+export async function resetTeacherPassword(teacherId: string, password: string): Promise<boolean> {
+  if (!isSupabaseServiceConfigured()) return false;
+  const cleanTeacherId = sanitizeText(teacherId, 80);
+  const cleanPassword = String(password || '').trim();
+  if (!cleanTeacherId || !cleanPassword) return false;
+  assertPasswordPolicy(cleanPassword);
+  const row = await getTeacherProfileRow(cleanTeacherId);
+  if (!row?.auth_user_id) return false;
+  await updateSupabaseAuthUser({
+    id: row.auth_user_id,
+    password: cleanPassword,
+  });
+  await supabaseUpdate<TeacherProfileRow>(
+    TABLES.profiles,
+    { must_change_password: true },
+    [{ column: 'id', value: cleanTeacherId }]
+  ).catch(() => []);
+  await logTeacherActivity({
+    actorType: 'admin',
+    action: 'reset-password',
+    teacherId: cleanTeacherId,
+  });
+  return true;
 }
 
 export async function resolveTeacherScopeForChapter(

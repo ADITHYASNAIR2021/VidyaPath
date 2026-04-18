@@ -431,15 +431,12 @@ export function toQuestionBankItem(row: TeacherQuestionBankRow): TeacherQuestion
 }
 
 export function isSubjectAllowedForClass(classLevel: 10 | 12, subject: string): boolean {
-  if (classLevel === 10) {
-    return ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'].includes(subject);
-  }
-  return ['Physics', 'Chemistry', 'Biology', 'Math', 'Accountancy', 'Business Studies', 'Economics', 'English Core'].includes(subject);
+  void classLevel;
+  return sanitizeText(subject, 80).length > 0;
 }
 
 export function toScope(row: TeacherScopeRow): TeacherScope | null {
   if (row.class_level !== 10 && row.class_level !== 12) return null;
-  if (!isSupportedSubject(row.subject)) return null;
   return {
     id: row.id,
     teacherId: row.teacher_id,

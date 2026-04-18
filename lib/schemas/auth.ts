@@ -20,7 +20,6 @@ export const studentLoginSchema = z
     roll: optionalShortString,
     rollNo: optionalShortString,
     rollCode: optionalString,
-    pin: optionalShortString,
     password: optionalString,
   })
   .refine(
@@ -28,8 +27,8 @@ export const studentLoginSchema = z
     { message: 'Provide roll, rollNo, or rollCode.', path: ['roll'] }
   )
   .refine(
-    (value) => !!(value.password || value.pin),
-    { message: 'Provide password or pin.', path: ['password'] }
+    (value) => !!value.password,
+    { message: 'Provide password.', path: ['password'] }
   )
   .passthrough();
 
@@ -39,7 +38,6 @@ export const teacherLoginSchema = z
     email: optionalString,
     identifier: optionalString,
     password: optionalString,
-    pin: optionalShortString,
     phone: optionalShortString,
     schoolCode: optionalString,
   })
@@ -48,22 +46,20 @@ export const teacherLoginSchema = z
     { message: 'Provide identifier, email, phone, or teacherCode.', path: ['identifier'] }
   )
   .refine(
-    (value) => !!(value.password || value.pin),
-    { message: 'Provide password or pin.', path: ['password'] }
+    (value) => !!value.password,
+    { message: 'Provide password.', path: ['password'] }
   )
   .passthrough();
 
 export const adminBootstrapSchema = z
   .object({
-    schoolCode: optionalString,
     email: optionalString,
     password: optionalString,
     identifier: optionalString,
-    key: optionalString,
   })
   .refine(
-    (value) => !!value.key || !!(value.password && (value.identifier || value.email)),
-    { message: 'Provide bootstrap key OR identifier/email + password.', path: ['key'] }
+    (value) => !!(value.password && (value.identifier || value.email)),
+    { message: 'Provide identifier/email and password.', path: ['identifier'] }
   )
   .passthrough();
 
@@ -77,6 +73,14 @@ export const developerLoginSchema = z
     (value) => !!(value.username || value.email),
     { message: 'Provide username or email.', path: ['username'] }
   )
+  .passthrough();
+
+export const unifiedLoginSchema = z
+  .object({
+    identifier: z.string().trim().min(1).max(256),
+    password: z.string().trim().min(1).max(256),
+    portal: z.enum(['student', 'teacher', 'admin', 'developer']).optional(),
+  })
   .passthrough();
 
 export const parentLoginSchema = z

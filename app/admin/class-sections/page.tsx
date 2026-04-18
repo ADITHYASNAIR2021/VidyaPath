@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Layers, Plus, RefreshCw, Save, UserCog } from 'lucide-react';
+import { Layers, PencilLine, Plus, RefreshCw, Save, UserCog, X } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
@@ -11,6 +11,7 @@ interface ClassSection {
   classLevel: 10 | 12;
   section: string;
   batch?: string;
+  notes?: string;
   classTeacherId?: string;
   classTeacherName?: string;
   status: 'active' | 'inactive' | 'archived';
@@ -45,6 +46,8 @@ export default function ClassSectionsPage() {
     batch: '',
   });
   const [draftTeachers, setDraftTeachers] = useState<Record<string, string>>({});
+  const [editingSectionId, setEditingSectionId] = useState<string>('');
+  const [draftDetails, setDraftDetails] = useState<Record<string, { section: string; batch: string; notes: string }>>({});
 
   async function load() {
     setLoading(true);
@@ -75,10 +78,17 @@ export default function ClassSectionsPage() {
       setTeachers(nextTeachers);
 
       const nextDrafts: Record<string, string> = {};
+      const nextDetailDrafts: Record<string, { section: string; batch: string; notes: string }> = {};
       for (const section of nextSections) {
         nextDrafts[section.id] = section.classTeacherId ?? '';
+        nextDetailDrafts[section.id] = {
+          section: section.section || '',
+          batch: section.batch || '',
+          notes: section.notes || '',
+        };
       }
       setDraftTeachers(nextDrafts);
+      setDraftDetails(nextDetailDrafts);
     } catch {
       setError('Failed to load class sections.');
     } finally {
@@ -123,7 +133,13 @@ export default function ClassSectionsPage() {
 
   async function patchSection(
     sectionId: string,
-    patch: Partial<{ classTeacherId: string | null; status: 'active' | 'inactive' | 'archived' }>
+    patch: Partial<{
+      classTeacherId: string | null;
+      status: 'active' | 'inactive' | 'archived';
+      section: string;
+      batch: string;
+      notes: string;
+    }>
   ) {
     setSavingSectionId(sectionId);
     setError('');
@@ -146,6 +162,37 @@ export default function ClassSectionsPage() {
     } finally {
       setSavingSectionId('');
     }
+  }
+
+  function startEditing(section: ClassSection) {
+    setEditingSectionId(section.id);
+    setDraftDetails((prev) => ({
+      ...prev,
+      [section.id]: {
+        section: section.section || '',
+        batch: section.batch || '',
+        notes: section.notes || '',
+      },
+    }));
+  }
+
+  function cancelEditing() {
+    setEditingSectionId('');
+  }
+
+  async function saveSectionDetails(section: ClassSection) {
+    const draft = draftDetails[section.id] ?? { section: section.section || '', batch: section.batch || '', notes: section.notes || '' };
+    const nextSection = draft.section.trim().toUpperCase();
+    if (!nextSection) {
+      setError('Section is required.');
+      return;
+    }
+    await patchSection(section.id, {
+      section: nextSection,
+      batch: draft.batch.trim(),
+      notes: draft.notes.trim(),
+    });
+    setEditingSectionId('');
   }
 
   const activeTeachers = useMemo(
@@ -279,7 +326,67 @@ export default function ClassSectionsPage() {
                       </span>
                     </div>
 
-                    <p className="text-xs text-gray-500 mb-3">Batch: {section.batch || 'Not set'}</p>
+                    {editingSectionId === section.id ? (
+                      <div className="mb-3 grid gap-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Section</label>
+                          <input
+                            value={draftDetails[section.id]?.section ?? section.section}
+                            onChange={(event) =>
+                              setDraftDetails((prev) => ({
+                                ...prev,
+                                [section.id]: {
+                                  section: event.target.value,
+                                  batch: prev[section.id]?.batch ?? section.batch ?? '',
+                                  notes: prev[section.id]?.notes ?? section.notes ?? '',
+                                },
+                              }))
+                            }
+                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                            placeholder="A"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Batch</label>
+                          <input
+                            value={draftDetails[section.id]?.batch ?? section.batch ?? ''}
+                            onChange={(event) =>
+                              setDraftDetails((prev) => ({
+                                ...prev,
+                                [section.id]: {
+                                  section: prev[section.id]?.section ?? section.section,
+                                  batch: event.target.value,
+                                  notes: prev[section.id]?.notes ?? section.notes ?? '',
+                                },
+                              }))
+                            }
+                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                            placeholder="2026"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Notes</label>
+                          <textarea
+                            value={draftDetails[section.id]?.notes ?? section.notes ?? ''}
+                            onChange={(event) =>
+                              setDraftDetails((prev) => ({
+                                ...prev,
+                                [section.id]: {
+                                  section: prev[section.id]?.section ?? section.section,
+                                  batch: prev[section.id]?.batch ?? section.batch ?? '',
+                                  notes: event.target.value,
+                                },
+                              }))
+                            }
+                            rows={2}
+                            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                            placeholder="Optional notes for this section"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500 mb-3">Batch: {section.batch || 'Not set'}</p>
+                    )}
 
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-gray-600 flex items-center gap-1.5">
@@ -306,6 +413,35 @@ export default function ClassSectionsPage() {
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2">
+                      {editingSectionId === section.id ? (
+                        <>
+                          <button
+                            onClick={() => void saveSectionDetails(section)}
+                            disabled={savingSectionId === section.id}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-60"
+                          >
+                            <Save className="h-3.5 w-3.5" />
+                            Save Details
+                          </button>
+                          <button
+                            onClick={cancelEditing}
+                            disabled={savingSectionId === section.id}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-200 disabled:opacity-60"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => startEditing(section)}
+                          disabled={savingSectionId === section.id}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-200 disabled:opacity-60"
+                        >
+                          <PencilLine className="h-3.5 w-3.5" />
+                          Edit Details
+                        </button>
+                      )}
                       <button
                         onClick={() =>
                           void patchSection(section.id, {

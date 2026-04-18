@@ -296,7 +296,10 @@ export async function softResetOperationalData(): Promise<{
   };
 }
 
-export async function resolveRoleContextByAuthUserId(authUserId: string): Promise<PlatformRoleContext | null> {
+export async function resolveRoleContextByAuthUserId(
+  authUserId: string,
+  preferredRole?: Exclude<PlatformRole, 'anonymous'>
+): Promise<PlatformRoleContext | null> {
   if (!isSupabaseServiceConfigured()) return null;
   const normalizedId = sanitize(authUserId, 90);
   if (!normalizedId) return null;
@@ -311,7 +314,9 @@ export async function resolveRoleContextByAuthUserId(authUserId: string): Promis
   const allRoles = roleRows
     .map((row) => (isPlatformRole(row.role) ? row.role : null))
     .filter((role): role is Exclude<PlatformRole, 'anonymous'> => !!role);
-  const chosenRole = chooseHighestRole(allRoles);
+  const chosenRole = preferredRole && allRoles.includes(preferredRole)
+    ? preferredRole
+    : chooseHighestRole(allRoles);
   if (!chosenRole) return null;
   const chosen = roleRows.find((row) => row.role === chosenRole) ?? roleRows[0];
   if (!chosen) return null;

@@ -15,7 +15,7 @@ import {
   LayoutDashboard, Package, PenSquare, Users, Megaphone,
   HelpCircle, Wand2, BookMarked, ClipboardCheck, ScrollText,
   CalendarDays, RefreshCw, TrendingUp, Clock, AlertCircle,
-  ChevronRight,
+  ChevronRight, CalendarRange, BarChart3,
 } from 'lucide-react';
 
 function unwrap<T>(payload: unknown): T {
@@ -33,7 +33,9 @@ const QUICK_LINKS = [
   { href: '/teacher/attendance',   label: 'Attendance',    icon: ClipboardCheck,desc: 'Mark daily attendance',     color: 'from-lime-500 to-green-500'     },
   { href: '/teacher/gradebook',    label: 'Gradebook',     icon: ScrollText,    desc: 'Consolidated grades',       color: 'from-orange-500 to-amber-600'   },
   { href: '/teacher/resources',    label: 'Resources',     icon: BookMarked,    desc: 'Teaching materials',        color: 'from-fuchsia-500 to-violet-500' },
-  { href: '/teacher/calendar',     label: 'Calendar',      icon: CalendarDays,  desc: 'School events',             color: 'from-sky-500 to-blue-600'       },
+  { href: '/teacher/calendar',              label: 'Calendar',          icon: CalendarDays,  desc: 'School events',             color: 'from-sky-500 to-blue-600'       },
+  { href: '/teacher/timetable',             label: 'My Timetable',      icon: CalendarRange, desc: 'Weekly class schedule',     color: 'from-teal-500 to-cyan-500'      },
+  { href: '/teacher/attendance-analytics',  label: 'Attendance Report', icon: BarChart3,     desc: 'Chronic absence tracking',  color: 'from-rose-500 to-red-500'       },
 ];
 
 export default function TeacherOverviewPage() {

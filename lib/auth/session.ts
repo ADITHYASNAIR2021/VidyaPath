@@ -6,6 +6,7 @@ export const ADMIN_SESSION_COOKIE = 'vp_admin_session';
 export const TEACHER_SESSION_COOKIE = 'vp_teacher_session';
 export const STUDENT_SESSION_COOKIE = 'vp_student_session';
 export const DEVELOPER_SESSION_COOKIE = 'vp_developer_session';
+export const ACTIVE_ROLE_COOKIE = 'vp_active_role';
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 8;
 const COOKIE_MAX_AGE_SECONDS = Math.max(
@@ -49,6 +50,8 @@ export interface StudentSession {
   issuedAt: number;
   expiresAt: number;
 }
+
+export type ActivePlatformRole = 'student' | 'teacher' | 'admin' | 'developer';
 
 type SessionPayload = AdminSession | TeacherSession | StudentSession | DeveloperSession;
 
@@ -224,6 +227,14 @@ export function parseDeveloperSession(token?: string | null): DeveloperSession |
   return payload as DeveloperSession;
 }
 
+export function parseActiveRoleHint(value?: string | null): ActivePlatformRole | null {
+  const role = String(value || '').trim().toLowerCase();
+  if (role === 'student' || role === 'teacher' || role === 'admin' || role === 'developer') {
+    return role;
+  }
+  return null;
+}
+
 export function attachAdminSessionCookie(res: NextResponse, token: string): void {
   res.cookies.set({
     name: ADMIN_SESSION_COOKIE,
@@ -311,9 +322,34 @@ export function attachDeveloperSessionCookie(res: NextResponse, token: string): 
   });
 }
 
+export function attachActiveRoleCookie(res: NextResponse, role: ActivePlatformRole): void {
+  res.cookies.set({
+    name: ACTIVE_ROLE_COOKIE,
+    value: role,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: COOKIE_MAX_AGE_SECONDS,
+  });
+}
+
 export function clearDeveloperSessionCookie(res: NextResponse): void {
   res.cookies.set({
     name: DEVELOPER_SESSION_COOKIE,
+    value: '',
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    expires: new Date(0),
+    maxAge: 0,
+  });
+}
+
+export function clearActiveRoleCookie(res: NextResponse): void {
+  res.cookies.set({
+    name: ACTIVE_ROLE_COOKIE,
     value: '',
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -329,4 +365,5 @@ export function clearAllRoleSessionCookies(res: NextResponse): void {
   clearTeacherSessionCookie(res);
   clearStudentSessionCookie(res);
   clearDeveloperSessionCookie(res);
+  clearActiveRoleCookie(res);
 }

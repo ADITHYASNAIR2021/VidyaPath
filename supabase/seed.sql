@@ -504,10 +504,10 @@ join public.teacher_scopes sc
 drop table if exists pg_temp.vp_student_seed;
 create temp table vp_student_seed as
 with groups as (
-  select 10 as class_level, 'A'::text as section, 'Science Foundation'::text as stream
-  union all select 10, 'B', 'Science Foundation'
-  union all select 12, 'A', 'Science'
-  union all select 12, 'B', 'Commerce'
+  select 10 as class_level, 'A'::text as section, null::text as stream
+  union all select 10, 'B', null::text
+  union all select 12, 'A', 'pcm'
+  union all select 12, 'B', 'commerce'
 ),
 nums as (
   select generate_series(1, 50) as n
@@ -575,7 +575,7 @@ with ins as (
     s.roll_code,
     s.class_level,
     case
-      when s.class_level = 10 then 'foundation'
+      when s.class_level = 10 then null
       when s.class_level = 12 and s.section = 'B' then 'commerce'
       else 'pcm'
     end,

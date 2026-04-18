@@ -2,6 +2,7 @@ import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/aut
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { z } from 'zod';
+import { teacherHasScopeForTarget } from '@/lib/teacher/scope-guards';
 const createResourceSchema = z.object({
   title: z.string().trim().min(1).max(180),
   type: z.enum(['pdf', 'link', 'video', 'image']),
@@ -113,6 +114,20 @@ export async function POST(req: Request) {
       status: 400,
     });
   }
+  const allowedByScope = teacherHasScopeForTarget(teacherSession, {
+    chapterId: chapterId || undefined,
+    classLevel,
+    subject: subject || undefined,
+    section: section || undefined,
+  });
+  if (!allowedByScope) {
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-scope-forbidden',
+      message: 'Resource scope is outside your assigned class/subject/section permissions.',
+      status: 403,
+    });
+  }
 
   try {
     const resource = await createResource({
@@ -221,4 +236,3 @@ export async function DELETE(req: Request) {
     });
   }
 }
-

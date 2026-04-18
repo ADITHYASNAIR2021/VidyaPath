@@ -12,6 +12,7 @@ const calendarEventBodySchema = z.object({
 });
 import { createSchoolEvent, deleteSchoolEvent, listSchoolEvents } from '@/lib/school-ops-db';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { teacherHasScopeForTarget } from '@/lib/teacher/scope-guards';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,6 +107,28 @@ export async function POST(req: Request) {
       message: 'title, eventDate, and valid type are required.',
       status: 400,
     });
+  }
+  if (section && !classLevel) {
+    return errorJson({
+      requestId,
+      errorCode: 'class-level-required-for-section',
+      message: 'classLevel is required when section is provided.',
+      status: 400,
+    });
+  }
+  if (classLevel) {
+    const allowedByScope = teacherHasScopeForTarget(teacherSession, {
+      classLevel,
+      section: section || undefined,
+    });
+    if (!allowedByScope) {
+      return errorJson({
+        requestId,
+        errorCode: 'teacher-scope-forbidden',
+        message: 'Event scope is outside your assigned class/section permissions.',
+        status: 403,
+      });
+    }
   }
 
   try {
@@ -205,4 +228,3 @@ export async function DELETE(req: Request) {
     });
   }
 }
-

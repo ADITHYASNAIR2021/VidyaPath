@@ -8,6 +8,14 @@ export async function GET(req: Request) {
   const requestId = getRequestId(req);
   const studentSession = await getStudentSessionFromRequestCookies();
   if (!studentSession) return unauthorizedJson('Student session required.', requestId);
+  if (!studentSession.schoolId) {
+    return errorJson({
+      requestId,
+      errorCode: 'student-school-missing',
+      message: 'Student school scope is required.',
+      status: 403,
+    });
+  }
 
   try {
     const summary = await getStudentCertificateSummary({

@@ -1378,9 +1378,9 @@ async function main() {
   await upsertRows('app_state', appStateRows, 'state_key');
 
   // ── APS (Adithya Public School) — new roll-code format demo block ───────────
-  const APS_SCHOOL_ID = 'c0aps111-aps1-4ap1-8ap1-aps111111111';
-  const APS_TEACHER_ID = 'c0apt111-apt1-4ap1-8ap1-apt111111111';
-  const APS_SCOPE_ID   = 'c0aps222-aps2-4ap2-8ap2-aps222222222';
+  const APS_SCHOOL_ID = 'ca0a5111-1111-4111-8111-111111111111';
+  const APS_TEACHER_ID = 'ca0a5b01-b001-4b01-8b01-b00100000001';
+  const APS_SCOPE_ID   = 'ca0a5333-3333-4333-8333-333333333333';
 
   await upsertRows('schools', [
     {
@@ -1418,7 +1418,7 @@ async function main() {
   // APS students — new composite roll-code format
   await upsertRows('student_profiles', [
     {
-      id: 'c0apss01-aps1-4ap1-8ap1-apsstud0001',
+      id: 'ca0a5c01-c001-4c01-8c01-c00100000001',
       school_id: APS_SCHOOL_ID,
       auth_user_id: null,
       auth_email: null,
@@ -1433,7 +1433,7 @@ async function main() {
       status: 'active',
     },
     {
-      id: 'c0apss02-aps1-4ap1-8ap1-apsstud0002',
+      id: 'ca0a5c02-c002-4c02-8c02-c00200000002',
       school_id: APS_SCHOOL_ID,
       auth_user_id: null,
       auth_email: null,
@@ -1448,7 +1448,7 @@ async function main() {
       status: 'active',
     },
     {
-      id: 'c0apss03-aps1-4ap1-8ap1-apsstud0003',
+      id: 'ca0a5c03-c003-4c03-8c03-c00300000003',
       school_id: APS_SCHOOL_ID,
       auth_user_id: null,
       auth_email: null,
@@ -1463,7 +1463,7 @@ async function main() {
       status: 'active',
     },
     {
-      id: 'c0apss04-aps1-4ap1-8ap1-apsstud0004',
+      id: 'ca0a5c04-c004-4c04-8c04-c00400000004',
       school_id: APS_SCHOOL_ID,
       auth_user_id: null,
       auth_email: null,
@@ -1525,7 +1525,7 @@ async function main() {
   console.log('  rollCode=APS.STU.10.B.2600500, password=apsstu10b2600500');
   console.log('  rollCode=APS.STU.12.A.2600100, password=apsstu12a2600100');
   console.log('  rollCode=APS.STU.12.B.2600500, password=apsstu12b2600500');
-  console.log('Admin login: use your ADMIN_PORTAL_KEY (bootstrap key mode).');
+  console.log('Admin login: use admin email + password (bootstrap key mode removed).');
 }
 
 main().catch((error) => {

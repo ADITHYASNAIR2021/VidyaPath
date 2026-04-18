@@ -2072,6 +2072,7 @@ const SUBJECT_ORDER: Record<Subject, number> = {
   'Business Studies': 6,
   Economics: 7,
   'English Core': 8,
+  'Social Science': 9,
 };
 
 export function getSortedChapters(): Chapter[] {
@@ -2197,7 +2198,7 @@ export const ENTRANCE_EXAMS: EntranceExam[] = [
     eligibility: 'Class 12 pass or appearing. No minimum percentage required.',
     pattern: 'MCQ | Domain Subjects + General Test + Languages | Online CBT',
     dates: 'May–June | Results: July',
-    officialUrl: 'https://exams.nta.ac.in/CUET-UG',
+    officialUrl: 'https://cuet.nta.nic.in',
     topColleges: ['Delhi University (DU)', 'JNU Delhi', 'BHU Varanasi', 'Jamia Millia Islamia', 'Hyderabad Central University'],
     prepTip: 'NCERT is largely sufficient. Focus on your domain subject + General Test (Quantitative Reasoning + English). No negative marking for un-attempted questions.',
   },
@@ -2233,7 +2234,7 @@ export const ENTRANCE_EXAMS: EntranceExam[] = [
     eligibility: 'Class 12 pass/appearing as per ICMAI admission norms.',
     pattern: 'Fundamentals of Economics and Management, Accounting, Laws and Ethics sections as per ICMAI pattern.',
     dates: 'Term-wise schedules published by ICMAI.',
-    officialUrl: 'https://icmai.in/studentswebsite/mgmtaccexam.php',
+    officialUrl: 'https://icmai.in/studentswebsite/exam.php',
     topColleges: ['ICMAI CMA Pathway', 'Narsee Monjee College of Commerce', 'Symbiosis Pune'],
     prepTip: 'Strengthen accountancy and economics fundamentals before moving into CMA pattern tests.',
   },

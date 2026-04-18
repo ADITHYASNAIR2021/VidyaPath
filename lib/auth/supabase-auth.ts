@@ -273,6 +273,55 @@ export async function createSupabaseAuthUser(input: {
   };
 }
 
+export async function updateSupabaseAuthUser(input: {
+  id: string;
+  password?: string;
+  email?: string;
+  emailConfirm?: boolean;
+  userMetadata?: Record<string, unknown>;
+}): Promise<{ id: string; email?: string }> {
+  const config = readSupabaseAuthConfig();
+  if (!config?.serviceKey) throw new Error('Supabase service key is required to update auth users.');
+  const userId = String(input.id || '').trim();
+  if (!userId) throw new Error('Auth user id is required.');
+  const payload: Record<string, unknown> = {};
+  if (typeof input.password === 'string' && input.password.trim().length > 0) payload.password = input.password;
+  if (typeof input.email === 'string' && input.email.trim().length > 0) payload.email = input.email.trim().toLowerCase();
+  if (input.emailConfirm !== undefined) payload.email_confirm = !!input.emailConfirm;
+  if (input.userMetadata && typeof input.userMetadata === 'object') payload.user_metadata = input.userMetadata;
+  if (Object.keys(payload).length === 0) throw new Error('At least one auth user update field is required.');
+
+  const response = await fetch(`${config.url}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    headers: {
+      apikey: config.serviceKey,
+      Authorization: `Bearer ${config.serviceKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  const row = json && typeof json.user === 'object'
+    ? (json.user as Record<string, unknown>)
+    : json;
+  if (!response.ok || !row || typeof row.id !== 'string') {
+    const message =
+      typeof json?.msg === 'string'
+        ? json.msg
+        : typeof json?.error_description === 'string'
+          ? json.error_description
+          : typeof json?.error === 'string'
+            ? json.error
+            : 'Failed to update Supabase user.';
+    throw new Error(message);
+  }
+  return {
+    id: row.id,
+    email: typeof row.email === 'string' ? row.email : undefined,
+  };
+}
+
 export function attachSupabaseSessionCookies(
   response: NextResponse,
   session: Pick<SupabaseAuthSession, 'access_token' | 'refresh_token' | 'expires_in'>,

@@ -5,6 +5,7 @@ import { teacherWeeklyPlanCreateSchema } from '@/lib/schemas/teacher';
 import { publishWeeklyPlan } from '@/lib/teacher-admin-db';
 import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 import type { TeacherWeeklyPlan, TeacherClassPreset } from '@/lib/teacher-types';
+import { teacherHasScopeForTarget } from '@/lib/teacher/scope-guards';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,14 @@ export async function GET(req: Request) {
   const requestId = getRequestId(req);
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Teacher session required.', requestId);
+  if (!session.teacher.schoolId) {
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-school-missing',
+      message: 'Teacher school context is required.',
+      status: 403,
+    });
+  }
 
   try {
     const resolvedClient = resolveRequestSupabaseClient(req, 'user-first');
@@ -55,6 +64,14 @@ export async function POST(req: Request) {
   const requestId = getRequestId(req);
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Teacher session required.', requestId);
+  if (!session.teacher.schoolId) {
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-school-missing',
+      message: 'Teacher school context is required.',
+      status: 403,
+    });
+  }
 
   const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, teacherWeeklyPlanCreateSchema);
   if (!bodyResult.ok) {
@@ -71,17 +88,52 @@ export async function POST(req: Request) {
 
   const resolvedClassLevel: 10 | 12 = Number(classLevel) === 10 ? 10 : 12;
   const resolvedPreset: TeacherClassPreset = (classPreset as TeacherClassPreset) ?? 'custom';
+  const resolvedSection = typeof section === 'string' && section.trim().length > 0
+    ? section.trim().toUpperCase()
+    : undefined;
+  const resolvedSubject = typeof subject === 'string' && subject.trim().length > 0
+    ? subject.trim()
+    : undefined;
+
+  const classSubjectScopeAllowed = teacherHasScopeForTarget(session, {
+    classLevel: resolvedClassLevel,
+    subject: resolvedSubject,
+    section: resolvedSection,
+  });
+  if (!classSubjectScopeAllowed) {
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-scope-forbidden',
+      message: 'Weekly plan scope is outside your assigned class/subject/section permissions.',
+      status: 403,
+    });
+  }
+
+  for (const chapterId of focusChapterIds) {
+    const chapterScopeAllowed = teacherHasScopeForTarget(session, {
+      chapterId,
+      section: resolvedSection,
+    });
+    if (!chapterScopeAllowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'teacher-scope-forbidden',
+        message: `Chapter ${chapterId} is outside your assigned scope.`,
+        status: 403,
+      });
+    }
+  }
 
   try {
     const plan = await publishWeeklyPlan(session.teacher.id, {
       title: String(title).trim(),
       classPreset: resolvedPreset,
       classLevel: resolvedClassLevel,
-      subject: typeof subject === 'string' ? subject.trim() : undefined,
+      subject: resolvedSubject,
       focusChapterIds: (focusChapterIds as unknown[]).filter((id): id is string => typeof id === 'string'),
       planWeeks: planWeeks as unknown as TeacherWeeklyPlan['planWeeks'],
       dueDate: typeof dueDate === 'string' ? dueDate.trim() : undefined,
-      section: typeof section === 'string' ? section.trim() : undefined,
+      section: resolvedSection,
     });
     return dataJson({ requestId, data: { plan } });
   } catch (error) {

@@ -8,6 +8,16 @@ import { listTeachers } from '@/lib/teacher/auth.db';
 
 export const dynamic = 'force-dynamic';
 
+const DAY_LABEL_TO_NUM: Record<string, number> = {
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+  sun: 7,
+};
+
 function toClassLevel(value: unknown): 10 | 12 | null {
   const parsed = Number(value);
   if (parsed === 10 || parsed === 12) return parsed;
@@ -22,6 +32,26 @@ function toSection(value: unknown): string {
 function toText(value: unknown, max = 220): string {
   if (typeof value !== 'string') return '';
   return value.replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function toDayOfWeek(value: unknown): number | null {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 7) {
+    return numeric;
+  }
+  if (typeof value === 'string') {
+    const mapped = DAY_LABEL_TO_NUM[value.trim().slice(0, 3).toLowerCase()];
+    if (mapped) return mapped;
+  }
+  return null;
+}
+
+function toPeriodNo(value: unknown): number | null {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 20) {
+    return numeric;
+  }
+  return null;
 }
 
 export async function GET(req: Request) {
@@ -107,7 +137,9 @@ export async function PUT(req: Request) {
   const body = bodyResult.value;
   const classLevel = toClassLevel(body.classLevel);
   const section = toSection(body.section);
-  const slotsRaw = Array.isArray(body.slots) ? body.slots : [];
+  const slotsRaw = Array.isArray(body.slots) && body.slots.length > 0
+    ? body.slots
+    : (Array.isArray(body.periods) ? body.periods : []);
   if (!classLevel || !section || slotsRaw.length === 0) {
     return errorJson({
       requestId,
@@ -121,13 +153,13 @@ export async function PUT(req: Request) {
     .map((item: unknown) => {
       if (!item || typeof item !== 'object') return null;
       const row = item as Record<string, unknown>;
-      const dayOfWeek = Number(row.dayOfWeek);
-      const periodNo = Number(row.periodNo);
+      const dayOfWeek = toDayOfWeek(row.dayOfWeek ?? row.day);
+      const periodNo = toPeriodNo(row.periodNo ?? row.slot);
       const subject = toText(row.subject, 120);
       const teacherId = toText(row.teacherId, 90);
       const startTime = toText(row.startTime, 16);
       const endTime = toText(row.endTime, 16);
-      if (!Number.isFinite(dayOfWeek) || !Number.isFinite(periodNo) || !subject) return null;
+      if (!dayOfWeek || !periodNo || !subject) return null;
       return {
         dayOfWeek,
         periodNo,

@@ -15,7 +15,7 @@
  *   OPENAI_API_KEY        (fallback — text-embedding-3-small, truncated to 1024)
  */
 
-import { createReadStream } from 'node:fs';
+import { createReadStream, promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,11 +23,49 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
+async function loadLocalEnvFiles() {
+  for (const file of [join(ROOT, '.env.local'), join(ROOT, '.env')]) {
+    try {
+      const raw = await fs.readFile(file, 'utf-8');
+      for (const rawLine of raw.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+
+        const normalized = line.startsWith('export ') ? line.slice('export '.length).trim() : line;
+        const idx = normalized.indexOf('=');
+        if (idx <= 0) continue;
+
+        const key = normalized.slice(0, idx).trim();
+        let value = normalized.slice(idx + 1).trim();
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1);
+        }
+
+        if (!process.env[key]) process.env[key] = value;
+      }
+    } catch {
+      // Ignore missing env files.
+    }
+  }
+}
+
+await loadLocalEnvFiles();
+
 // ── CLI args ──────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
-const BATCH_SIZE = Number(args[args.indexOf('--batch-size') + 1] || 32);
+const batchSizeArgIndex = args.indexOf('--batch-size');
+const parsedBatchSize = batchSizeArgIndex >= 0 ? Number(args[batchSizeArgIndex + 1]) : Number.NaN;
+const BATCH_SIZE = Number.isFinite(parsedBatchSize) && parsedBatchSize > 0
+  ? Math.max(1, Math.floor(parsedBatchSize))
+  : 32;
 const DRY_RUN = args.includes('--dry-run');
 const UPSERT_ONLY_MISSING = args.includes('--skip-existing');
+if (batchSizeArgIndex >= 0 && (!Number.isFinite(parsedBatchSize) || parsedBatchSize <= 0)) {
+  console.warn('WARN: Invalid --batch-size value provided. Falling back to 32.');
+}
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
@@ -109,6 +147,12 @@ async function embedBatch(texts) {
   return PROVIDER === 'nvidia' ? embedNvidia(texts) : embedOpenAI(texts);
 }
 
+function isUsableChunk(chunk) {
+  if (!chunk || typeof chunk !== 'object') return false;
+  const text = typeof chunk.text === 'string' ? chunk.text.trim() : '';
+  return text.length > 0;
+}
+
 // ── Supabase upsert ───────────────────────────────────────────────────────────
 async function upsertRows(rows) {
   if (DRY_RUN) {
@@ -182,6 +226,15 @@ async function main() {
     allChunks = allChunks.concat(chunks);
   }
 
+  const beforeSanitize = allChunks.length;
+  allChunks = allChunks
+    .filter(isUsableChunk)
+    .map((chunk) => ({ ...chunk, text: chunk.text.trim() }));
+  const droppedInvalid = beforeSanitize - allChunks.length;
+  if (droppedInvalid > 0) {
+    console.log(`  Dropped ${droppedInvalid} empty/invalid chunks before ingest.`);
+  }
+
   // Deduplicate by id
   const seen = new Set();
   allChunks = allChunks.filter((c) => {
@@ -209,7 +262,12 @@ async function main() {
 
   for (let i = 0; i < allChunks.length; i += BATCH_SIZE) {
     const batch = allChunks.slice(i, i + BATCH_SIZE);
-    const texts = batch.map((c) => (c.text ?? '').slice(0, 2048));
+    if (batch.length === 0) continue;
+    const texts = batch.map((c) => c.text.slice(0, 2048)).filter((text) => text.length > 0);
+    if (texts.length === 0) {
+      errors += batch.length;
+      continue;
+    }
 
     try {
       await withRetry(async () => {
@@ -233,7 +291,8 @@ async function main() {
       ingested += batch.length;
       process.stdout.write(`\r  ${ingested}/${allChunks.length} ingested`);
     } catch (err) {
-      console.error(`\n  Batch ${Math.floor(i / BATCH_SIZE) + 1} failed after 3 attempts: ${err.message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\n  Batch ${Math.floor(i / BATCH_SIZE) + 1} failed after 3 attempts: ${message}`);
       errors += batch.length;
     }
 

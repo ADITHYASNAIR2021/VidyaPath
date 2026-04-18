@@ -12,7 +12,7 @@ returns table (
   allowed boolean,
   retry_after_seconds integer,
   remaining integer,
-  limit integer
+  "limit" integer
 )
 language plpgsql
 security definer

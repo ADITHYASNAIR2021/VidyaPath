@@ -35,17 +35,8 @@ export default function SiteFooter() {
         </div>
 
         <div className="flex items-center gap-3 text-xs">
-          <Link href="/student/login" className="text-emerald-700 hover:text-emerald-800 font-semibold">
-            Student
-          </Link>
-          <Link href="/teacher/login" className="text-indigo-700 hover:text-indigo-800 font-semibold">
-            Teacher
-          </Link>
-          <Link href="/admin/login" className="text-amber-700 hover:text-amber-800 font-semibold">
-            Admin
-          </Link>
-          <Link href="/developer/login" className="text-violet-700 hover:text-violet-800 font-semibold">
-            Developer
+          <Link href="/login" className="text-indigo-700 hover:text-indigo-800 font-semibold">
+            Login
           </Link>
         </div>
       </div>

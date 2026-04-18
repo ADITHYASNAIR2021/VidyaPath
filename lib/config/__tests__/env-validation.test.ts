@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { validateEnv } from '@/lib/config/env-validation';
 
-const REQUIRED_KEYS = ['SESSION_SIGNING_SECRET', 'TEACHER_PORTAL_KEY', 'ADMIN_PORTAL_KEY'];
+const REQUIRED_KEYS = ['SESSION_SIGNING_SECRET', 'TEACHER_PORTAL_KEY'];
 
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void) {
   const saved: Record<string, string | undefined> = {};
@@ -52,7 +52,6 @@ describe('validateEnv — report mode', () => {
       {
         SESSION_SIGNING_SECRET: 'short',
         TEACHER_PORTAL_KEY: 'test-teacher-key',
-        ADMIN_PORTAL_KEY: 'test-admin-key',
       },
       () => {
         const result = validateEnv('report');
@@ -72,7 +71,6 @@ describe('validateEnv — strict mode', () => {
       {
         SESSION_SIGNING_SECRET: undefined,
         TEACHER_PORTAL_KEY: 'test-teacher-key',
-        ADMIN_PORTAL_KEY: 'test-admin-key',
       },
       () => {
         expect(() => validateEnv('strict')).toThrow(/SESSION_SIGNING_SECRET/);

@@ -1,10 +1,12 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import {
+  ACTIVE_ROLE_COOKIE,
   ADMIN_SESSION_COOKIE,
   DEVELOPER_SESSION_COOKIE,
   STUDENT_SESSION_COOKIE,
   TEACHER_SESSION_COOKIE,
+  parseActiveRoleHint,
   parseAdminSession,
   parseDeveloperSession,
   parseStudentSession,
@@ -71,6 +73,7 @@ async function resolveSupabaseContext(): Promise<RequestAuthContext | null> {
   const cookieStore = cookies();
   let accessToken = cookieStore.get(SUPABASE_ACCESS_COOKIE)?.value;
   const refreshToken = cookieStore.get(SUPABASE_REFRESH_COOKIE)?.value;
+  const preferredRole = parseActiveRoleHint(cookieStore.get(ACTIVE_ROLE_COOKIE)?.value);
 
   if (!accessToken && !refreshToken) return null;
 
@@ -87,7 +90,7 @@ async function resolveSupabaseContext(): Promise<RequestAuthContext | null> {
   if (!payload?.sub) return null;
   const user = await getSupabaseUser(accessToken || '');
   if (!user?.id || user.id !== payload.sub) return null;
-  const roleContext = await resolveRoleContextByAuthUserId(payload.sub);
+  const roleContext = await resolveRoleContextByAuthUserId(payload.sub, preferredRole || undefined);
   if (!roleContext) return null;
   return toRequestAuthContext(roleContext, { iat: payload.iat, exp: payload.exp });
 }
@@ -168,6 +171,7 @@ export async function getAdminSessionFromRequestCookies(): Promise<{
   schoolName?: string;
   authUserId?: string;
   displayName?: string;
+  availableRoles?: Array<Exclude<PlatformRole, 'anonymous'>>;
   role: 'admin' | 'developer';
 } | null> {
   const context = await requireRequestRole(['admin', 'developer']);
@@ -181,6 +185,7 @@ export async function getAdminSessionFromRequestCookies(): Promise<{
     schoolName: context.schoolName,
     authUserId: context.authUserId,
     displayName: context.displayName,
+    availableRoles: context.availableRoles,
   };
 }
 
@@ -201,30 +206,21 @@ export async function getStudentSessionFromRequestCookies() {
   if (context?.profileId && context.role === 'student') {
     const token = cookies().get(STUDENT_SESSION_COOKIE)?.value;
     const parsed = parseStudentSession(token);
-    const student = await getStudentById(context.profileId);
-    const fallbackStudentId = parsed?.studentId || context.profileId;
-    const fallbackClassLevel = parsed?.classLevel === 10 || parsed?.classLevel === 12 ? parsed.classLevel : undefined;
-    if (!student && parsed) {
-      const enrolledSubjects = await getStudentEnrolledSubjects(parsed.studentId, parsed.schoolId);
-      const stream = deriveStudentStream(enrolledSubjects, parsed.classLevel, parsed.stream);
-      return {
-        ...parsed,
-        mustChangePassword: parsed.mustChangePassword === true,
-        enrolledSubjects,
-        stream,
-      };
-    }
-    if (!student) return parsed ?? null;
+    const student = await getStudentById(context.profileId, context.schoolId || undefined);
+    if (!student) return null;
+    if (parsed?.schoolId && student.schoolId && parsed.schoolId !== student.schoolId) return null;
+    if (context.schoolId && student.schoolId && context.schoolId !== student.schoolId) return null;
+
     const enrolledSubjects = await getStudentEnrolledSubjects(student.id, student.schoolId);
     const stream = deriveStudentStream(enrolledSubjects, student.classLevel, student.stream);
     return {
-      studentId: student.id || fallbackStudentId,
+      studentId: student.id,
       studentName: student.name || parsed?.studentName || 'Student',
       rollCode: student.rollCode || parsed?.rollCode || '',
-      classLevel: student.classLevel || fallbackClassLevel || 12,
+      classLevel: student.classLevel || 12,
       section: student.section || parsed?.section,
-      schoolId: student.schoolId || parsed?.schoolId,
-      schoolCode: context.schoolCode,
+      schoolId: student.schoolId,
+      schoolCode: context.schoolCode || parsed?.schoolCode,
       batch: student.batch,
       mustChangePassword: student.mustChangePassword === true || parsed?.mustChangePassword === true,
       enrolledSubjects,
@@ -238,17 +234,26 @@ export async function getStudentSessionFromRequestCookies() {
   const token = cookies().get(STUDENT_SESSION_COOKIE)?.value;
   const parsed = parseStudentSession(token);
   if (!parsed) return null;
-  const student = await getStudentById(parsed.studentId).catch(() => null);
-  if (!student) return parsed;
+  const student = await getStudentById(parsed.studentId, parsed.schoolId || undefined).catch(() => null);
+  if (!student) return null;
+  if (parsed.schoolId && student.schoolId && parsed.schoolId !== student.schoolId) return null;
   const enrolledSubjects = await getStudentEnrolledSubjects(student.id, student.schoolId);
   const stream = deriveStudentStream(enrolledSubjects, student.classLevel, student.stream);
   return {
-    ...parsed,
-    schoolId: parsed.schoolId || student.schoolId,
-    batch: parsed.batch || student.batch,
+    studentId: student.id,
+    studentName: student.name || parsed.studentName || 'Student',
+    rollCode: student.rollCode || parsed.rollCode,
+    classLevel: student.classLevel,
+    section: student.section || parsed.section,
+    schoolId: student.schoolId,
+    schoolCode: parsed.schoolCode,
+    batch: student.batch || parsed.batch,
     mustChangePassword: student.mustChangePassword === true || parsed.mustChangePassword === true,
     enrolledSubjects,
     stream,
+    role: 'student' as const,
+    issuedAt: parsed.issuedAt,
+    expiresAt: parsed.expiresAt,
   };
 }
 

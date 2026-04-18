@@ -50,7 +50,7 @@ export const sectionLetter = z
   .max(3)
   .regex(/^[A-Z0-9]+$/);
 
-export const stream = z.enum(['foundation', 'pcm', 'pcb', 'commerce', 'interdisciplinary']);
+export const stream = z.enum(['pcm', 'pcb', 'commerce']);
 
 export const cbseSubject = z.enum([
   'Physics',

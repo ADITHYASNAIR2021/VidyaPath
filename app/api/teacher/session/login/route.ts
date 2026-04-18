@@ -1,4 +1,5 @@
 import {
+  attachActiveRoleCookie,
   attachTeacherSessionCookie,
   clearAllRoleSessionCookies,
   createTeacherSessionToken,
@@ -21,7 +22,7 @@ import {
 } from '@/lib/platform-rbac-db';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
-import { authenticateTeacher, authenticateTeacherByIdentifier, getTeacherSessionById } from '@/lib/teacher/auth.db';
+import { getTeacherSessionById } from '@/lib/teacher/auth.db';
 
 const SESSION_EXPIRY_MS = 8 * 60 * 60 * 1000;
 
@@ -66,11 +67,10 @@ export async function POST(req: Request) {
   const body = bodyResult.value;
   const schoolCode = typeof body.schoolCode === 'string'
     ? body.schoolCode.trim()
-    : (process.env.DEFAULT_SCHOOL_CODE || '').trim();
+    : '';
   const identifier = typeof body.identifier === 'string' ? body.identifier.trim() : '';
   const phone = typeof body.phone === 'string' ? body.phone.trim() : identifier;
-  const pin = typeof body.pin === 'string' ? body.pin.trim() : '';
-  const password = typeof body.password === 'string' ? body.password.trim() : pin;
+  const password = typeof body.password === 'string' ? body.password.trim() : '';
   if (!phone || !password) {
     return errorJson({
       requestId,
@@ -102,9 +102,12 @@ export async function POST(req: Request) {
         email: identifier.toLowerCase(),
         password,
       });
-      const roleContext = authSession.user?.id
-        ? await resolveRoleContextByAuthUserId(authSession.user.id)
+      let roleContext = authSession.user?.id
+        ? await resolveRoleContextByAuthUserId(authSession.user.id, 'teacher')
         : null;
+      if ((!roleContext || roleContext.role !== 'teacher') && authSession.user?.id) {
+        roleContext = await resolveRoleContextByAuthUserId(authSession.user.id);
+      }
       if (!roleContext || roleContext.role !== 'teacher' || !roleContext.profileId) {
         return errorJson({
           requestId,
@@ -148,6 +151,7 @@ export async function POST(req: Request) {
       clearAllRoleSessionCookies(response);
       attachSupabaseSessionCookies(response, authSession, 'teacher');
       attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
+      attachActiveRoleCookie(response, 'teacher');
       return response;
     } catch {
       return errorJson({
@@ -174,50 +178,12 @@ export async function POST(req: Request) {
       identifier: phone,
     });
     if (!authIdentity?.authEmail) {
-      const legacyResolved = await authenticateTeacherByIdentifier(phone, pin || password, school.id);
-      if (legacyResolved.ambiguous) {
-        return errorJson({
-          requestId,
-          errorCode: 'teacher-identity-ambiguous',
-          message: 'Multiple teacher profiles matched this identifier. Ask admin to set unique phone/staff code.',
-          status: 409,
-        });
-      }
-      if (!legacyResolved.session) {
-        await recordAuditEvent({
-          requestId,
-          endpoint: '/api/teacher/session/login',
-          action: 'teacher-login-failed',
-          statusCode: 401,
-          actorRole: 'system',
-          schoolId: school.id,
-          metadata: { schoolCode, identifier: phone, mode: 'legacy-scoped' },
-        });
-        return errorJson({
-          requestId,
-          errorCode: 'invalid-teacher-credentials',
-          message: 'Invalid teacher credentials for this school.',
-          status: 401,
-        });
-      }
-      const response = dataJson({
+      return errorJson({
         requestId,
-        data: {
-          teacher: legacyResolved.session.teacher,
-          effectiveScopes: legacyResolved.session.effectiveScopes,
-          role: 'teacher',
-          auth: 'legacy-scoped',
-          schoolId: school.id,
-          schoolCode,
-          availableRoles: ['teacher'],
-          mustChangePassword: legacyResolved.session.teacher.mustChangePassword ?? false,
-          sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
-        },
+        errorCode: 'teacher-password-login-not-provisioned',
+        message: 'Teacher password login is not provisioned for this identifier in the selected school.',
+        status: 403,
       });
-      clearSupabaseSessionCookies(response);
-      clearAllRoleSessionCookies(response);
-      attachTeacherSessionCookie(response, createTeacherSessionToken(legacyResolved.session.teacher.id));
-      return response;
     }
     try {
       const authSession = await signInWithPassword({
@@ -251,6 +217,7 @@ export async function POST(req: Request) {
       clearAllRoleSessionCookies(response);
       attachSupabaseSessionCookies(response, authSession, 'teacher');
       attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
+      attachActiveRoleCookie(response, 'teacher');
       await recordAuditEvent({
         requestId,
         endpoint: '/api/teacher/session/login',
@@ -305,6 +272,7 @@ export async function POST(req: Request) {
         clearAllRoleSessionCookies(response);
         attachSupabaseSessionCookies(response, authSession, 'teacher');
         attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
+        attachActiveRoleCookie(response, 'teacher');
         return response;
       }
     } catch {
@@ -315,62 +283,15 @@ export async function POST(req: Request) {
     return errorJson({
       requestId,
       errorCode: 'teacher-identity-ambiguous',
-      message: 'Multiple schools matched this teacher identifier. Enter school code in admin-managed login flow.',
+      message: 'Multiple schools matched this teacher identifier. Please login with your teacher email.',
       status: 409,
     });
   }
 
-  const legacyResolved = await authenticateTeacherByIdentifier(phone, pin || password);
-  if (legacyResolved.ambiguous) {
-    return errorJson({
-      requestId,
-      errorCode: 'teacher-identity-ambiguous',
-      message: 'Multiple teacher profiles matched this identifier. Please contact admin.',
-      status: 409,
-    });
-  }
-  if (!legacyResolved.session) {
-    const phoneSession = await authenticateTeacher(phone, pin || password);
-    if (!phoneSession) {
-      return errorJson({
-        requestId,
-        errorCode: 'invalid-teacher-credentials',
-        message: 'Invalid teacher credentials.',
-        status: 401,
-      });
-    }
-    const response = dataJson({
-      requestId,
-      data: {
-        teacher: phoneSession.teacher,
-        effectiveScopes: phoneSession.effectiveScopes,
-        role: 'teacher',
-        auth: 'legacy',
-        availableRoles: ['teacher'],
-        mustChangePassword: phoneSession.teacher.mustChangePassword ?? false,
-        sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
-      },
-    });
-    clearSupabaseSessionCookies(response);
-    clearAllRoleSessionCookies(response);
-    attachTeacherSessionCookie(response, createTeacherSessionToken(phoneSession.teacher.id));
-    return response;
-  }
-
-  const response = dataJson({
+  return errorJson({
     requestId,
-    data: {
-      teacher: legacyResolved.session.teacher,
-      effectiveScopes: legacyResolved.session.effectiveScopes,
-      role: 'teacher',
-      auth: 'legacy',
-      availableRoles: ['teacher'],
-      mustChangePassword: legacyResolved.session.teacher.mustChangePassword ?? false,
-      sessionExpiry: Date.now() + SESSION_EXPIRY_MS,
-    },
+    errorCode: 'teacher-password-login-not-provisioned',
+    message: 'Teacher password login is not provisioned for this identifier.',
+    status: 403,
   });
-  clearSupabaseSessionCookies(response);
-  clearAllRoleSessionCookies(response);
-  attachTeacherSessionCookie(response, createTeacherSessionToken(legacyResolved.session.teacher.id));
-  return response;
 }

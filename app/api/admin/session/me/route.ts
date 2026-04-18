@@ -20,6 +20,7 @@ export async function GET(req: Request) {
         schoolName: session.schoolName,
         authUserId: session.authUserId,
         displayName: session.displayName,
+        availableRoles: session.availableRoles,
       },
     });
   } catch (error) {

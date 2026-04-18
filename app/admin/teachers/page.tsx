@@ -16,8 +16,8 @@ function unwrap<T>(payload: unknown): T {
 
 type Subject = TeacherScope['subject'];
 
-const CLASS10_SUBJECTS: Subject[] = ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'];
-const CLASS12_SUBJECTS: Subject[] = ['Physics', 'Chemistry', 'Biology', 'Math', 'Accountancy', 'Business Studies', 'Economics', 'English Core'];
+const CLASS10_SUBJECTS: Subject[] = ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core', 'Social Science'];
+const CLASS12_SUBJECTS: Subject[] = ['Physics', 'Chemistry', 'Biology', 'Math', 'Accountancy', 'Business Studies', 'Economics', 'English Core', 'Social Science'];
 
 export default function AdminTeachersPage() {
   const router = useRouter();
@@ -25,7 +25,7 @@ export default function AdminTeachersPage() {
   const [error, setError] = useState('');
   const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [pinReset, setPinReset] = useState<Record<string, string>>({});
+  const [passwordResettingFor, setPasswordResettingFor] = useState<string | null>(null);
   const [scopeDrafts, setScopeDrafts] = useState<Record<string, { classLevel: 10 | 12; subject: Subject; section: string }>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -35,7 +35,6 @@ export default function AdminTeachersPage() {
     name: '',
     email: '',
     phone: '',
-    pin: '',
     password: '',
     classLevel: 12 as 10 | 12,
     subject: 'Physics' as Subject,
@@ -85,7 +84,6 @@ export default function AdminTeachersPage() {
           name: newTeacher.name,
           email: newTeacher.email,
           phone: newTeacher.phone || undefined,
-          pin: newTeacher.pin || undefined,
           password: newTeacher.password || undefined,
           scopes: pendingScopes,
           sendCredentialEmail: true,
@@ -110,7 +108,6 @@ export default function AdminTeachersPage() {
         name: '',
         email: '',
         phone: '',
-        pin: '',
         password: '',
         classLevel: 12,
         subject: 'Physics',
@@ -124,20 +121,30 @@ export default function AdminTeachersPage() {
     }
   }
 
-  async function resetPin(teacherId: string) {
-    const newPin = pinReset[teacherId]?.trim();
-    if (!newPin) return;
-    const response = await fetch(`/api/admin/teachers/${teacherId}/reset-pin`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: newPin }),
-    });
-    if (!response.ok) {
-      setError('Failed to reset PIN.');
-      return;
+  async function resetPassword(teacherId: string) {
+    setPasswordResettingFor(teacherId);
+    setError('');
+    try {
+      const response = await fetch(`/api/admin/teachers/${teacherId}/reset-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ generateRandom: true }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(body?.message ?? 'Failed to reset password.');
+        return;
+      }
+      const data = unwrap<Record<string, unknown>>(body);
+      const credentials = (data?.issuedCredentials || {}) as Record<string, unknown>;
+      setIssued({
+        loginIdentifier: String(credentials.loginIdentifier || ''),
+        password: String(credentials.password || ''),
+      });
+      await load();
+    } finally {
+      setPasswordResettingFor(null);
     }
-    setPinReset((prev) => ({ ...prev, [teacherId]: '' }));
-    await load();
   }
 
   async function addScope(teacherId: string) {
@@ -296,11 +303,15 @@ export default function AdminTeachersPage() {
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold text-gray-500 mb-2">Reset PIN</p>
+                    <p className="text-xs font-semibold text-gray-500 mb-2">Reset Password</p>
                     <div className="flex gap-2">
-                      <input type="password" placeholder="New PIN" value={pinReset[teacher.id] ?? ''} onChange={(e) => setPinReset((p) => ({ ...p, [teacher.id]: e.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs w-36" />
-                      <button onClick={() => resetPin(teacher.id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-600 text-white text-xs font-semibold hover:bg-gray-700">
-                        <KeyRound className="w-3 h-3" /> Reset
+                      <button
+                        onClick={() => void resetPassword(teacher.id)}
+                        disabled={passwordResettingFor === teacher.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-600 text-white text-xs font-semibold hover:bg-gray-700 disabled:opacity-60"
+                      >
+                        <KeyRound className="w-3 h-3" />
+                        {passwordResettingFor === teacher.id ? 'Resetting...' : 'Generate Temp Password'}
                       </button>
                     </div>
                   </div>

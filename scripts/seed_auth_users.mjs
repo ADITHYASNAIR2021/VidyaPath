@@ -67,6 +67,34 @@ function cfg() {
 
 // ── Supabase Admin Auth API ──────────────────────────────────────────────────
 
+function publicApiKey() {
+  return (
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    ''
+  ).trim();
+}
+
+async function signInAuthUserByPassword(email, password) {
+  const c = cfg();
+  const apiKey = publicApiKey();
+  if (!apiKey) return null;
+  const response = await fetch(`${c.url}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: {
+      apikey: apiKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => null);
+  const user = data?.user;
+  return user?.id ? user : null;
+}
+
 async function createAuthUser({ email, password, userMetadata = {} }) {
   const c = cfg();
   const response = await fetch(`${c.url}/auth/v1/admin/users`, {
@@ -86,7 +114,9 @@ async function createAuthUser({ email, password, userMetadata = {} }) {
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     // If user already exists, look it up
-    if (response.status === 422 && JSON.stringify(data).toLowerCase().includes('already')) {
+    if (response.status === 422 && JSON.stringify(data).toLowerCase().includes('email')) {
+      const signedIn = await signInAuthUserByPassword(email, password).catch(() => null);
+      if (signedIn?.id) return signedIn;
       return await getAuthUserByEmail(email);
     }
     throw new Error(`createAuthUser(${email}): ${response.status} ${JSON.stringify(data)}`);
@@ -96,18 +126,33 @@ async function createAuthUser({ email, password, userMetadata = {} }) {
 
 async function getAuthUserByEmail(email) {
   const c = cfg();
-  const response = await fetch(`${c.url}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
-    headers: {
-      apikey: c.key,
-      Authorization: `Bearer ${c.key}`,
-    },
-  });
-  const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(`getAuthUserByEmail(${email}): ${response.status}`);
-  const users = data?.users ?? (Array.isArray(data) ? data : []);
-  const found = users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-  if (!found) throw new Error(`Auth user ${email} not found after creation conflict.`);
-  return found;
+  const needle = String(email || '').trim().toLowerCase();
+  // This project's auth admin endpoint is unreliable for per_page > 1.
+  const perPage = 1;
+  const maxPages = 1000;
+
+  for (let page = 1; page <= maxPages; page++) {
+    const response = await fetch(`${c.url}/auth/v1/admin/users?page=${page}&per_page=${perPage}`, {
+      headers: {
+        apikey: c.key,
+        Authorization: `Bearer ${c.key}`,
+      },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        `getAuthUserByEmail(${email}): ${response.status} ${typeof data === 'string' ? data : JSON.stringify(data)}`,
+      );
+    }
+
+    const users = Array.isArray(data?.users) ? data.users : [];
+    const found = users.find((u) => String(u?.email || '').toLowerCase() === needle);
+    if (found) return found;
+
+    if (users.length < perPage) break;
+  }
+
+  throw new Error(`Auth user ${email} not found after creation conflict.`);
 }
 
 async function updateAuthUserPassword(userId, password) {
@@ -174,16 +219,26 @@ function buildProvisionedAuthEmail(role, schoolToken, userToken, profileId) {
 
 // ── Definitions ───────────────────────────────────────────────────────────────
 
-const APS_SCHOOL_ID   = 'c0aps111-aps1-4ap1-8ap1-aps111111111';
-const ADMIN_PROFILE_ID = 'c0apsa01-aps1-4ap1-8ap1-apsadm0001';
-const TEACHER_PROFILE_ID = 'c0apst01-aps1-4ap1-8ap1-apstch0001';
+const APS_SCHOOL_ID   = 'ca0a5111-1111-4111-8111-111111111111';
+const ADMIN_PROFILE_ID = 'ca0a5a01-a001-4a01-8a01-a00100000001';
+const TEACHER_PROFILE_ID = 'ca0a5b01-b001-4b01-8b01-b00100000001';
+const APS_SCOPE_ID = 'ca0a5333-3333-4333-8333-333333333333';
+const ADMIN_ROLE_ID = 'ca0a5d01-d001-4d01-8d01-d00100000001';
+const TEACHER_ROLE_ID = 'ca0a5d02-d002-4d02-8d02-d00200000002';
 
 const STUDENTS = [
-  { id: 'c0apss01-aps1-4ap1-8ap1-apsstud0001', rollCode: 'APS.STU.10.A.2600001', name: 'Arjun Pillai',   classLevel: 10, section: 'A', rollNo: '001' },
-  { id: 'c0apss02-aps1-4ap1-8ap1-apsstud0002', rollCode: 'APS.STU.10.B.2600500', name: 'Meena Krishnan', classLevel: 10, section: 'B', rollNo: '500' },
-  { id: 'c0apss03-aps1-4ap1-8ap1-apsstud0003', rollCode: 'APS.STU.12.A.2600100', name: 'Rohan Varma',    classLevel: 12, section: 'A', rollNo: '100' },
-  { id: 'c0apss04-aps1-4ap1-8ap1-apsstud0004', rollCode: 'APS.STU.12.B.2600500', name: 'Priya Suresh',   classLevel: 12, section: 'B', rollNo: '500' },
+  { id: 'ca0a5c01-c001-4c01-8c01-c00100000001', rollCode: 'APS.STU.10.A.2600001', name: 'Arjun Pillai',   classLevel: 10, section: 'A', rollNo: '001' },
+  { id: 'ca0a5c02-c002-4c02-8c02-c00200000002', rollCode: 'APS.STU.10.B.2600500', name: 'Meena Krishnan', classLevel: 10, section: 'B', rollNo: '500' },
+  { id: 'ca0a5c03-c003-4c03-8c03-c00300000003', rollCode: 'APS.STU.12.A.2600100', name: 'Rohan Varma',    classLevel: 12, section: 'A', rollNo: '100' },
+  { id: 'ca0a5c04-c004-4c04-8c04-c00400000004', rollCode: 'APS.STU.12.B.2600500', name: 'Priya Suresh',   classLevel: 12, section: 'B', rollNo: '500' },
 ];
+
+const STUDENT_ROLE_IDS = {
+  'ca0a5c01-c001-4c01-8c01-c00100000001': 'ca0a5d11-d011-4d11-8d11-d01100000011',
+  'ca0a5c02-c002-4c02-8c02-c00200000002': 'ca0a5d12-d012-4d12-8d12-d01200000012',
+  'ca0a5c03-c003-4c03-8c03-c00300000003': 'ca0a5d13-d013-4d13-8d13-d01300000013',
+  'ca0a5c04-c004-4c04-8c04-c00400000004': 'ca0a5d14-d014-4d14-8d14-d01400000014',
+};
 
 function studentInitialPassword(rollCode) {
   // mirrors buildInitialStudentPasswordFromLoginId: lowercase, strip non-alphanumeric
@@ -235,13 +290,13 @@ async function main() {
   });
 
   await upsertRow('platform_user_roles', {
-    id: randomUUID(),
+    id: ADMIN_ROLE_ID,
     auth_user_id: adminAuthUser.id,
     role: 'admin',
     school_id: APS_SCHOOL_ID,
     profile_id: ADMIN_PROFILE_ID,
     is_active: true,
-  }, 'auth_user_id,role,school_id');
+  });
 
   console.log('  ✓ admin profile + role ready');
   console.log(`  Login: identifier=${adminEmail}  password=${adminPassword}`);
@@ -273,23 +328,23 @@ async function main() {
   });
 
   await upsertRow('teacher_scopes', {
-    id: randomUUID(),
+    id: APS_SCOPE_ID,
     school_id: APS_SCHOOL_ID,
     teacher_id: TEACHER_PROFILE_ID,
     class_level: 10,
     subject: 'Physics',
     section: null,
     is_active: true,
-  }, 'teacher_id,class_level,subject,school_id');
+  });
 
   await upsertRow('platform_user_roles', {
-    id: randomUUID(),
+    id: TEACHER_ROLE_ID,
     auth_user_id: teacherAuthUser.id,
     role: 'teacher',
     school_id: APS_SCHOOL_ID,
     profile_id: TEACHER_PROFILE_ID,
     is_active: true,
-  }, 'auth_user_id,role,school_id');
+  });
 
   console.log('  ✓ teacher profile + scope + role ready');
   console.log(`  Login: identifier=${teacherEmail}  password=${teacherInitialPassword}`);
@@ -331,13 +386,13 @@ async function main() {
     });
 
     await upsertRow('platform_user_roles', {
-      id: randomUUID(),
+      id: STUDENT_ROLE_IDS[student.id] || randomUUID(),
       auth_user_id: authUser.id,
       role: 'student',
       school_id: APS_SCHOOL_ID,
       profile_id: student.id,
       is_active: true,
-    }, 'auth_user_id,role,school_id');
+    });
 
     console.log(`  ✓ ${student.rollCode} → password: ${initPw}`);
     console.log(`    Login: rollCode=${student.rollCode}  password=${initPw}`);

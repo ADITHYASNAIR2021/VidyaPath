@@ -27,14 +27,10 @@ export default function AdminStudentsPage() {
     rollNo: '',
     batch: '',
     classLevel: 12 as 10 | 12,
-    stream: 'pcm' as 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary',
+    stream: 'pcm' as '' | 'pcm' | 'pcb' | 'commerce',
     section: '',
-    pin: '',
   });
-
-  const [resetPinFor, setResetPinFor] = useState<string | null>(null);
-  const [newPin, setNewPin] = useState('');
-  const [pinSaving, setPinSaving] = useState(false);
+  const [passwordResettingFor, setPasswordResettingFor] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -67,10 +63,14 @@ export default function AdminStudentsPage() {
     setCreating(true);
     setError('');
     try {
+      const payload = {
+        ...newStudent,
+        stream: newStudent.stream || undefined,
+      };
       const response = await fetch('/api/admin/students', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newStudent),
+        body: JSON.stringify(payload),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
@@ -91,7 +91,6 @@ export default function AdminStudentsPage() {
         classLevel: 12,
         stream: 'pcm',
         section: '',
-        pin: '',
       });
       await load();
     } catch {
@@ -101,28 +100,33 @@ export default function AdminStudentsPage() {
     }
   }
 
-  async function savePin(studentId: string) {
-    if (!newPin.trim() || !/^\d{4,8}$/.test(newPin)) {
-      setError('PIN must be 4-8 digits.');
-      return;
-    }
-    setPinSaving(true);
+  function generateTempPassword(length = 12): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
+    const random = crypto.getRandomValues(new Uint32Array(length));
+    return Array.from(random).map((value) => chars[value % chars.length]).join('');
+  }
+
+  async function resetPassword(studentId: string, loginIdentifier: string) {
+    setPasswordResettingFor(studentId);
     setError('');
     try {
+      const generatedPassword = generateTempPassword();
       const response = await fetch(`/api/admin/students/${studentId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: newPin }),
+        body: JSON.stringify({ password: generatedPassword }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
-        setError(body?.message ?? 'Failed to reset PIN.');
+        setError(body?.message ?? 'Failed to reset password.');
         return;
       }
-      setResetPinFor(null);
-      setNewPin('');
+      setIssued({
+        loginIdentifier,
+        password: generatedPassword,
+      });
     } finally {
-      setPinSaving(false);
+      setPasswordResettingFor(null);
     }
   }
 
@@ -167,7 +171,6 @@ export default function AdminStudentsPage() {
             <input value={newStudent.name} onChange={(e) => setNewStudent((p) => ({ ...p, name: e.target.value }))} placeholder="Full name" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             <input value="" disabled placeholder="Login ID auto-generated" className="rounded-xl border border-gray-200 bg-gray-100 px-3 py-2 text-sm text-gray-500" />
             <input value={newStudent.rollNo} onChange={(e) => setNewStudent((p) => ({ ...p, rollNo: e.target.value }))} placeholder="Roll number (optional)" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
-            <input type="password" value={newStudent.pin} onChange={(e) => setNewStudent((p) => ({ ...p, pin: e.target.value }))} placeholder="PIN (optional)" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             <select
               value={newStudent.classLevel}
               onChange={(e) => {
@@ -175,7 +178,7 @@ export default function AdminStudentsPage() {
                 setNewStudent((p) => ({
                   ...p,
                   classLevel,
-                  stream: classLevel === 10 ? 'foundation' : (p.stream === 'foundation' ? 'pcm' : p.stream),
+                  stream: classLevel === 10 ? '' : (p.stream || 'pcm'),
                 }));
               }}
               className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
@@ -189,19 +192,19 @@ export default function AdminStudentsPage() {
                 onChange={(e) =>
                   setNewStudent((p) => ({
                     ...p,
-                    stream: e.target.value as 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary',
+                    stream: e.target.value as '' | 'pcm' | 'pcb' | 'commerce',
                   }))
                 }
                 className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
               >
+                <option value="">Stream: Unspecified</option>
                 <option value="pcm">Stream: PCM</option>
                 <option value="pcb">Stream: PCB</option>
                 <option value="commerce">Stream: Commerce</option>
-                <option value="interdisciplinary">Stream: Interdisciplinary</option>
               </select>
             ) : (
               <input
-                value="Foundation"
+                value="No stream (Class 10)"
                 disabled
                 className="rounded-xl border border-gray-200 bg-gray-100 px-3 py-2 text-sm text-gray-500"
               />
@@ -256,27 +259,13 @@ export default function AdminStudentsPage() {
                   <td className="px-4 py-3 text-sm text-gray-500 hidden md:table-cell">Class {student.classLevel}{student.section ? ` ${student.section}` : ''}</td>
                   <td className="px-4 py-3 text-sm text-gray-500 hidden lg:table-cell">{student.batch || '-'}</td>
                   <td className="px-4 py-3 text-right">
-                    {resetPinFor === student.id ? (
-                      <div className="inline-flex items-center gap-2">
-                        <input
-                          type="password"
-                          value={newPin}
-                          onChange={(e) => setNewPin(e.target.value)}
-                          placeholder="New PIN"
-                          className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs w-24"
-                        />
-                        <button onClick={() => void savePin(student.id)} disabled={pinSaving} className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700">
-                          Save
-                        </button>
-                        <button onClick={() => { setResetPinFor(null); setNewPin(''); }} className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-medium hover:bg-gray-50">
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setResetPinFor(student.id)} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50">
-                        <KeyRound className="w-3 h-3" /> Reset PIN
-                      </button>
-                    )}
+                    <button
+                      onClick={() => void resetPassword(student.id, student.rollCode)}
+                      disabled={passwordResettingFor === student.id}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      <KeyRound className="w-3 h-3" /> {passwordResettingFor === student.id ? 'Resetting...' : 'Reset Password'}
+                    </button>
                   </td>
                 </tr>
               ))}

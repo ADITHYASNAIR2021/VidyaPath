@@ -1,18 +1,21 @@
 import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { normalizeAcademicStream } from '@/lib/academic-taxonomy';
-import { isValidPin } from '@/lib/auth/pin';
 import {
-  buildInitialStudentPasswordFromLoginId,
-  generateLegacyPin,
+  generateStrongPassword,
+  validatePasswordPolicy,
 } from '@/lib/auth/password-policy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { importStudentsSchema } from '@/lib/schemas/teacher-roster';
 import { getClassSectionById, isTeacherClassTeacherForSection } from '@/lib/school-management-db';
+import { isSubjectInCatalog } from '@/lib/subject-catalog-db';
 import { createStudent } from '@/lib/teacher-admin-db';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { checkRateLimit, buildRateLimitKey } from '@/lib/security/rate-limit';
 
 export const dynamic = 'force-dynamic';
+const MAX_IMPORT_ROWS_TEACHER = 200;
+const MAX_IMPORT_ROWS_ADMIN_OVERRIDE = 1500;
 
 interface ImportRowRecord {
   [key: string]: unknown;
@@ -21,10 +24,6 @@ interface ImportRowRecord {
 function readString(value: unknown, max = 220): string {
   if (typeof value !== 'string') return '';
   return value.replace(/\s+/g, ' ').trim().slice(0, max);
-}
-
-function generatePin(seed: string): string {
-  return generateLegacyPin(seed, 6);
 }
 
 function parseRows(value: unknown): ImportRowRecord[] {
@@ -99,13 +98,65 @@ export async function POST(req: Request) {
       status: 400,
     });
   }
-  if (rows.length > 1500) {
+  if (rows.length > MAX_IMPORT_ROWS_ADMIN_OVERRIDE) {
     return errorJson({
       requestId,
       errorCode: 'import-rows-too-large',
-      message: 'Max 1500 rows per import request.',
+      message: `Max ${MAX_IMPORT_ROWS_ADMIN_OVERRIDE} rows per import request.`,
       status: 413,
     });
+  }
+  if (teacherSession && rows.length > MAX_IMPORT_ROWS_TEACHER) {
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-import-cap-exceeded',
+      message: `Teacher import is capped at ${MAX_IMPORT_ROWS_TEACHER} rows per request. Use admin emergency override for larger batches.`,
+      status: 403,
+    });
+  }
+
+  const schoolRateLimit = await checkRateLimit({
+    key: buildRateLimitKey('teacher:students-import:school', [classSection.schoolId]),
+    windowSeconds: 60,
+    maxRequests: 8,
+    blockSeconds: 180,
+    metadata: {
+      actorRole: teacherSession ? 'teacher' : 'admin',
+      schoolId: classSection.schoolId,
+      classSectionId,
+      emergencyOverride,
+    },
+  });
+  if (!schoolRateLimit.allowed) {
+    return errorJson({
+      requestId,
+      errorCode: 'rate-limit-exceeded',
+      message: 'Too many import attempts for this school. Please retry shortly.',
+      status: 429,
+      hint: `Retry after ${schoolRateLimit.retryAfterSeconds}s`,
+    });
+  }
+  if (teacherSession) {
+    const teacherRateLimit = await checkRateLimit({
+      key: buildRateLimitKey('teacher:students-import:teacher', [teacherSession.teacher.id]),
+      windowSeconds: 60,
+      maxRequests: 4,
+      blockSeconds: 180,
+      metadata: {
+        teacherId: teacherSession.teacher.id,
+        schoolId: classSection.schoolId,
+        classSectionId,
+      },
+    });
+    if (!teacherRateLimit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many import attempts for this teacher account. Please retry shortly.',
+        status: 429,
+        hint: `Retry after ${teacherRateLimit.retryAfterSeconds}s`,
+      });
+    }
   }
 
   const created: Array<Record<string, unknown>> = [];
@@ -117,14 +168,32 @@ export async function POST(req: Request) {
       const rollNo = readString(row.rollNo ?? row.roll_number ?? row.roll, 50).toUpperCase();
       const rollCode = readString(row.rollCode ?? row.roll_code, 80).toUpperCase();
       const stream = normalizeAcademicStream(row.stream ?? row.academicStream ?? row.track);
+      const subjects = readString(row.subjects, 500)
+        .split(/[,|;]/)
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
       if (!name) {
         throw new Error('Required student field missing: name.');
       }
-      if (classSection.classLevel === 12 && !stream) {
-        throw new Error('Class 12 student rows must include stream (pcm|pcb|commerce|interdisciplinary).');
+      if (classSection.classLevel === 10 && stream) {
+        throw new Error('Class 10 does not use stream.');
       }
-      const pinInput = readString(row.pin, 16);
-      const pin = pinInput && isValidPin(pinInput) ? pinInput : generatePin(rollNo || rollCode || name);
+      for (const subject of subjects) {
+        const allowed = await isSubjectInCatalog({
+          schoolId: classSection.schoolId,
+          classLevel: classSection.classLevel,
+          subject,
+        });
+        if (!allowed) {
+          throw new Error(`Unsupported subject for Class ${classSection.classLevel}: ${subject}.`);
+        }
+      }
+      const providedPassword = readString(row.password, 120);
+      if (providedPassword) {
+        const policy = validatePasswordPolicy(providedPassword);
+        if (!policy.ok) throw new Error(policy.message);
+      }
+      const issuedPassword = providedPassword || generateStrongPassword(12);
       const student = await createStudent({
         schoolId: classSection.schoolId,
         name,
@@ -134,7 +203,9 @@ export async function POST(req: Request) {
         stream,
         section: classSection.section,
         batch: classSection.batch,
-        pin,
+        password: issuedPassword,
+        subjects,
+        forcePasswordChangeOnFirstLogin: true,
       });
       created.push({
         rowIndex: index + 1,
@@ -146,8 +217,7 @@ export async function POST(req: Request) {
         issuedCredentials: {
           loginIdentifier: student.rollCode,
           alternateIdentifier: student.rollNo,
-          pin,
-          password: buildInitialStudentPasswordFromLoginId(student.rollCode),
+          password: issuedPassword,
         },
       });
     } catch (error) {
@@ -169,6 +239,7 @@ export async function POST(req: Request) {
     actorAuthUserId: adminSession?.authUserId,
     schoolId: classSection.schoolId,
     metadata: {
+      actorType: teacherSession ? 'teacher' : 'admin',
       classSectionId,
       classLevel: classSection.classLevel,
       section: classSection.section,

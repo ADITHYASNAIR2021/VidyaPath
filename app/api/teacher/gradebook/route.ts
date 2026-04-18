@@ -8,8 +8,19 @@ export async function GET(req: Request) {
   const requestId = getRequestId(req);
   const teacherSession = await getTeacherSessionFromRequestCookies();
   if (!teacherSession) return unauthorizedJson('Teacher session required.', requestId);
+  if (!teacherSession.teacher.schoolId) {
+    return errorJson({
+      requestId,
+      errorCode: 'teacher-school-missing',
+      message: 'Teacher school context is required.',
+      status: 403,
+    });
+  }
   try {
-    const gradebook = await listTeacherGradebook(teacherSession.teacher.id);
+    const gradebook = await listTeacherGradebook({
+      teacherId: teacherSession.teacher.id,
+      schoolId: teacherSession.teacher.schoolId,
+    });
     return dataJson({
       requestId,
       data: gradebook,
@@ -24,4 +35,3 @@ export async function GET(req: Request) {
     });
   }
 }
-

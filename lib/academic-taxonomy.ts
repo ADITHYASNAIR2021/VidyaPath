@@ -1,41 +1,55 @@
-export const CORE_SUBJECTS = ['Physics', 'Chemistry', 'Biology', 'Math'] as const;
+export const CLASS_10_SUBJECTS = [
+  'Physics',
+  'Chemistry',
+  'Biology',
+  'Math',
+  'English Core',
+  'Social Science',
+] as const;
+export const PCM_SUBJECTS = ['Physics', 'Chemistry', 'Math', 'English Core'] as const;
+export const PCB_SUBJECTS = ['Physics', 'Chemistry', 'Biology', 'English Core'] as const;
 export const COMMERCE_SUBJECTS = ['Accountancy', 'Business Studies', 'Economics', 'English Core'] as const;
-export const SUPPORTED_SUBJECTS = [...CORE_SUBJECTS, ...COMMERCE_SUBJECTS] as const;
+export const CLASS_12_SUBJECTS = [
+  'Physics',
+  'Chemistry',
+  'Biology',
+  'Math',
+  'Accountancy',
+  'Business Studies',
+  'Economics',
+  'English Core',
+  'Social Science',
+] as const;
+export const SUPPORTED_SUBJECTS = [
+  'Physics',
+  'Chemistry',
+  'Biology',
+  'Math',
+  'English Core',
+  'Social Science',
+  'Accountancy',
+  'Business Studies',
+  'Economics',
+] as const;
 
-export type CoreSubject = (typeof CORE_SUBJECTS)[number];
-export type CommerceSubject = (typeof COMMERCE_SUBJECTS)[number];
 export type SupportedSubject = (typeof SUPPORTED_SUBJECTS)[number];
 
 export type HelperClassLevel = 10 | 12;
-export type AcademicStream = 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary';
-export type SeniorSecondaryStream = Exclude<AcademicStream, 'foundation'>;
+export type AcademicStream = 'pcm' | 'pcb' | 'commerce';
+export type SeniorSecondaryStream = AcademicStream;
 
-export const CLASS_10_STREAM: AcademicStream = 'foundation';
-export const CLASS_12_STREAMS: SeniorSecondaryStream[] = ['pcm', 'pcb', 'commerce', 'interdisciplinary'];
+export const CLASS_12_STREAMS: SeniorSecondaryStream[] = ['pcm', 'pcb', 'commerce'];
 
 export const STREAM_LABELS: Record<AcademicStream, string> = {
-  foundation: 'Foundation',
   pcm: 'PCM',
   pcb: 'PCB',
   commerce: 'Commerce',
-  interdisciplinary: 'Interdisciplinary',
 };
 
 const STREAM_SUBJECT_MAP: Record<AcademicStream, SupportedSubject[]> = {
-  foundation: ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'],
-  pcm: ['Physics', 'Chemistry', 'Math', 'English Core'],
-  pcb: ['Physics', 'Chemistry', 'Biology', 'English Core'],
-  commerce: ['Accountancy', 'Business Studies', 'Economics', 'English Core'],
-  interdisciplinary: [
-    'Physics',
-    'Chemistry',
-    'Biology',
-    'Math',
-    'Accountancy',
-    'Business Studies',
-    'Economics',
-    'English Core',
-  ],
+  pcm: [...PCM_SUBJECTS],
+  pcb: [...PCB_SUBJECTS],
+  commerce: [...COMMERCE_SUBJECTS],
 };
 
 export interface ClassBranchConfig {
@@ -50,22 +64,13 @@ export const CLASS_BRANCH_CONFIG: Record<HelperClassLevel, ClassBranchConfig> = 
     classLevel: 10,
     title: 'Class 10 Helper',
     description: 'Board-first chapter practice with chapter intelligence, PYQs, and revision support.',
-    subjects: ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'],
+    subjects: [...CLASS_10_SUBJECTS],
   },
   12: {
     classLevel: 12,
     title: 'Class 12 Helper',
     description: 'Board + entrance aligned support across science, math, and commerce-ready subjects.',
-    subjects: [
-      'Physics',
-      'Chemistry',
-      'Biology',
-      'Math',
-      'Accountancy',
-      'Business Studies',
-      'Economics',
-      'English Core',
-    ],
+    subjects: [...CLASS_12_SUBJECTS],
   },
 };
 
@@ -74,7 +79,7 @@ export function isSupportedSubject(value: string): value is SupportedSubject {
 }
 
 export function isAcademicStream(value: string): value is AcademicStream {
-  return value === 'foundation' || value === 'pcm' || value === 'pcb' || value === 'commerce' || value === 'interdisciplinary';
+  return value === 'pcm' || value === 'pcb' || value === 'commerce';
 }
 
 export function normalizeAcademicStream(value: unknown): AcademicStream | undefined {
@@ -85,22 +90,23 @@ export function normalizeAcademicStream(value: unknown): AcademicStream | undefi
 
   // Legacy aliases from older sessions / payloads.
   if (normalized === 'science') return 'pcm';
-  if (normalized === 'humanities' || normalized === 'arts') return 'interdisciplinary';
-  if (normalized === 'class10' || normalized === 'class-10') return 'foundation';
+  if (normalized === 'class10' || normalized === 'class-10') return undefined;
+  if (normalized === 'foundation' || normalized === 'interdisciplinary') return undefined;
   return undefined;
 }
 
-export function getDefaultAcademicStream(classLevel: HelperClassLevel): AcademicStream {
-  return classLevel === 10 ? 'foundation' : 'pcm';
+export function getDefaultAcademicStream(classLevel: HelperClassLevel): AcademicStream | undefined {
+  return classLevel === 12 ? 'pcm' : undefined;
 }
 
 export function enforceAcademicStreamForClass(
   classLevel: HelperClassLevel,
   stream?: AcademicStream
-): AcademicStream {
-  if (classLevel === 10) return 'foundation';
-  if (!stream || stream === 'foundation') {
-    throw new Error('Class 12 stream is required: pcm, pcb, commerce, or interdisciplinary.');
+): AcademicStream | undefined {
+  if (classLevel === 10) return undefined;
+  if (!stream) return undefined;
+  if (!isAcademicStream(stream)) {
+    throw new Error('Class 12 stream must be one of: pcm, pcb, commerce.');
   }
   return stream;
 }
@@ -110,10 +116,10 @@ export function getSubjectsForAcademicTrack(
   stream?: AcademicStream
 ): SupportedSubject[] {
   if (classLevel === 10) {
-    return [...STREAM_SUBJECT_MAP.foundation];
+    return [...CLASS_10_SUBJECTS];
   }
-  if (!stream || stream === 'foundation') {
-    return [...STREAM_SUBJECT_MAP.interdisciplinary];
+  if (!stream) {
+    return [...CLASS_12_SUBJECTS];
   }
   return [...STREAM_SUBJECT_MAP[stream]];
 }

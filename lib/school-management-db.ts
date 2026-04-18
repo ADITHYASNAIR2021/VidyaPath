@@ -506,6 +506,75 @@ export async function setStudentSubjectEnrollmentsForClassSection(input: {
   return { students: students.length, subjects, activated, deactivated };
 }
 
+export async function setStudentSubjectEnrollmentsForStudent(input: {
+  schoolId: string;
+  studentId: string;
+  classLevel: 10 | 12;
+  section?: string;
+  subjects: string[];
+  classSectionId?: string;
+  assignedByTeacherId?: string | null;
+  replaceExisting?: boolean;
+}): Promise<{ subjects: SupportedSubject[]; activated: number; deactivated: number }> {
+  if (!isSupabaseServiceConfigured()) {
+    throw new Error('Supabase is not configured.');
+  }
+  const schoolId = sanitizeId(input.schoolId);
+  const studentId = sanitizeId(input.studentId);
+  if (!schoolId || !studentId) throw new Error('schoolId and studentId are required.');
+  const subjects = [...new Set(input.subjects.map((subject) => sanitizeText(subject, 60)).filter(isSupportedSubject))];
+  if (subjects.length === 0) throw new Error('At least one valid subject is required.');
+
+  const existing = await supabaseSelect<StudentSubjectEnrollmentRow>(TABLES.studentSubjectEnrollments, {
+    select: '*',
+    filters: [{ column: 'school_id', value: schoolId }, { column: 'student_id', value: studentId }],
+    limit: 2000,
+  }).catch(() => []);
+
+  let activated = 0;
+  let deactivated = 0;
+  for (const subject of subjects) {
+    const row = existing.find((entry) => entry.subject === subject);
+    if (row) {
+      if (row.status !== 'active') {
+        const rows = await supabaseUpdate<StudentSubjectEnrollmentRow>(
+          TABLES.studentSubjectEnrollments,
+          { status: 'active' },
+          [{ column: 'id', value: row.id }]
+        ).catch(() => []);
+        if (rows[0]) activated += 1;
+      }
+      continue;
+    }
+    const rows = await supabaseInsert<StudentSubjectEnrollmentRow>(TABLES.studentSubjectEnrollments, {
+      id: randomUUID(),
+      school_id: schoolId,
+      student_id: studentId,
+      class_section_id: input.classSectionId ? sanitizeId(input.classSectionId) : null,
+      subject,
+      assigned_by_teacher_id: input.assignedByTeacherId ? sanitizeId(input.assignedByTeacherId) : null,
+      status: 'active',
+    });
+    if (rows[0]) activated += 1;
+  }
+
+  if (input.replaceExisting === true) {
+    const selected = new Set(subjects);
+    for (const row of existing) {
+      if (row.status !== 'active') continue;
+      if (selected.has(row.subject)) continue;
+      const rows = await supabaseUpdate<StudentSubjectEnrollmentRow>(
+        TABLES.studentSubjectEnrollments,
+        { status: 'inactive' },
+        [{ column: 'id', value: row.id }]
+      ).catch(() => []);
+      if (rows[0]) deactivated += 1;
+    }
+  }
+
+  return { subjects, activated, deactivated };
+}
+
 export async function ensureDefaultEnrollmentsForStudent(input: {
   schoolId: string;
   studentId: string;
@@ -518,9 +587,7 @@ export async function ensureDefaultEnrollmentsForStudent(input: {
   const schoolId = sanitizeId(input.schoolId);
   const studentId = sanitizeId(input.studentId);
   if (!schoolId || !studentId) return;
-  const stream = input.classLevel === 10
-    ? 'foundation'
-    : enforceAcademicStreamForClass(input.classLevel, normalizeAcademicStream(input.stream));
+  const stream = enforceAcademicStreamForClass(input.classLevel, normalizeAcademicStream(input.stream));
   const defaults = getDefaultSubjectsForClass(input.classLevel, stream);
   const defaultsSet = new Set(defaults);
   const existing = await supabaseSelect<StudentSubjectEnrollmentRow>(TABLES.studentSubjectEnrollments, {
@@ -591,10 +658,10 @@ export function deriveStudentStream(
   subjects: SupportedSubject[],
   classLevel: 10 | 12,
   explicitStream?: AcademicStream
-): AcademicStream {
-  if (classLevel === 10) return 'foundation';
+): AcademicStream | undefined {
+  if (classLevel === 10) return undefined;
   const normalizedExplicit = normalizeAcademicStream(explicitStream);
-  if (normalizedExplicit && normalizedExplicit !== 'foundation') return normalizedExplicit;
+  if (normalizedExplicit) return normalizedExplicit;
 
   const set = new Set(subjects);
   const hasPhysics = set.has('Physics');
@@ -607,11 +674,11 @@ export function deriveStudentStream(
   if (hasCommerce && !(hasMath || hasBiology || hasCoreScience)) return 'commerce';
   if (hasCoreScience && hasMath && !hasBiology && !hasCommerce) return 'pcm';
   if (hasCoreScience && hasBiology && !hasMath && !hasCommerce) return 'pcb';
-  if (hasCoreScience && hasMath && hasBiology && !hasCommerce) return 'interdisciplinary';
-  if (hasCommerce) return 'commerce';
+  if (hasCommerce && (hasMath || hasBiology || hasCoreScience)) return undefined;
+  if (hasCoreScience && hasMath && hasBiology) return undefined;
   if (hasCoreScience && hasMath) return 'pcm';
   if (hasCoreScience && hasBiology) return 'pcb';
-  return 'interdisciplinary';
+  return undefined;
 }
 
 export async function studentCanAccessSubject(input: {

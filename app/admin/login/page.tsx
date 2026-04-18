@@ -1,161 +1,23 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
+function firstParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] || '';
+  return value || '';
+}
 
-export default function AdminLoginPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const nextPath = searchParams.get('next')?.trim() || '/admin';
-  const bootstrapKey = searchParams.get('key')?.trim() || '';
-  const reason = searchParams.get('reason')?.trim() || '';
-
-  const [key, setKey] = useState(bootstrapKey);
-  const [schoolCode, setSchoolCode] = useState('');
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showBootstrapKey, setShowBootstrapKey] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  async function login() {
-    setLoading(true);
-    setError('');
-    try {
-      const candidateKey = key.trim() || bootstrapKey;
-      const hasCredentialLogin = identifier.trim().length > 0 && password.trim().length > 0;
-      if (!hasCredentialLogin && !candidateKey) {
-        setError('Enter admin credentials or bootstrap key.');
-        return;
-      }
-      const response = await fetch('/api/admin/session/bootstrap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(
-          hasCredentialLogin
-            ? {
-                schoolCode: schoolCode.trim() || undefined,
-                identifier: identifier.trim(),
-                password: password.trim(),
-              }
-            : { key: candidateKey }
-        ),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) {
-        setError(data?.message || data?.error || data?.hint || 'Invalid admin credentials.');
-        return;
-      }
-      const role = data?.role || data?.data?.role;
-      const redirectTo = role === 'developer' ? '/developer' : nextPath;
-      router.replace(redirectTo);
-    } catch {
-      setError('Failed to login.');
-    } finally {
-      setLoading(false);
+export default function AdminLoginRedirectPage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
+  const params = new URLSearchParams();
+  if (searchParams) {
+    for (const [key, raw] of Object.entries(searchParams)) {
+      const value = firstParam(raw).trim();
+      if (value) params.set(key, value);
     }
   }
-
-  return (
-    <div className="min-h-screen bg-[#FDFAF6] px-4 py-14">
-      <div className="max-w-md mx-auto bg-white border border-[#E8E4DC] rounded-2xl shadow-sm p-6">
-        <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
-          <ShieldCheck className="w-5 h-5 text-indigo-600" />
-          Admin Access
-        </h1>
-        <p className="text-sm text-[#5F5A73] mt-2">Sign in with school admin credentials, or use bootstrap key for emergency access.</p>
-        {reason === 'auth-required' && (
-          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
-            Admin login is required to access that page.
-          </p>
-        )}
-        {reason === 'developer-required' && (
-          <p className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-800">
-            Developer login is at{' '}
-            <a href="/developer/login" className="font-semibold underline">
-              /developer/login
-            </a>
-            .
-          </p>
-        )}
-        <input
-          value={schoolCode}
-          onChange={(event) => setSchoolCode(event.target.value)}
-          placeholder="School code (e.g. BLR)"
-          className="w-full mt-4 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
-        />
-        <input
-          value={identifier}
-          onChange={(event) => setIdentifier(event.target.value)}
-          placeholder="Admin email"
-          className="w-full mt-3 text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
-        />
-        <div className="relative mt-3">
-          <input
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Password"
-            type={showPassword ? 'text' : 'password'}
-            className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 pr-11"
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword((value) => !value)}
-            className="absolute inset-y-0 right-0 px-3 text-[#6A6580] hover:text-[#373347]"
-            aria-label={showPassword ? 'Hide password' : 'Show password'}
-          >
-            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-        <p className="mt-3 text-[11px] text-[#7A7490]">Or enter bootstrap key below (optional fallback).</p>
-        <div className="relative mt-4">
-          <input
-            value={key}
-            onChange={(event) => setKey(event.target.value)}
-            placeholder="Admin secret key"
-            type={showBootstrapKey ? 'text' : 'password'}
-            className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 pr-11"
-          />
-          <button
-            type="button"
-            onClick={() => setShowBootstrapKey((value) => !value)}
-            className="absolute inset-y-0 right-0 px-3 text-[#6A6580] hover:text-[#373347]"
-            aria-label={showBootstrapKey ? 'Hide bootstrap key' : 'Show bootstrap key'}
-          >
-            {showBootstrapKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-        <button
-          onClick={login}
-          disabled={loading}
-          className="w-full mt-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm px-4 py-2.5 rounded-xl disabled:opacity-50"
-        >
-          {loading ? 'Authorizing...' : 'Login'}
-        </button>
-        {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
-        <div className="mt-4 rounded-xl border border-[#E8E4DC] bg-[#F9F7F1] px-3 py-2.5 text-xs text-[#6A6A84]">
-          <p className="font-semibold text-[#4A4560]">Looking for developer access?</p>
-          <p className="mt-1">
-            Use the dedicated login at{' '}
-            <Link href="/developer/login" className="font-semibold text-indigo-700 hover:text-indigo-800">
-              /developer/login
-            </Link>
-            .
-          </p>
-          <Link href="/affiliate-your-school" className="mt-2 inline-flex font-semibold text-indigo-700 hover:text-indigo-800">
-            View affiliate request form
-          </Link>
-          <p className="mt-2">
-            <Link href="/" className="font-semibold text-indigo-700 hover:text-indigo-800">
-              Back to home
-            </Link>
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  if (!params.get('next')) params.set('next', '/admin');
+  params.set('portal', 'admin');
+  redirect(`/login?${params.toString()}`);
 }

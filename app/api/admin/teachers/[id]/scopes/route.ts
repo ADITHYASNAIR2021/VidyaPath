@@ -1,8 +1,8 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
-import { isSupportedSubject } from '@/lib/academic-taxonomy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { updateTeacherScopesSchema } from '@/lib/schemas/admin-management';
+import { isSubjectInCatalog } from '@/lib/subject-catalog-db';
 import { addTeacherScope, getTeacherById } from '@/lib/teacher/auth.db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -22,7 +22,7 @@ function parseScope(value: unknown): ScopeRequest | null {
   const classLevel = Number(body.classLevel);
   const subject = typeof body.subject === 'string' ? body.subject.trim() : '';
   const section = typeof body.section === 'string' ? body.section.trim() : undefined;
-  if ((classLevel !== 10 && classLevel !== 12) || !subject || !isSupportedSubject(subject)) return null;
+  if ((classLevel !== 10 && classLevel !== 12) || !subject) return null;
   return {
     classLevel: classLevel as 10 | 12,
     subject: subject as TeacherScope['subject'],
@@ -71,6 +71,19 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         errorCode: 'teacher-not-found',
         message: 'Teacher not found.',
         status: 404,
+      });
+    }
+    const allowed = await isSubjectInCatalog({
+      schoolId: teacher.schoolId,
+      classLevel: parsed.classLevel,
+      subject: parsed.subject,
+    });
+    if (!allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'unsupported-teacher-scope-subject',
+        message: `Unsupported scope subject for Class ${parsed.classLevel}: ${parsed.subject}.`,
+        status: 400,
       });
     }
     const scope = await addTeacherScope(teacherId, parsed);

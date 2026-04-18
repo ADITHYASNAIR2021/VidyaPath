@@ -12,7 +12,7 @@ import {
 import clsx from 'clsx';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { Subject } from '@/lib/data';
-import { STREAM_LABELS, type AcademicStream } from '@/lib/academic-taxonomy';
+import { STREAM_LABELS, getSubjectsForAcademicTrack, type AcademicStream } from '@/lib/academic-taxonomy';
 import { useProgressStore, useBookmarkStore } from '@/lib/store';
 import { getPaperStats } from '@/lib/papers';
 import { getPYQData } from '@/lib/pyq';
@@ -211,14 +211,23 @@ export default function DashboardPage() {
   const { studiedChapterIds } = useProgressStore();
   const { bookmarkedChapterIds } = useBookmarkStore();
   const eligibleChapters = useMemo(() => ALL_CHAPTERS.filter((c) => c.classLevel !== 11), []);
-  const enrolledSubjectSet = useMemo(() => {
+  const allowedSubjectSet = useMemo(() => {
     if (!studentSession) return null;
-    if (studentSession.enrolledSubjects.length === 0) return null;
-    return new Set<Subject>(studentSession.enrolledSubjects);
+    if (studentSession.enrolledSubjects.length > 0) {
+      return new Set<Subject>(studentSession.enrolledSubjects);
+    }
+    return new Set<Subject>(
+      getSubjectsForAcademicTrack(studentSession.classLevel, studentSession.stream) as Subject[]
+    );
   }, [studentSession]);
   const visibleChapters = useMemo(
-    () => eligibleChapters.filter((chapter) => !enrolledSubjectSet || enrolledSubjectSet.has(chapter.subject)),
-    [eligibleChapters, enrolledSubjectSet]
+    () =>
+      eligibleChapters.filter((chapter) => {
+        if (studentSession?.classLevel && chapter.classLevel !== studentSession.classLevel) return false;
+        if (allowedSubjectSet && !allowedSubjectSet.has(chapter.subject)) return false;
+        return true;
+      }),
+    [eligibleChapters, allowedSubjectSet, studentSession?.classLevel]
   );
   const chapterById = useMemo(() => new Map(visibleChapters.map((chapter) => [chapter.id, chapter])), [visibleChapters]);
 
@@ -235,8 +244,10 @@ export default function DashboardPage() {
       12: { studied: 0, total: 0 },
     };
     for (const ch of visibleChapters) {
-      result[ch.subject].total++;
-      if (studiedChapterIds.includes(ch.id)) result[ch.subject].studied++;
+      if (result[ch.subject]) {
+        result[ch.subject].total++;
+        if (studiedChapterIds.includes(ch.id)) result[ch.subject].studied++;
+      }
       if (classProgress[ch.classLevel]) {
         classProgress[ch.classLevel].total++;
         if (studiedChapterIds.includes(ch.id)) classProgress[ch.classLevel].studied++;
@@ -248,10 +259,10 @@ export default function DashboardPage() {
   const totalChapters = visibleChapters.length;
   const studiedCount = studiedChapterIds.filter((id) => chapterById.has(id)).length;
   const overallPct = totalChapters > 0 ? Math.round((studiedCount / totalChapters) * 100) : 0;
-  const dashboardStream = useMemo<AcademicStream>(() => {
-    if (!studentSession) return 'interdisciplinary';
+  const dashboardStream = useMemo<AcademicStream | undefined>(() => {
+    if (!studentSession) return undefined;
     if (studentSession.stream) return studentSession.stream;
-    if (studentSession.classLevel === 10) return 'foundation';
+    if (studentSession.classLevel === 10) return undefined;
     const subjectSet = new Set(teacherAssignments.map((item) => item.subject));
     const hasCommerce = ['Accountancy', 'Business Studies', 'Economics'].some((subject) => subjectSet.has(subject));
     const hasPhysics = subjectSet.has('Physics');
@@ -259,16 +270,16 @@ export default function DashboardPage() {
     const hasBiology = subjectSet.has('Biology');
     const hasMath = subjectSet.has('Math');
     const hasCoreScience = hasPhysics && hasChemistry;
-    if (hasCommerce && (hasCoreScience || hasBiology || hasMath)) return 'interdisciplinary';
+    if (hasCommerce && (hasCoreScience || hasBiology || hasMath)) return undefined;
     if (hasCommerce) return 'commerce';
     if (hasCoreScience && hasBiology && !hasMath) return 'pcb';
     if (hasCoreScience && hasMath && !hasBiology) return 'pcm';
-    if (hasCoreScience && hasBiology && hasMath) return 'interdisciplinary';
+    if (hasCoreScience && hasBiology && hasMath) return undefined;
     if (hasCoreScience && hasMath) return 'pcm';
     if (hasCoreScience && hasBiology) return 'pcb';
-    return 'interdisciplinary';
+    return undefined;
   }, [studentSession, teacherAssignments]);
-  const dashboardTrack = STREAM_LABELS[dashboardStream];
+  const dashboardTrack = dashboardStream ? STREAM_LABELS[dashboardStream] : 'General';
   const orderedSubjects = useMemo(() => {
     const allSubjects = Object.keys(SUBJECT_META) as Array<keyof typeof SUBJECT_META>;
     const visibleSet = new Set(visibleChapters.map((chapter) => chapter.subject));
@@ -290,10 +301,13 @@ export default function DashboardPage() {
     return [...new Set([...priority, ...allSubjects])].filter((subject) => visibleSet.has(subject));
   }, [dashboardStream, studentSession, visibleChapters]);
   const plannerClassLevel = useMemo<10 | 12>(() => {
+    if (studentSession?.classLevel === 10 || studentSession?.classLevel === 12) {
+      return studentSession.classLevel;
+    }
     const class10Weak = weakProfiles.filter((profile) => chapterById.get(profile.chapterId)?.classLevel === 10).length;
     const class12Weak = weakProfiles.filter((profile) => chapterById.get(profile.chapterId)?.classLevel === 12).length;
     return class10Weak > class12Weak ? 10 : 12;
-  }, [chapterById, weakProfiles]);
+  }, [chapterById, studentSession?.classLevel, weakProfiles]);
   const plannerWeakChapterIds = useMemo(
     () =>
       weakProfiles
@@ -728,8 +742,18 @@ export default function DashboardPage() {
                 Progress by Class
               </h2>
               <div className="space-y-5">
-                <ClassBar cls={10} studied={subjectProgress.byClass[10]?.studied ?? 0} total={subjectProgress.byClass[10]?.total ?? 0} />
-                <ClassBar cls={12} studied={subjectProgress.byClass[12]?.studied ?? 0} total={subjectProgress.byClass[12]?.total ?? 0} />
+                {studentSession?.classLevel ? (
+                  <ClassBar
+                    cls={studentSession.classLevel}
+                    studied={subjectProgress.byClass[studentSession.classLevel]?.studied ?? 0}
+                    total={subjectProgress.byClass[studentSession.classLevel]?.total ?? 0}
+                  />
+                ) : (
+                  <>
+                    <ClassBar cls={10} studied={subjectProgress.byClass[10]?.studied ?? 0} total={subjectProgress.byClass[10]?.total ?? 0} />
+                    <ClassBar cls={12} studied={subjectProgress.byClass[12]?.studied ?? 0} total={subjectProgress.byClass[12]?.total ?? 0} />
+                  </>
+                )}
               </div>
             </div>
 

@@ -9,7 +9,7 @@ export interface TeacherScope {
   id: string;
   teacherId: string;
   classLevel: 10 | 12;
-  subject: Subject;
+  subject: string;
   section?: TeacherSectionCode;
   isActive: boolean;
   createdAt: string;
@@ -420,7 +420,7 @@ export interface StudentSession {
   batch?: string;
   mustChangePassword?: boolean;
   stream?: AcademicStream;
-  enrolledSubjects?: Subject[];
+  enrolledSubjects?: string[];
 }
 
 export interface SheetsIntegrationSettings {

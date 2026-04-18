@@ -26,6 +26,7 @@ const TEACHER_NAV: NavItem[] = [
   { href: '/teacher/announcements', label: 'Announcements',  icon: Megaphone },
   { href: '/teacher/assignments',   label: 'Assignments',    icon: Package },
   { href: '/teacher/grading',       label: 'Grading Desk',   icon: PenSquare },
+  { href: '/teacher/my-class',       label: 'My Class',       icon: GraduationCap },
   { href: '/teacher/students',      label: 'Students',       icon: Users },
   { href: '/teacher/question-bank', label: 'Question Bank',  icon: HelpCircle },
   { href: '/teacher/ai-tools',         label: 'AI Tools',        icon: Wand2 },
@@ -92,7 +93,7 @@ const ROLE_CONFIG: Record<Role, {
     gradient: 'from-emerald-600 to-teal-600',
     ring: 'ring-emerald-400/30',
     logoutUrl: '/api/student/session/logout',
-    logoutRedirect: '/student/login?logout=1',
+    logoutRedirect: '/login?portal=student&logout=1',
   },
   teacher: {
     nav: TEACHER_NAV,
@@ -100,7 +101,7 @@ const ROLE_CONFIG: Record<Role, {
     gradient: 'from-amber-600 to-orange-600',
     ring: 'ring-amber-400/30',
     logoutUrl: '/api/teacher/session/logout',
-    logoutRedirect: '/teacher/login?logout=1',
+    logoutRedirect: '/login?portal=teacher&logout=1',
   },
   admin: {
     nav: ADMIN_NAV,
@@ -108,7 +109,7 @@ const ROLE_CONFIG: Record<Role, {
     gradient: 'from-indigo-600 to-indigo-700',
     ring: 'ring-indigo-400/30',
     logoutUrl: '/api/admin/session/logout',
-    logoutRedirect: '/admin/login?logout=1',
+    logoutRedirect: '/login?portal=admin&logout=1',
   },
   developer: {
     nav: DEVELOPER_NAV,
@@ -116,7 +117,7 @@ const ROLE_CONFIG: Record<Role, {
     gradient: 'from-violet-600 to-violet-700',
     ring: 'ring-violet-400/30',
     logoutUrl: '/api/developer/session/logout',
-    logoutRedirect: '/developer/login',
+    logoutRedirect: '/login?portal=developer',
   },
 };
 

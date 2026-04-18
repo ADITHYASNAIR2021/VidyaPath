@@ -30,12 +30,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       name: string;
       rollCode: string;
       rollNo: string;
-      batch: string;
-      classLevel: 10 | 12;
-      stream: 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary';
+    batch: string;
+    classLevel: 10 | 12;
+      stream: 'pcm' | 'pcb' | 'commerce';
       section?: string;
       status: 'active' | 'inactive';
-      pin: string;
+      password: string;
     }> = {};
     if (typeof body.name === 'string') updates.name = body.name;
     if (typeof body.rollCode === 'string') updates.rollCode = body.rollCode;
@@ -48,7 +48,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
     if (typeof body.section === 'string') updates.section = body.section;
     if (body.status === 'active' || body.status === 'inactive') updates.status = body.status;
-    if (typeof body.pin === 'string') updates.pin = body.pin;
+    if (typeof body.password === 'string') updates.password = body.password;
 
     const schoolId = adminSession.role === 'admin' ? adminSession.schoolId : undefined;
     const student = await updateStudent(params.id, updates, schoolId);

@@ -1,4 +1,5 @@
 import {
+  attachActiveRoleCookie,
   attachStudentSessionCookie,
   clearAllRoleSessionCookies,
   createStudentSessionToken,
@@ -22,8 +23,6 @@ import { recordAuditEvent } from '@/lib/security/audit';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { recordStudentActivity } from '@/lib/study-enhancements-db';
 import {
-  authenticateStudent,
-  authenticateStudentByRollNo,
   getStudentById,
   getStudentByRollCode,
 } from '@/lib/teacher-admin-db';
@@ -35,7 +34,7 @@ function buildSessionPayload(student: {
   name: string;
   rollCode: string;
   classLevel: 10 | 12;
-  stream?: 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary';
+  stream?: 'pcm' | 'pcb' | 'commerce';
   section?: string;
   schoolId?: string;
   batch?: string;
@@ -107,9 +106,8 @@ export async function POST(req: Request) {
     typeof body.rollCode === 'string'
       ? body.rollCode.trim().toUpperCase().replace(/[^A-Z0-9._-]/g, '').slice(0, 80)
       : '';
-  const pin = typeof body.pin === 'string' ? body.pin.trim().slice(0, 64) : '';
-  const password = typeof body.password === 'string' ? body.password.trim().slice(0, 128) : (pin || '');
-  const secret = password || pin;
+  const password = typeof body.password === 'string' ? body.password.trim().slice(0, 128) : '';
+  const secret = password;
   const normalizedRollNo = (rollNo || rollNoFromInput).trim().toUpperCase();
   const normalizedRollCode = (rollCode || rollCodeFromInput).trim().toUpperCase().replace(/[^A-Z0-9._-]/g, '').slice(0, 80);
   const identityToken = normalizedRollNo || normalizedRollCode || 'unknown';
@@ -158,7 +156,7 @@ export async function POST(req: Request) {
     studentName: string;
     rollCode: string;
     classLevel: 10 | 12;
-    stream?: 'foundation' | 'pcm' | 'pcb' | 'commerce' | 'interdisciplinary';
+    stream?: 'pcm' | 'pcb' | 'commerce';
     section?: string;
     schoolId?: string;
     batch?: string;
@@ -180,6 +178,7 @@ export async function POST(req: Request) {
     });
     clearSupabaseSessionCookies(response);
     clearAllRoleSessionCookies(response);
+    attachActiveRoleCookie(response, 'student');
     attachStudentSessionCookie(
       response,
       createStudentSessionToken({
@@ -261,61 +260,15 @@ export async function POST(req: Request) {
         });
       }
     }
-    const legacyByRoll = await authenticateStudentByRollNo({
-      rollNo: normalizedRollNo,
-      pin: secret,
-      classLevel: classLevel as 10 | 12,
-      section: section || undefined,
-      batch: batch || undefined,
-    });
-    if (legacyByRoll.ambiguous) {
-      return errorJson({
-        requestId,
-        errorCode: 'student-identity-ambiguous',
-        message: 'Multiple students matched this roll number. Include section/batch or ask admin to resolve duplicates.',
-        status: 409,
-      });
-    }
-    if (legacyByRoll.session) {
-      return await buildSuccessResponse({
-        ...legacyByRoll.session,
-        schoolId: undefined,
-        auth: 'legacy-roll',
-      });
-    }
     return errorJson({
       requestId,
-      errorCode: 'student-roster-not-found',
-      message: 'Student roster identity not found for this school/class/section.',
-      status: 404,
+      errorCode: 'student-password-login-not-provisioned',
+      message: 'Student password login is not provisioned for this roster identity. Ask admin to re-import roster with credentials.',
+      status: 403,
     });
   }
 
   if (normalizedRollNo) {
-    const legacyByRoll = await authenticateStudentByRollNo({
-      rollNo: normalizedRollNo,
-      pin: secret,
-      schoolId: undefined,
-      classLevel: classLevel === 10 || classLevel === 12 ? (classLevel as 10 | 12) : undefined,
-      section: section || undefined,
-      batch: batch || undefined,
-    });
-    if (legacyByRoll.ambiguous) {
-      return errorJson({
-        requestId,
-        errorCode: 'student-identity-ambiguous',
-        message: 'Roll number matched multiple schools/sections. Ask admin to provide school code or resolve duplicates.',
-        status: 409,
-      });
-    }
-    if (legacyByRoll.session) {
-      return await buildSuccessResponse({
-        ...legacyByRoll.session,
-        schoolId: undefined,
-        auth: 'legacy-roll',
-      });
-    }
-
     const identityMatches = await findStudentAuthIdentitiesByRollNo({
       rollNo: normalizedRollNo,
       schoolCode: schoolCode || undefined,
@@ -372,9 +325,9 @@ export async function POST(req: Request) {
     }
     return errorJson({
       requestId,
-      errorCode: 'student-roll-not-found',
-      message: 'Student roll number not found.',
-      status: 404,
+      errorCode: 'student-password-login-not-provisioned',
+      message: 'Student password login is not provisioned for this roll number. Ask admin to re-import roster with credentials.',
+      status: 403,
     });
   }
 
@@ -395,7 +348,7 @@ export async function POST(req: Request) {
         password: secret,
       });
       const roleContext = authSession.user?.id
-        ? await resolveRoleContextByAuthUserId(authSession.user.id)
+        ? await resolveRoleContextByAuthUserId(authSession.user.id, 'student')
         : null;
       if (roleContext && roleContext.role !== 'student') {
         return errorJson({
@@ -440,6 +393,7 @@ export async function POST(req: Request) {
       });
       clearSupabaseSessionCookies(response);
       clearAllRoleSessionCookies(response);
+      attachActiveRoleCookie(response, 'student');
       attachStudentSessionCookie(
         response,
         createStudentSessionToken({
@@ -467,19 +421,10 @@ export async function POST(req: Request) {
     }
   }
 
-  const session = await authenticateStudent(normalizedRollCode, secret || undefined);
-  if (!session) {
-    return errorJson({
-      requestId,
-      errorCode: 'invalid-student-credentials',
-      message: 'Invalid student ID or password.',
-      status: 401,
-    });
-  }
-
-  return await buildSuccessResponse({
-    ...session,
-    schoolId: undefined,
-    auth: 'legacy',
+  return errorJson({
+    requestId,
+    errorCode: 'student-password-login-not-provisioned',
+    message: 'Student password login is not provisioned for this student ID. Ask admin to re-import roster with credentials.',
+    status: 403,
   });
 }
