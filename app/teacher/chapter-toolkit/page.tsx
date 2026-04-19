@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { TeacherScope } from '@/lib/teacher-types';
 import { BookOpen, Link2, Star, Check, RefreshCw, AlertCircle, Trash2 } from 'lucide-react';
@@ -16,7 +15,6 @@ function unwrap<T>(payload: unknown): T {
 type Tab = 'quiz-links' | 'important-topics';
 
 export default function ChapterToolkitPage() {
-  const router = useRouter();
   const [scopes, setScopes] = useState<TeacherScope[]>([]);
   const [importantTopics, setImportantTopics] = useState<Record<string, string[]>>({});
   const [quizLinks, setQuizLinks] = useState<Record<string, string>>({});
@@ -50,7 +48,7 @@ export default function ChapterToolkitPage() {
           fetch('/api/teacher/session/me', { cache: 'no-store' }),
           fetch('/api/teacher', { cache: 'no-store' }),
         ]);
-        if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+        if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
         const sessionData = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await sessionRes.json().catch(() => null));
         setScopes(Array.isArray(sessionData?.effectiveScopes) ? sessionData.effectiveScopes : []);
 

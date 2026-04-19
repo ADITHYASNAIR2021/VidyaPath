@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Activity, RefreshCw, Send } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -47,7 +46,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function DeveloperObservabilityPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [dispatching, setDispatching] = useState(false);
   const [error, setError] = useState('');
@@ -63,7 +61,7 @@ export default function DeveloperObservabilityPage() {
         fetch('/api/developer/observability/summary?hours=24', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/developer/login');
+        setError('Session error. Please refresh or sign in again.');
         return;
       }
       const body = await summaryRes.json().catch(() => null);
@@ -108,7 +106,7 @@ export default function DeveloperObservabilityPage() {
   return (
     <div className="mx-auto max-w-6xl p-6">
       <BackButton href="/developer" label="Console" />
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <Activity className="h-6 w-6 text-violet-600" />

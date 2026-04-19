@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ClipboardList, RefreshCw } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -39,7 +38,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function DeveloperCareerHealthPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState('');
@@ -55,7 +53,7 @@ export default function DeveloperCareerHealthPage() {
         fetch('/api/developer/data-quality/verify-career-sources', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/developer/login');
+        setError('Session error. Please refresh or sign in again.');
         return;
       }
       const body = await issuesRes.json().catch(() => null);
@@ -104,7 +102,7 @@ export default function DeveloperCareerHealthPage() {
   return (
     <div className="mx-auto max-w-6xl p-6">
       <BackButton href="/developer" label="Console" />
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <ClipboardList className="h-6 w-6 text-violet-600" />

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { TeacherQuestionBankItem, TeacherScope } from '@/lib/teacher-types';
 import { HelpCircle, Plus, Trash2, RefreshCw } from 'lucide-react';
@@ -16,7 +16,6 @@ function unwrap<T>(payload: unknown): T {
 type QuestionKind = 'mcq' | 'short' | 'long';
 
 export default function QuestionBankPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const preselectedChapter = searchParams.get('chapter') ?? '';
   const [scopes, setScopes] = useState<TeacherScope[]>([]);
@@ -44,7 +43,7 @@ export default function QuestionBankPage() {
 
   async function loadSession() {
     const res = await fetch('/api/teacher/session/me', { cache: 'no-store' });
-    if (!res.ok) { router.replace('/teacher/login'); return; }
+    if (!res.ok) { setError('Session expired. Please sign in again.'); return; }
     const body = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await res.json().catch(() => null));
     setScopes(Array.isArray(body?.effectiveScopes) ? body.effectiveScopes : []);
   }

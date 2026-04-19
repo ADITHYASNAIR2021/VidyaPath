@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Users, UserPlus, RefreshCw, CheckCircle2, AlertCircle,
   PencilLine, KeyRound, UserMinus, UserCheck, BookOpen, X, Save,
@@ -268,7 +267,6 @@ function StudentRow({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function MyClassPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [classSections, setClassSections] = useState<ClassSection[]>([]);
   const [selectedSectionId, setSelectedSectionId] = useState('');
@@ -287,7 +285,7 @@ export default function MyClassPage() {
     let active = true;
     fetch('/api/teacher/session/me', { cache: 'no-store' })
       .then(async (res) => {
-        if (!res.ok) { router.replace('/teacher/login'); return; }
+        if (!res.ok) { return; }
         return fetch('/api/teacher/class-sections', { cache: 'no-store' });
       })
       .then(async (res) => {
@@ -307,7 +305,7 @@ export default function MyClassPage() {
       .catch(() => { if (active) setClassSections([]); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [router]);
+  }, []);
 
   const loadStudents = useCallback(async (sectionId: string) => {
     if (!sectionId) return;

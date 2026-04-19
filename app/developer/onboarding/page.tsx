@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 interface SchoolItem {
   id: string;
@@ -32,7 +31,6 @@ interface AffiliateRequestItem {
 }
 
 export default function DeveloperOnboardingPage() {
-  const router = useRouter();
   const [schools, setSchools] = useState<SchoolItem[]>([]);
   const [requests, setRequests] = useState<AffiliateRequestItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,7 +58,7 @@ export default function DeveloperOnboardingPage() {
       const schoolsPayload = await schoolsRes.json().catch(() => null);
       const requestsPayload = await requestsRes.json().catch(() => null);
       if (schoolsRes.status === 401 || requestsRes.status === 401) {
-        router.replace('/developer/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       if (!schoolsRes.ok || !requestsRes.ok) {

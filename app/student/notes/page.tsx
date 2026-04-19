@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { Subject } from '@/lib/data';
 import { PenSquare, Save, CheckCircle2 } from 'lucide-react';
@@ -23,7 +22,6 @@ const AUTOSAVE_DELAY_MS = 1500;
 const CLASS10_PUBLIC_SUBJECTS = new Set<Subject>(['Physics', 'Chemistry', 'Biology', 'Math', 'English Core']);
 
 export default function StudentNotesPage() {
-  const router = useRouter();
   const [chapterId, setChapterId] = useState('');
   const [content, setContent] = useState('');
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -78,7 +76,7 @@ export default function StudentNotesPage() {
         const res = await fetch(`/api/student/notes?chapterId=${encodeURIComponent(cid)}`, { cache: 'no-store' });
         const body = await res.json().catch(() => null);
         if (res.status === 401) {
-          router.replace('/student/login');
+          setError('Session expired. Please sign in again.');
           return;
         }
         if (!res.ok) {
@@ -94,14 +92,14 @@ export default function StudentNotesPage() {
         setLoadingNote(false);
       }
     },
-    [allowedChapterIds, router]
+    [allowedChapterIds]
   );
 
   useEffect(() => {
     async function checkSession() {
       const session = await fetchClientStudentSession().catch(() => null);
       if (!session?.studentId || (session.classLevel !== 10 && session.classLevel !== 12)) {
-        router.replace('/student/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       setSessionInfo({
@@ -110,7 +108,7 @@ export default function StudentNotesPage() {
       });
     }
     void checkSession();
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (!chapterId) return;

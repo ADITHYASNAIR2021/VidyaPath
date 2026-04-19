@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { BarChart3, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -62,7 +61,6 @@ function PercentBar({ value }: { value: number | null }) {
 }
 
 export default function AttendanceAnalyticsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<AnalyticsData | null>(null);
@@ -76,7 +74,7 @@ export default function AttendanceAnalyticsPage() {
         fetch('/api/teacher/session/me', { cache: 'no-store' }),
         fetch('/api/teacher/attendance-analytics', { cache: 'no-store' }),
       ]);
-      if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+      if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
       const body = await analyticsRes.json().catch(() => null);
       if (!analyticsRes.ok) {
         setError(body?.message || 'Failed to load attendance analytics.');

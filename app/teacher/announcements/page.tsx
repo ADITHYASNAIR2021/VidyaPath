@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { TeacherScope } from '@/lib/teacher-types';
 import { Megaphone, Plus, RefreshCw, Users, BookOpen, School, Layers, Trash2 } from 'lucide-react';
@@ -38,7 +37,6 @@ const SCOPE_OPTIONS = [
 ];
 
 export default function TeacherAnnouncementsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -71,7 +69,7 @@ export default function TeacherAnnouncementsPage() {
         fetch('/api/teacher', { cache: 'no-store' }),
         fetch('/api/teacher/school-announcements?limit=6', { cache: 'no-store' }),
       ]);
-      if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+      if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
       const sessionData = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await sessionRes.json().catch(() => null));
       setScopes(Array.isArray(sessionData?.effectiveScopes) ? sessionData.effectiveScopes : []);
 

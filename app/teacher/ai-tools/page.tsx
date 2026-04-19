@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { TeacherScope } from '@/lib/teacher-types';
 import {
@@ -163,7 +162,6 @@ function ContentRenderer({ text }: { text: string }) {
 
 /* ── Main page ─────────────────────────────────────────────────────────── */
 export default function AIToolsPage() {
-  const router = useRouter();
   const [scopes, setScopes] = useState<TeacherScope[]>([]);
   const [toolType, setToolType] = useState<ToolId>('worksheet');
   const [chapterId, setChapterId] = useState('');
@@ -191,7 +189,7 @@ export default function AIToolsPage() {
   useEffect(() => {
     fetch('/api/teacher/session/me', { cache: 'no-store' })
       .then(async (res) => {
-        if (!res.ok) { router.replace('/teacher/login'); return; }
+        if (!res.ok) { setError('Session expired. Please sign in again.'); return; }
         const body = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await res.json().catch(() => null));
         setScopes(Array.isArray(body?.effectiveScopes) ? body.effectiveScopes : []);
       })

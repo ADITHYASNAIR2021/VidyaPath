@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ElementType } from 'react';
-import { useRouter } from 'next/navigation';
 import { BookMarked, ExternalLink, FileText, Image, Link as LinkIcon, RefreshCw, Trash2, Video } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -44,7 +43,6 @@ const TYPE_STYLE: Record<ResourceType, string> = {
 };
 
 export default function ResourcesPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -69,7 +67,7 @@ export default function ResourcesPage() {
         fetch('/api/teacher/resources?mine=1&limit=300', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/teacher/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await resourcesRes.json().catch(() => null);

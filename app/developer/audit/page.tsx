@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { RefreshCw, ScrollText } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -23,7 +22,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function DeveloperAuditPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -37,7 +35,7 @@ export default function DeveloperAuditPage() {
         fetch('/api/developer/audit?limit=300', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/developer/login');
+        setError('Session error. Please refresh or sign in again.');
         return;
       }
       const body = await auditRes.json().catch(() => null);
@@ -63,7 +61,7 @@ export default function DeveloperAuditPage() {
   return (
     <div className="mx-auto max-w-6xl p-6">
       <BackButton href="/developer" label="Console" />
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <ScrollText className="h-6 w-6 text-violet-600" />

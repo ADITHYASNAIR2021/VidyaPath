@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { RefreshCw, School } from 'lucide-react';
 import BackButton from '@/components/BackButton';
@@ -29,7 +28,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function DeveloperSchoolsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [schoolDirectory, setSchoolDirectory] = useState<SchoolDirectoryItem[]>([]);
@@ -43,7 +41,7 @@ export default function DeveloperSchoolsPage() {
         fetch('/api/developer/schools', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/developer/login');
+        setError('Session error. Please refresh or sign in again.');
         return;
       }
       const body = await schoolsRes.json().catch(() => null);
@@ -105,7 +103,7 @@ export default function DeveloperSchoolsPage() {
   return (
     <div className="mx-auto max-w-7xl p-6">
       <BackButton href="/developer" label="Console" />
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <School className="h-6 w-6 text-violet-600" />

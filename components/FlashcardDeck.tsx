@@ -89,7 +89,29 @@ export default function FlashcardDeck({ chapterId, flashcards: initialFlashcards
     }
   };
 
-  if (!flashcards || flashcards.length === 0) return null;
+  if (!flashcards || flashcards.length === 0) {
+    return (
+      <div className="bg-[#FDFAF6] rounded-2xl border border-[#E8E4DC] shadow-sm p-8 text-center mb-5 flex flex-col items-center">
+        {statusMessage && <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">{statusMessage}</p>}
+        <div className="w-14 h-14 bg-violet-100 rounded-full flex items-center justify-center mb-4">
+          <BrainCircuit className="w-7 h-7 text-violet-600" />
+        </div>
+        <h2 className="font-fraunces text-lg font-bold text-navy-700 mb-2">No flashcards yet</h2>
+        <p className="text-[#8A8AAA] text-sm max-w-sm mb-5">
+          Generate AI-powered flashcards for this chapter to start active recall practice.
+        </p>
+        <button
+          onClick={handleGenerateCards}
+          type="button"
+          disabled={isGenerating}
+          className="inline-flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white px-5 py-2.5 rounded-xl font-semibold transition-colors disabled:opacity-50"
+        >
+          <Zap className="w-4 h-4" />
+          {isGenerating ? 'Generating…' : 'Generate Flashcards via AI'}
+        </button>
+      </div>
+    );
+  }
   if (!isLoaded) return <div className="h-40 animate-pulse bg-gray-100 rounded-2xl mb-5 border border-[#E8E4DC]"></div>;
 
   // Render "Caught up" state

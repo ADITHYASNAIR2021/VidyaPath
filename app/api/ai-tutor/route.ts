@@ -250,9 +250,18 @@ export async function POST(req: NextRequest) {
       statusCode: 200,
     });
 
+    const sources = contextPack.snippets.slice(0, 4).map((s) => ({
+      sourcePath: s.sourcePath,
+      year: s.year,
+      paperType: s.paperType,
+      sourceType: s.sourceType,
+      chapterId: s.chapterId,
+      relevanceScore: s.relevanceScore,
+    }));
+
     return dataJson({
       requestId,
-      data: { message, isOffTopic },
+      data: { message, isOffTopic, sources },
     });
   } catch (error) {
     console.error('AI tutor route error:', error);

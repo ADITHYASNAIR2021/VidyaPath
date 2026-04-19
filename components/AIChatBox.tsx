@@ -7,10 +7,18 @@ import clsx from 'clsx';
 import 'katex/dist/katex.min.css';
 import katex from 'katex';
 
+interface SourceCitation {
+  sourcePath: string;
+  year?: number;
+  paperType?: string;
+  sourceType?: string;
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   isOffTopic?: boolean;
+  sources?: SourceCitation[];
 }
 
 interface AIChatBoxProps {
@@ -261,12 +269,16 @@ export default function AIChatBox({
       const payload = (data && typeof data === 'object' && data.data && typeof data.data === 'object')
         ? data.data as Record<string, unknown>
         : data as Record<string, unknown>;
+      const sources = Array.isArray(payload.sources)
+        ? (payload.sources as SourceCitation[]).filter((s) => s && s.sourcePath)
+        : [];
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
           content: String(payload.message || ''),
           isOffTopic: payload.isOffTopic === true,
+          sources: sources.length > 0 ? sources : undefined,
         },
       ]);
     } catch {
@@ -398,22 +410,39 @@ export default function AIChatBox({
                   {msg.content}
                 </div>
               ) : (
-                <div
-                  className={clsx(
-                    'max-w-[82%] px-4 py-3 rounded-2xl text-sm leading-relaxed',
-                    msg.role === 'user'
-                      ? 'bg-navy-700 text-white rounded-tr-sm'
-                      : 'bg-white border border-gray-100 shadow-sm text-[#1C1C2E] rounded-tl-sm ai-response'
-                  )}
-                >
-                  {msg.role === 'assistant' ? (
-                    <div
-                      dangerouslySetInnerHTML={{
-                        __html: formatAIResponse(msg.content),
-                      }}
-                    />
-                  ) : (
-                    msg.content
+                <div className="max-w-[82%] flex flex-col gap-1.5">
+                  <div
+                    className={clsx(
+                      'px-4 py-3 rounded-2xl text-sm leading-relaxed',
+                      msg.role === 'user'
+                        ? 'bg-navy-700 text-white rounded-tr-sm'
+                        : 'bg-white border border-gray-100 shadow-sm text-[#1C1C2E] rounded-tl-sm ai-response'
+                    )}
+                  >
+                    {msg.role === 'assistant' ? (
+                      <div
+                        dangerouslySetInnerHTML={{
+                          __html: formatAIResponse(msg.content),
+                        }}
+                      />
+                    ) : (
+                      msg.content
+                    )}
+                  </div>
+                  {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                    <div className="flex flex-wrap gap-1 px-1">
+                      {msg.sources.map((src, si) => (
+                        <span
+                          key={si}
+                          title={src.sourcePath}
+                          className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-600"
+                        >
+                          {src.year ? `${src.year}` : ''}
+                          {src.paperType ? ` · ${src.paperType}` : ''}
+                          {!src.year && !src.paperType ? (src.sourceType ?? 'source') : ''}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}

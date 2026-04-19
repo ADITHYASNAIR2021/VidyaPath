@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Activity, BarChart2, ClipboardList, RefreshCw, School, ScrollText } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -41,7 +40,6 @@ interface ObservabilityPayload {
 }
 
 export default function DeveloperOverviewPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [metrics, setMetrics] = useState({
@@ -67,7 +65,7 @@ export default function DeveloperOverviewPage() {
     try {
       const sessionRes = await fetch('/api/developer/session/me', { cache: 'no-store' });
       if (!sessionRes.ok) {
-        router.replace('/developer/login');
+        setError('Session error. Please refresh or sign in again.');
         return;
       }
 
@@ -138,7 +136,7 @@ export default function DeveloperOverviewPage() {
 
   return (
     <div className="mx-auto max-w-7xl p-6">
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700">Developer Overview</h1>
           <p className="mt-0.5 text-sm text-gray-500">Top-line operations health across schools, auth, and AI usage.</p>

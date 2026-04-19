@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { TeacherScope, TeacherWeeklyPlan } from '@/lib/teacher-types';
 import { CalendarDays, Plus, RefreshCw, Archive, AlertCircle, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
@@ -16,7 +15,6 @@ function unwrap<T>(payload: unknown): T {
 const CLASS_LEVELS = [10, 12] as const;
 
 export default function WeeklyPlansPage() {
-  const router = useRouter();
   const [scopes, setScopes] = useState<TeacherScope[]>([]);
   const [plans, setPlans] = useState<TeacherWeeklyPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,7 +51,7 @@ export default function WeeklyPlansPage() {
         fetch('/api/teacher/session/me', { cache: 'no-store' }),
         fetch('/api/teacher/weekly-plans', { cache: 'no-store' }),
       ]);
-      if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+      if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
       const sessionData = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await sessionRes.json().catch(() => null));
       setScopes(Array.isArray(sessionData?.effectiveScopes) ? sessionData.effectiveScopes : []);
 

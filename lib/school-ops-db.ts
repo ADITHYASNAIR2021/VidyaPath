@@ -13,12 +13,31 @@ const TABLES = {
   announcements: 'school_announcements',
   assignmentPacks: 'teacher_assignment_packs',
   submissions: 'teacher_submissions',
+  questions: 'student_questions',
 };
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 type ResourceType = 'pdf' | 'link' | 'video' | 'image';
 type EventType = 'exam' | 'assignment_due' | 'holiday' | 'meeting' | 'other';
 type AnnouncementAudience = 'all' | 'teachers' | 'students' | 'class10' | 'class12';
+type QuestionStatus = 'pending' | 'answered' | 'closed';
+
+interface StudentQuestionRow {
+  id: RowId;
+  school_id: RowId;
+  student_id: RowId;
+  teacher_id: RowId | null;
+  chapter_id: string;
+  subject: string;
+  class_level: number;
+  topic: string | null;
+  question: string;
+  answer: string | null;
+  status: QuestionStatus;
+  answered_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 interface StudentProfileRow {
   id: RowId;
@@ -994,4 +1013,171 @@ export async function listStudentGrades(input: {
     })
     .filter((item): item is NonNullable<typeof item> => !!item)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+// ─── Student Questions ──────────────────────────────────────────────────────
+
+export interface StudentQuestionItem {
+  id: string;
+  schoolId: string;
+  studentId: string;
+  teacherId: string | null;
+  chapterId: string;
+  subject: string;
+  classLevel: 10 | 12;
+  topic: string | null;
+  question: string;
+  answer: string | null;
+  status: QuestionStatus;
+  answeredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapQuestionRow(row: StudentQuestionRow): StudentQuestionItem {
+  return {
+    id: row.id,
+    schoolId: row.school_id,
+    studentId: row.student_id,
+    teacherId: row.teacher_id,
+    chapterId: row.chapter_id,
+    subject: row.subject,
+    classLevel: (toClassLevel(row.class_level) ?? 12) as 10 | 12,
+    topic: row.topic,
+    question: row.question,
+    answer: row.answer,
+    status: row.status,
+    answeredAt: row.answered_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function addStudentQuestion(input: {
+  schoolId: string;
+  studentId: string;
+  chapterId: string;
+  subject: string;
+  classLevel: 10 | 12;
+  topic?: string;
+  question: string;
+}): Promise<StudentQuestionItem | null> {
+  if (!isSupabaseServiceConfigured()) return null;
+  const schoolId = sanitizeId(input.schoolId);
+  const studentId = sanitizeId(input.studentId);
+  const chapterId = sanitizeText(input.chapterId, 200);
+  const question = sanitizeText(input.question, 2000);
+  if (!schoolId || !studentId || !chapterId || !question) return null;
+
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const payload: Record<string, unknown> = {
+    id,
+    school_id: schoolId,
+    student_id: studentId,
+    teacher_id: null,
+    chapter_id: chapterId,
+    subject: sanitizeText(input.subject, 100),
+    class_level: input.classLevel,
+    topic: input.topic ? sanitizeText(input.topic, 200) : null,
+    question,
+    answer: null,
+    status: 'pending',
+    answered_at: null,
+    created_at: now,
+    updated_at: now,
+  };
+
+  await supabaseInsert(TABLES.questions, payload).catch(() => null);
+  return mapQuestionRow({
+    id,
+    school_id: schoolId,
+    student_id: studentId,
+    teacher_id: null,
+    chapter_id: chapterId,
+    subject: payload.subject as string,
+    class_level: input.classLevel,
+    topic: payload.topic as string | null,
+    question,
+    answer: null,
+    status: 'pending',
+    answered_at: null,
+    created_at: now,
+    updated_at: now,
+  });
+}
+
+export async function listStudentQuestions(input: {
+  studentId: string;
+  schoolId: string;
+  chapterId?: string;
+  limit?: number;
+}): Promise<StudentQuestionItem[]> {
+  if (!isSupabaseServiceConfigured()) return [];
+  const studentId = sanitizeId(input.studentId);
+  const schoolId = sanitizeId(input.schoolId);
+  if (!studentId || !schoolId) return [];
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null | (string | number | boolean | null)[] }> = [
+    { column: 'student_id', value: studentId },
+    { column: 'school_id', value: schoolId },
+  ];
+  if (input.chapterId) filters.push({ column: 'chapter_id', value: sanitizeText(input.chapterId, 200) });
+  const rows = await supabaseSelect<StudentQuestionRow>(TABLES.questions, {
+    select: '*',
+    filters,
+    orderBy: 'created_at',
+    ascending: false,
+    limit: input.limit ?? 50,
+  }).catch(() => []);
+  return rows.map(mapQuestionRow);
+}
+
+export async function listTeacherQuestions(input: {
+  schoolId: string;
+  classLevel?: 10 | 12;
+  subject?: string;
+  status?: QuestionStatus;
+  limit?: number;
+}): Promise<StudentQuestionItem[]> {
+  if (!isSupabaseServiceConfigured()) return [];
+  const schoolId = sanitizeId(input.schoolId);
+  if (!schoolId) return [];
+  const filters: Array<{ column: string; op?: string; value: string | number | boolean | null | (string | number | boolean | null)[] }> = [
+    { column: 'school_id', value: schoolId },
+  ];
+  if (input.classLevel) filters.push({ column: 'class_level', value: input.classLevel });
+  if (input.subject) filters.push({ column: 'subject', value: sanitizeText(input.subject, 100) });
+  if (input.status) filters.push({ column: 'status', value: input.status });
+  const rows = await supabaseSelect<StudentQuestionRow>(TABLES.questions, {
+    select: '*',
+    filters,
+    orderBy: 'created_at',
+    ascending: false,
+    limit: input.limit ?? 100,
+  }).catch(() => []);
+  return rows.map(mapQuestionRow);
+}
+
+export async function answerStudentQuestion(input: {
+  questionId: string;
+  schoolId: string;
+  teacherId: string;
+  answer: string;
+}): Promise<boolean> {
+  if (!isSupabaseServiceConfigured()) return false;
+  const questionId = sanitizeId(input.questionId);
+  const schoolId = sanitizeId(input.schoolId);
+  const teacherId = sanitizeId(input.teacherId);
+  const answer = sanitizeText(input.answer, 4000);
+  if (!questionId || !schoolId || !teacherId || !answer) return false;
+  const now = new Date().toISOString();
+  await supabaseUpdate(
+    TABLES.questions,
+    { teacher_id: teacherId, answer, status: 'answered', answered_at: now, updated_at: now },
+    [
+      { column: 'id', value: questionId },
+      { column: 'school_id', value: schoolId },
+    ]
+  ).catch(() => null);
+  return true;
 }

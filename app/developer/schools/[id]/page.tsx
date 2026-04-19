@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -147,7 +147,6 @@ function StatCard({
 export default function DeveloperSchoolDetailPage() {
   const params = useParams();
   const schoolId = typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? params.id[0] : '';
-  const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -181,7 +180,7 @@ export default function DeveloperSchoolDetailPage() {
         fetch(`/api/developer/schools/${schoolId}/overview`, { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/developer/login');
+        setError('Session error. Please refresh or sign in again.');
         return;
       }
       const overviewBody = await overviewRes.json().catch(() => null);

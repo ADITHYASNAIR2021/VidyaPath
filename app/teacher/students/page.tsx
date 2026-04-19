@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type { TeacherAssignmentPack, TeacherSubmissionSummary, TeacherScope } from '@/lib/teacher-types';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { Users, TrendingDown, TrendingUp, Minus, RefreshCw, UserPlus, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -33,7 +32,6 @@ interface ClassSection {
 }
 
 export default function StudentsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [packs, setPacks] = useState<TeacherAssignmentPack[]>([]);
   const [selectedPackId, setSelectedPackId] = useState('');
@@ -58,7 +56,7 @@ export default function StudentsPage() {
         fetch('/api/teacher', { cache: 'no-store' }),
         fetch('/api/teacher/class-sections', { cache: 'no-store' }),
       ]);
-      if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+      if (!sessionRes.ok) { return; }
       const sessionBody = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await sessionRes.json().catch(() => null));
       setScopes(Array.isArray(sessionBody?.effectiveScopes) ? sessionBody.effectiveScopes : []);
       const cfgBody = await configRes.json().catch(() => null);

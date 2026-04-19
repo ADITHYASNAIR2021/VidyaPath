@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { RefreshCw } from 'lucide-react';
 
 interface AttendanceRecord {
@@ -54,7 +53,6 @@ const DAY_OPTIONS = [30, 60, 120] as const;
 type DayOption = (typeof DAY_OPTIONS)[number];
 
 export default function StudentAttendancePage() {
-  const router   = useRouter();
   const [days, setDays]       = useState<DayOption>(120);
   const [data, setData]       = useState<AttendanceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,7 +64,7 @@ export default function StudentAttendancePage() {
     try {
       const sessionRes = await fetch('/api/student/session/me', { cache: 'no-store' });
       if (!sessionRes.ok) {
-        router.replace('/student/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
 
@@ -87,7 +85,7 @@ export default function StudentAttendancePage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     void fetchAttendance(days);

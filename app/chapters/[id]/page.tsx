@@ -31,7 +31,7 @@ import StudiedButton from '@/components/StudiedButton';
 import FormulaCard from '@/components/FormulaCard';
 import MermaidRenderer from '@/components/MermaidRenderer';
 import TextToSpeechButton from '@/components/TextToSpeechButton';
-import PomodoroTimer from '@/components/PomodoroTimer';
+import FloatingPomodoro from '@/components/FloatingPomodoro';
 import ChapterNotes from '@/components/ChapterNotes';
 import InlinePDFViewer from '@/components/InlinePDFViewer';
 import QuizEngine from '@/components/QuizEngine';
@@ -44,6 +44,7 @@ import AnalyticsTracker from '@/components/AnalyticsTracker';
 import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
 import StudentSubjectGate from '@/components/StudentSubjectGate';
 import TeacherQuestionBankLink from '@/components/TeacherQuestionBankLink';
+import AskTeacherButton from '@/components/AskTeacherButton';
 
 // Generate static params for all chapters
 export function generateStaticParams() {
@@ -434,16 +435,14 @@ export default function ChapterDetailPage({
             {chapter.formulas && <FormulaCard formulas={chapter.formulas} />}
             {chapter.mermaidDiagram && <MermaidRenderer chart={chapter.mermaidDiagram} title="Process Workflow" />}
 
-            {/* Native Quizzes & Flashcards */}
-            {chapter.flashcards && (
-              <FlashcardDeck
-                chapterId={chapter.id}
-                flashcards={chapter.flashcards}
-                subject={chapter.subject}
-                chapterTitle={chapter.title}
-              />
-            )}
-            {chapter.quizzes && <QuizEngine chapterId={chapter.id} quizzes={chapter.quizzes} subject={chapter.subject} chapterTitle={chapter.title} />}
+            {/* Native Quizzes & Flashcards — always rendered; components show generate-from-AI state when empty */}
+            <FlashcardDeck
+              chapterId={chapter.id}
+              flashcards={chapter.flashcards ?? []}
+              subject={chapter.subject}
+              chapterTitle={chapter.title}
+            />
+            <QuizEngine chapterId={chapter.id} quizzes={chapter.quizzes ?? []} subject={chapter.subject} chapterTitle={chapter.title} />
 
             {/* Inline PDF Viewer */}
             <InlinePDFViewer pdfUrl={chapter.ncertPdfUrl} />
@@ -569,7 +568,7 @@ export default function ChapterDetailPage({
           {/* RIGHT — AI Tutor (2/5) — sticky on desktop */}
           <div className="lg:col-span-2">
             <div className="lg:sticky lg:top-24 space-y-5">
-              <PomodoroTimer
+              <FloatingPomodoro
                 chapterTitle={chapter.title}
                 pyqStats={chapterPyq ? {
                   avgMarks: chapterPyq.avgMarks,
@@ -606,6 +605,16 @@ export default function ChapterDetailPage({
                   VidyaAI is trained on NCERT curriculum only
                 </p>
               </div>
+
+              {(chapter.classLevel === 10 || chapter.classLevel === 12) && (
+                <AskTeacherButton
+                  chapterId={chapter.id}
+                  chapterTitle={chapter.title}
+                  subject={chapter.subject}
+                  classLevel={chapter.classLevel}
+                  topics={chapter.topics}
+                />
+              )}
             </div>
           </div>
         </div>

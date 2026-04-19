@@ -71,7 +71,9 @@
       "Bash(node -e ' *)",
       "Bash(sed 's/create table.*public\\\\.//')",
       "Bash(grep -E \"\\\\.ts$|^d\")",
-      "Bash(awk '{print $NF}')"
+      "Bash(awk '{print $NF}')",
+      "Bash(cd /d D:\\\\VidyaPath)",
+      "Bash(dir components\\\\FloatingPomodoro.tsx components\\\\AskTeacherButton.tsx app\\\\api\\\\student\\\\questions\\\\route.ts app\\\\api\\\\teacher\\\\questions\\\\route.ts app\\\\teacher\\\\questions\\\\page.tsx app\\\\student\\\\questions\\\\page.tsx)"
     ]
   }
 }

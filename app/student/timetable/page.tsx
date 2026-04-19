@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import { RefreshCw } from 'lucide-react';
 
 interface TimetableSlot {
@@ -53,7 +52,6 @@ const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8];
 const TODAY_DOW = new Date().getDay(); // 0=Sun, 1=Mon…5=Fri, 6=Sat
 
 export default function StudentTimetablePage() {
-  const router    = useRouter();
   const [data, setData]       = useState<TimetableData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
@@ -64,7 +62,7 @@ export default function StudentTimetablePage() {
     try {
       const sessionRes = await fetch('/api/student/session/me', { cache: 'no-store' });
       if (!sessionRes.ok) {
-        router.replace('/student/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
 
@@ -85,7 +83,7 @@ export default function StudentTimetablePage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     void fetchTimetable();

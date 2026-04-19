@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { CheckCircle2, ClipboardCheck, RefreshCw, XCircle } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -41,7 +40,6 @@ function todayIso() {
 }
 
 export default function AttendancePage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -60,7 +58,7 @@ export default function AttendancePage() {
         fetch(`/api/teacher/attendance?date=${encodeURIComponent(targetDate)}`, { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/teacher/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await attendanceRes.json().catch(() => null);

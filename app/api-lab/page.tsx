@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Play, RefreshCcw, Search, ShieldAlert, Terminal } from 'lucide-react';
+import DeveloperPortalNav from '@/components/DeveloperPortalNav';
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 type AuthScope = 'none' | 'student' | 'teacher' | 'admin' | 'developer' | 'mixed';
@@ -870,7 +871,9 @@ export default function ApiLabPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FDFAF6] px-4 py-10">
+    <div className="min-h-screen bg-[#FDFAF6]">
+      <DeveloperPortalNav />
+      <div className="px-4 py-10">
       <div className="max-w-7xl mx-auto space-y-6">
         <section className="rounded-3xl border border-[#E8E4DC] bg-white px-6 py-6 shadow-sm">
           <div className="flex flex-wrap items-center gap-3">
@@ -989,6 +992,7 @@ export default function ApiLabPage() {
             </div>
           </section>
         ))}
+      </div>
       </div>
     </div>
   );

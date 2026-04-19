@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type {
   TeacherAssignmentPack,
   TeacherSubmissionSummary,
@@ -237,7 +236,6 @@ function SubmissionPanel({
 
 /* ── Main page ────────────────────────────────────────────────────────── */
 export default function GradingDeskPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [packs, setPacks] = useState<TeacherAssignmentPack[]>([]);
@@ -270,7 +268,7 @@ export default function GradingDeskPage() {
         fetch('/api/teacher/session/me', { cache: 'no-store' }),
         fetch('/api/teacher', { cache: 'no-store' }),
       ]);
-      if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+      if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
       const cfgBody = await configRes.json().catch(() => null);
       const cfg = unwrap<{ assignmentPacks?: TeacherAssignmentPack[] } | null>(cfgBody);
       if (!configRes.ok || !cfg) return;

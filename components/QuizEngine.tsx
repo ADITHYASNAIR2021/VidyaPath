@@ -71,7 +71,13 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
     };
   }, []);
 
-  if (!quizzes || quizzes.length === 0) return null;
+  const resetQuiz = () => {
+    setCurrentQ(0);
+    setSelectedOption(null);
+    setShowAnswer(false);
+    setScore(0);
+    setFinished(false);
+  };
 
   const handleGenerateValues = async () => {
     setIsGenerating(true);
@@ -112,6 +118,30 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
     }
   };
 
+  if (!quizzes || quizzes.length === 0) {
+    return (
+      <div className="bg-[#FDFAF6] rounded-2xl border border-[#E8E4DC] shadow-sm p-8 text-center mb-5 flex flex-col items-center">
+        {statusMessage && <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">{statusMessage}</p>}
+        <div className="w-14 h-14 bg-saffron-100 rounded-full flex items-center justify-center mb-4">
+          <Award className="w-7 h-7 text-saffron-500" />
+        </div>
+        <h2 className="font-fraunces text-lg font-bold text-navy-700 mb-2">No quiz yet</h2>
+        <p className="text-[#8A8AAA] text-sm max-w-sm mb-5">
+          Generate an AI-powered quiz for this chapter to test your understanding.
+        </p>
+        <button
+          onClick={handleGenerateValues}
+          type="button"
+          disabled={isGenerating || studentAiEnabled === false}
+          className="inline-flex items-center gap-2 bg-saffron-500 hover:bg-saffron-600 text-white px-5 py-2.5 rounded-xl font-semibold transition-colors disabled:opacity-50"
+        >
+          <Award className="w-4 h-4" />
+          {studentAiEnabled === false ? 'Login to Generate Quiz' : isGenerating ? 'Generating…' : 'Generate Quiz via AI'}
+        </button>
+      </div>
+    );
+  }
+
   const handleSelect = (idx: number) => {
     if (showAnswer) return;
     setSelectedOption(idx);
@@ -134,14 +164,6 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
         setBestScore(newScore);
       }
     }
-  };
-
-  const resetQuiz = () => {
-    setCurrentQ(0);
-    setSelectedOption(null);
-    setShowAnswer(false);
-    setScore(0);
-    setFinished(false);
   };
 
   if (finished) {

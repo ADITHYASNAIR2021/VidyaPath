@@ -101,26 +101,6 @@ graph TD
     C --> G[Electrolytic]
     C --> H[Photolytic]
     `,
-    quizzes: [
-      {
-        question: 'Which of the following is a physical change?',
-        options: ['Rusting of iron', 'Melting of ice', 'Burning of magnesium ribbon', 'Digestion of food'],
-        correctAnswerIndex: 1,
-        explanation: 'Melting of ice is a physical change because no new substance is formed, only the state changes.',
-      },
-      {
-        question: 'Identify the type of reaction: 2H2 + O2 → 2H2O',
-        options: ['Decomposition', 'Displacement', 'Combination', 'Double Displacement'],
-        correctAnswerIndex: 2,
-        explanation: 'Two elements (H2 and O2) are combining to form a single product (H2O), which is a combination reaction.',
-      }
-    ],
-    flashcards: [
-      { front: 'Exothermic Reaction', back: 'A reaction in which heat is released along with the formation of products.' },
-      { front: 'Endothermic Reaction', back: 'A reaction which requires energy (in the form of heat, light or electricity) to proceed.' },
-      { front: 'Oxidation', back: 'The addition of oxygen to a substance or the removal of hydrogen from a substance.' },
-      { front: 'Reduction', back: 'The addition of hydrogen to a substance or the removal of oxygen from a substance.' }
-    ]
   },
   {
     id: 'c10-chem-2', classLevel: 10, subject: 'Chemistry', chapterNumber: 2,

@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Fraunces, DM_Sans, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import Navbar from '@/components/Navbar';
@@ -27,6 +27,14 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 const BASE_URL = 'https://sreyas-vidyapath.vercel.com';
+
+export const viewport: Viewport = {
+  themeColor: '#8B5CF6',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: 'cover',
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
@@ -71,7 +79,7 @@ export const metadata: Metadata = {
       { url: '/favicon-16.png', sizes: '16x16', type: 'image/png' },
       { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
     ],
-    apple: '/apple-touch-icon.png',
+    apple: '/icon.png',
   },
   robots: {
     index: true,
@@ -105,6 +113,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
+        {/* iOS PWA */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="VidyaPath" />
+        {/* Android Chrome PWA */}
+        <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className="min-h-screen bg-[#FDFAF6] pb-16 md:pb-0">
         <a

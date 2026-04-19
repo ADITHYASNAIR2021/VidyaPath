@@ -1,7 +1,6 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 type RatingValue = 'again' | 'hard' | 'good' | 'easy';
 
@@ -27,7 +26,6 @@ function unwrap<T>(payload: unknown): T | null {
 }
 
 export default function StudentSrsPage() {
-  const router = useRouter();
   const [cards, setCards] = useState<SrsCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -41,10 +39,10 @@ export default function StudentSrsPage() {
     setError('');
     try {
       const sessionRes = await fetch('/api/student/session/me', { cache: 'no-store' });
-      if (!sessionRes.ok) { router.replace('/student/login'); return; }
+      if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
       const res = await fetch('/api/student/srs', { cache: 'no-store' });
       const body = await res.json().catch(() => null);
-      if (res.status === 401) { router.replace('/student/login'); return; }
+      if (res.status === 401) { setError('Session expired. Please sign in again.'); return; }
       const data = unwrap<{ cards?: SrsCard[] } | null>(body);
       if (!res.ok) {
         setError((body && typeof body === 'object' && 'message' in body ? String((body as Record<string, unknown>).message) : 'Failed to load SRS cards.'));

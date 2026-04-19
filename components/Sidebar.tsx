@@ -8,7 +8,7 @@ import {
   ClipboardList, PenSquare, FileCheck, Megaphone, Wand2, HelpCircle,
   BookMarked, CalendarDays, Package, LayoutDashboard, School, Activity,
   Settings, ScrollText, Menu, X, ChevronLeft, ChevronRight,
-  Bell, ClipboardCheck, Layers, Bookmark,
+  Bell, ClipboardCheck, Layers, Bookmark, MessageSquare, BrainCircuit,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -36,6 +36,7 @@ const TEACHER_NAV: NavItem[] = [
   { href: '/teacher/attendance',      label: 'Attendance',      icon: ClipboardCheck },
   { href: '/teacher/gradebook',       label: 'Gradebook',       icon: ScrollText },
   { href: '/teacher/calendar',        label: 'Calendar',        icon: CalendarDays },
+  { href: '/teacher/questions',       label: 'Student Q&A',     icon: MessageSquare },
 ];
 
 const STUDENT_NAV: NavItem[] = [
@@ -52,6 +53,8 @@ const STUDENT_NAV: NavItem[] = [
   { href: '/student/calendar',  label: 'Calendar',      icon: CalendarDays },
   { href: '/student/achievements', label: 'Achievements', icon: Activity },
   { href: '/student/notes',        label: 'My Notes',      icon: PenSquare },
+  { href: '/student/ai-tools',     label: 'AI Study Tools', icon: BrainCircuit },
+  { href: '/student/questions',    label: 'My Questions',  icon: MessageSquare },
 ];
 
 const ADMIN_NAV: NavItem[] = [

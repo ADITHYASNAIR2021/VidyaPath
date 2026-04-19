@@ -91,6 +91,34 @@ h1, h2, h3 {
   border-radius: 2px;
 }
 
+/* ── PWA safe-area utilities ─────────────────────────────── */
+@layer utilities {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pl-safe {
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+  .pr-safe {
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* Body bottom padding accounts for mobile nav + iOS home bar */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  @media (max-width: 767px) {
+    body {
+      padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+    }
+  }
+}
+
 /* Prose styling for AI responses */
 .ai-response p { margin-bottom: 0.5rem; }
 .ai-response ul { margin: 0.5rem 0; padding-left: 1.25rem; }

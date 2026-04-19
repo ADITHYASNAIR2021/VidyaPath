@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type {
   TeacherAssignmentPack,
@@ -168,7 +167,6 @@ function MCQEditor({
 
 /* ── Main page ────────────────────────────────────────────────────────── */
 export default function TeacherAssignmentsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [packs, setPacks] = useState<TeacherAssignmentPack[]>([]);
@@ -234,7 +232,7 @@ export default function TeacherAssignmentsPage() {
         fetch('/api/teacher/session/me', { cache: 'no-store' }),
         fetch('/api/teacher', { cache: 'no-store' }),
       ]);
-      if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+      if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
       const sessionData = unwrap<Record<string, unknown>>(await sessionRes.json().catch(() => null));
       setScopes(Array.isArray(sessionData?.effectiveScopes) ? (sessionData.effectiveScopes as TeacherScope[]) : []);
 

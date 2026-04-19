@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type {
   TeacherAssignmentAnalytics,
@@ -15,7 +14,7 @@ import {
   LayoutDashboard, Package, PenSquare, Users, Megaphone,
   HelpCircle, Wand2, BookMarked, ClipboardCheck, ScrollText,
   CalendarDays, RefreshCw, TrendingUp, Clock, AlertCircle,
-  ChevronRight, CalendarRange, BarChart3,
+  ChevronRight, CalendarRange, BarChart3, MessageSquare,
 } from 'lucide-react';
 
 function unwrap<T>(payload: unknown): T {
@@ -35,11 +34,11 @@ const QUICK_LINKS = [
   { href: '/teacher/resources',    label: 'Resources',     icon: BookMarked,    desc: 'Teaching materials',        color: 'from-fuchsia-500 to-violet-500' },
   { href: '/teacher/calendar',              label: 'Calendar',          icon: CalendarDays,  desc: 'School events',             color: 'from-sky-500 to-blue-600'       },
   { href: '/teacher/timetable',             label: 'My Timetable',      icon: CalendarRange, desc: 'Weekly class schedule',     color: 'from-teal-500 to-cyan-500'      },
-  { href: '/teacher/attendance-analytics',  label: 'Attendance Report', icon: BarChart3,     desc: 'Chronic absence tracking',  color: 'from-rose-500 to-red-500'       },
+  { href: '/teacher/attendance-analytics',  label: 'Attendance Report', icon: BarChart3,      desc: 'Chronic absence tracking',  color: 'from-rose-500 to-red-500'       },
+  { href: '/teacher/questions',             label: 'Student Q&A',       icon: MessageSquare,  desc: 'Answer student questions',  color: 'from-indigo-500 to-violet-500'  },
 ];
 
 export default function TeacherOverviewPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [teacherName, setTeacherName] = useState('Teacher');
   const [analytics, setAnalytics] = useState<TeacherAssignmentAnalytics | null>(null);
@@ -56,7 +55,7 @@ export default function TeacherOverviewPage() {
           fetch('/api/teacher/session/me', { cache: 'no-store' }),
           fetch('/api/teacher', { cache: 'no-store' }),
         ]);
-        if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+        if (!sessionRes.ok) { return; }
         const sessionData = unwrap<Record<string, unknown> | null>(await sessionRes.json().catch(() => null));
         const teacherInfo = sessionData?.teacher as { name?: string } | undefined;
         setTeacherName(typeof teacherInfo?.name === 'string' && teacherInfo.name.trim() ? teacherInfo.name : 'Teacher');

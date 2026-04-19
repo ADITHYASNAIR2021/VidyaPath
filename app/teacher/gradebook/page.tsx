@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { RefreshCw, ScrollText } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -44,7 +43,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function GradebookPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<GradebookResponse | null>(null);
@@ -58,7 +56,7 @@ export default function GradebookPage() {
         fetch('/api/teacher/gradebook', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/teacher/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await gradebookRes.json().catch(() => null);

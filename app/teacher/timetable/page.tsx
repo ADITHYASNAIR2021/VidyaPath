@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { CalendarRange, RefreshCw, Clock } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -119,7 +118,6 @@ function TimetableGrid({ slots, activeDays, label }: { slots: TimetableSlot[]; a
 }
 
 export default function TimetablePage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<TimetableData | null>(null);
@@ -133,7 +131,7 @@ export default function TimetablePage() {
         fetch('/api/teacher/session/me', { cache: 'no-store' }),
         fetch('/api/teacher/timetable', { cache: 'no-store' }),
       ]);
-      if (!sessionRes.ok) { router.replace('/teacher/login'); return; }
+      if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
       const body = await timetableRes.json().catch(() => null);
       if (!timetableRes.ok) {
         setError(body?.message || 'Failed to load timetable.');

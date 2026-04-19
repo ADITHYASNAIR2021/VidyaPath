@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { RefreshCw } from 'lucide-react';
 
 interface Grade {
@@ -45,7 +44,6 @@ function statusBadge(status: Grade['status']): { label: string; cls: string } {
 }
 
 export default function StudentGradesPage() {
-  const router = useRouter();
   const [grades, setGrades]     = useState<Grade[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
@@ -57,7 +55,7 @@ export default function StudentGradesPage() {
     try {
       const sessionRes = await fetch('/api/student/session/me', { cache: 'no-store' });
       if (!sessionRes.ok) {
-        router.replace('/student/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
 
@@ -78,7 +76,7 @@ export default function StudentGradesPage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     void fetchGrades();
