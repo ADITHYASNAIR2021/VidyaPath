@@ -20,6 +20,8 @@ import { buildLearningProfile, rankWeakChapters, type LearningProfile } from '@/
 import RevisionPlanCard from '@/components/RevisionPlanCard';
 import DashboardChapterCoach from '@/components/DashboardChapterCoach';
 import { fetchClientStudentSession } from '@/lib/client-student-session';
+import { useServerProgressSync } from '@/lib/hooks/useServerProgressSync';
+import EnableNotificationsButton from '@/components/EnableNotificationsButton';
 
 // ── SVG Progress Ring ─────────────────────────────────────────
 function ProgressRing({
@@ -210,6 +212,7 @@ export default function DashboardPage() {
   const [schoolAnnouncements, setSchoolAnnouncements] = useState<DashboardSchoolAnnouncement[]>([]);
   const { studiedChapterIds } = useProgressStore();
   const { bookmarkedChapterIds } = useBookmarkStore();
+  useServerProgressSync();
   const eligibleChapters = useMemo(() => ALL_CHAPTERS.filter((c) => c.classLevel !== 11), []);
   const allowedSubjectSet = useMemo(() => {
     if (!studentSession) return null;
@@ -663,7 +666,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FDFAF6]">
+    <div className="min-h-screen bg-[#FDFAF6] dark:bg-gray-900">
       {/* ── Hero ── */}
       <div className="bg-gradient-to-br from-navy-700 to-navy-900 text-white px-4 pt-12 pb-16 relative overflow-hidden">
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -681,8 +684,11 @@ export default function DashboardPage() {
                   ? `Class ${studentSession.classLevel}${studentSession.section ? ` • Section ${studentSession.section}` : ''} personalized learning view.`
                   : 'Track progress, weak zones, and teacher-assigned study flow.'}
               </p>
-              <div className="mt-2 inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white/90">
-                Focus track: {dashboardTrack}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white/90">
+                  Focus track: {dashboardTrack}
+                </div>
+                <EnableNotificationsButton />
               </div>
             </div>
             {/* Overall ring */}

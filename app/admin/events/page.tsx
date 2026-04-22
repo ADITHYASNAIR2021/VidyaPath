@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Activity, ChevronLeft, ChevronRight, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -44,7 +43,6 @@ function toMonthKey(date: Date): string {
 }
 
 export default function AdminEventsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -69,7 +67,7 @@ export default function AdminEventsPage() {
         fetch('/api/admin/events?limit=500', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await eventsRes.json().catch(() => null);

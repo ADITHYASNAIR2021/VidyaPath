@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Layers, PencilLine, Plus, RefreshCw, Save, UserCog, X } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -31,7 +30,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function ClassSectionsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [savingSectionId, setSavingSectionId] = useState<string>('');
   const [error, setError] = useState('');
@@ -59,7 +57,7 @@ export default function ClassSectionsPage() {
         fetch('/api/admin/teachers', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
 

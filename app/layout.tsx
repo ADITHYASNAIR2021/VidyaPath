@@ -7,6 +7,7 @@ import FloatingAIButton from '@/components/FloatingAIButton';
 import PrivacyAnalytics from '@/components/PrivacyAnalytics';
 import SiteFooter from '@/components/SiteFooter';
 import AppMainShell from '@/components/AppMainShell';
+import { ThemeProvider } from '@/components/ThemeProvider';
 
 const fraunces = Fraunces({
   subsets: ['latin'],
@@ -120,19 +121,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Android Chrome PWA */}
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body className="min-h-screen bg-[#FDFAF6] pb-16 md:pb-0">
-        <a
-          href="#main-content"
-          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-navy-700 focus:shadow-lg focus:outline-none"
-        >
-          Skip to main content
-        </a>
-        <PrivacyAnalytics />
-        <Navbar />
-        <AppMainShell>{children}</AppMainShell>
-        <SiteFooter />
-        <MobileBottomNav />
-        <FloatingAIButton />
+      <body className="min-h-screen bg-[#FDFAF6] dark:bg-gray-900 pb-16 md:pb-0 transition-colors duration-200">
+        <ThemeProvider>
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-navy-700 focus:shadow-lg focus:outline-none"
+          >
+            Skip to main content
+          </a>
+          <PrivacyAnalytics />
+          <Navbar />
+          <AppMainShell>{children}</AppMainShell>
+          <SiteFooter />
+          <MobileBottomNav />
+          <FloatingAIButton />
+        </ThemeProvider>
       </body>
     </html>
   );

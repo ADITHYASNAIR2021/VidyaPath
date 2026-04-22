@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Printer, Award, Star, CheckCircle, Flame, BookOpen, ClipboardCheck } from 'lucide-react';
 
 interface CertificateSummary {
@@ -63,7 +62,6 @@ function StatBox({ label, value, icon }: StatBoxProps) {
 }
 
 export default function StudentCertificatePage() {
-  const router = useRouter();
   const [summary, setSummary] = useState<CertificateSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -76,7 +74,7 @@ export default function StudentCertificatePage() {
       try {
         const res = await fetch('/api/student/certificate', { cache: 'no-store' });
         if (res.status === 401) {
-          router.push('/student/login');
+          if (active) setError('Session expired. Please sign in again.');
           return;
         }
         const body: unknown = await res.json().catch(() => null);
@@ -100,7 +98,7 @@ export default function StudentCertificatePage() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, []);
 
   return (
     <>

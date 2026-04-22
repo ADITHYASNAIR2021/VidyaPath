@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   BookOpen,
   ClipboardList,
@@ -192,7 +191,6 @@ function SectionToggle({
 }
 
 export default function StudentCalendarPage() {
-  const router = useRouter();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -206,7 +204,7 @@ export default function StudentCalendarPage() {
     try {
       const res = await fetch('/api/student/calendar', { cache: 'no-store' });
       if (res.status === 401) {
-        router.push('/student/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body: unknown = await res.json().catch(() => null);

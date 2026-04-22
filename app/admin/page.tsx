@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Users, GraduationCap, Layers, BarChart2,
   Bell, CalendarDays, Activity, Upload, Settings, ChevronRight,
@@ -39,7 +38,6 @@ const QUICK_LINKS = [
 ];
 
 export default function AdminOverviewPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<AdminOverviewResponse | null>(null);
   const [schoolName, setSchoolName] = useState('');
@@ -52,7 +50,7 @@ export default function AdminOverviewPage() {
           fetch('/api/admin/session/me', { cache: 'no-store' }),
           fetch('/api/admin/overview', { cache: 'no-store' }),
         ]);
-        if (!sessionRes.ok) { router.replace('/admin/login'); return; }
+        if (!sessionRes.ok) { return; }
         const sessionBody = unwrap<{ schoolName?: string; displayName?: string } | null>(await sessionRes.json().catch(() => null));
         setSchoolName(sessionBody?.schoolName ?? sessionBody?.displayName ?? 'School Admin');
 

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { CalendarDays, Plus, RefreshCw, Save, X } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -51,7 +50,6 @@ function slotKey(day: number, period: number): string {
 }
 
 export default function TimetablePage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -75,7 +73,7 @@ export default function TimetablePage() {
         fetch(`/api/admin/timetable?classLevel=${nextClassLevel}&section=${encodeURIComponent(sectionValue)}`, { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await timetableRes.json().catch(() => null);

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type { StudentProfile } from '@/lib/teacher-types';
 import { GraduationCap, KeyRound, Plus, RefreshCw, Search } from 'lucide-react';
 import BackButton from '@/components/BackButton';
@@ -14,7 +13,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function AdminStudentsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [students, setStudents] = useState<StudentProfile[]>([]);
@@ -41,7 +39,7 @@ export default function AdminStudentsPage() {
         fetch('/api/admin/students', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await studentsRes.json().catch(() => null);

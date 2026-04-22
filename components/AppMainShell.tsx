@@ -54,7 +54,7 @@ export default function AppMainShell({ children }: { children: React.ReactNode }
 
   if (showRoleSidebar && auth.role !== 'anonymous') {
     return (
-      <div className="flex min-h-screen bg-[#FDFAF6]">
+      <div className="flex min-h-screen bg-[#FDFAF6] dark:bg-gray-900">
         <Sidebar role={auth.role} displayName={auth.displayName} />
         <main id="main-content" tabIndex={-1} className="flex-1 min-h-screen md:ml-60 transition-all duration-200">
           {children}

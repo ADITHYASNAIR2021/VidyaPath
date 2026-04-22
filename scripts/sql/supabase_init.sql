@@ -1239,4 +1239,19 @@ begin
       before update on public.parent_links
       for each row execute function public.touch_updated_at();
   end if;
+
+  if not exists (select 1 from pg_trigger where tgname = 'student_chapter_progress_touch_updated_at') then
+    create trigger student_chapter_progress_touch_updated_at
+      before update on public.student_chapter_progress
+      for each row execute function public.touch_updated_at();
+  end if;
 end $$;
+
+-- Cross-device progress sync (run in Supabase SQL editor)
+create table if not exists public.student_chapter_progress (
+  id uuid primary key default gen_random_uuid(),
+  student_id text not null unique,
+  school_id uuid references public.schools(id) on delete set null,
+  studied_chapter_ids text[] not null default '{}',
+  updated_at timestamptz not null default now()
+);

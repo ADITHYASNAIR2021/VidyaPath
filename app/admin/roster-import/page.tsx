@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useMemo, useState, type ChangeEvent } from 'react';
-import { useRouter } from 'next/navigation';
 
 type ImportEntity = 'students' | 'teachers';
 type SourceFormat = 'csv' | 'tsv' | 'xlsx';
@@ -177,7 +176,6 @@ function pickPreviewFromSheets(entity: ImportEntity, sheets: Record<string, Arra
 }
 
 export default function AdminRosterImportPage() {
-  const router = useRouter();
   const [entity, setEntity] = useState<ImportEntity>('students');
   const [csvText, setCsvText] = useState('');
   const [preview, setPreview] = useState<ParsedPreview>({ headers: [], rows: [] });
@@ -250,7 +248,7 @@ export default function AdminRosterImportPage() {
       });
       const payload = await response.json().catch(() => null);
       if (response.status === 401) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       if (!response.ok || !payload) {

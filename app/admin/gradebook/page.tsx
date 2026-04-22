@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { BookOpen, GraduationCap, RefreshCw, Search } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import type { StudentProfile } from '@/lib/teacher-types';
@@ -27,7 +26,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function AdminGradebookPage() {
-  const router = useRouter();
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(true);
   const [loadingGrades, setLoadingGrades] = useState(false);
@@ -40,7 +38,7 @@ export default function AdminGradebookPage() {
     async function init() {
       const sessionRes = await fetch('/api/admin/session/me', { cache: 'no-store' });
       if (!sessionRes.ok) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       setLoadingStudents(true);
@@ -60,7 +58,7 @@ export default function AdminGradebookPage() {
       }
     }
     void init();
-  }, [router]);
+  }, []);
 
   async function loadStudentGrades(studentId: string) {
     setLoadingGrades(true);

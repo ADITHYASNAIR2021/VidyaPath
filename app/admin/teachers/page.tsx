@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type { TeacherProfile, TeacherScope } from '@/lib/teacher-types';
 import { ChevronDown, ChevronUp, KeyRound, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
 import BackButton from '@/components/BackButton';
@@ -20,7 +19,6 @@ const CLASS10_SUBJECTS: Subject[] = ['Physics', 'Chemistry', 'Biology', 'Math', 
 const CLASS12_SUBJECTS: Subject[] = ['Physics', 'Chemistry', 'Biology', 'Math', 'Accountancy', 'Business Studies', 'Economics', 'English Core', 'Social Science'];
 
 export default function AdminTeachersPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
@@ -55,7 +53,7 @@ export default function AdminTeachersPage() {
         fetch('/api/admin/teachers', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await teachersRes.json().catch(() => null);

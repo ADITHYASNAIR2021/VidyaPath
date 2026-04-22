@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { BarChart2, RefreshCw, TrendingUp, Users } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -33,7 +32,6 @@ function unwrap<T>(payload: unknown): T {
 }
 
 export default function AdminAnalyticsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<AnalyticsPayload | null>(null);
@@ -47,7 +45,7 @@ export default function AdminAnalyticsPage() {
         fetch('/api/admin/analytics', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await analyticsRes.json().catch(() => null);

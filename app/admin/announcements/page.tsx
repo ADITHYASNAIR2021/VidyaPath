@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Bell, RefreshCw, Send } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -33,7 +32,6 @@ const AUDIENCE_LABELS: Record<Audience, string> = {
 };
 
 export default function AdminAnnouncementsPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -53,7 +51,7 @@ export default function AdminAnnouncementsPage() {
         fetch('/api/admin/announcements?limit=200', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) {
-        router.replace('/admin/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body = await listRes.json().catch(() => null);

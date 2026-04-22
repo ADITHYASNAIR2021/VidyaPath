@@ -26,8 +26,31 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import CommandPalette from '@/components/CommandPalette';
+import { useTheme } from '@/components/ThemeProvider';
 import type { PlatformRole } from '@/lib/auth/roles';
 import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
+
+function ThemeToggle() {
+  const { theme, toggle } = useTheme();
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      className="p-2 rounded-xl text-[#4A4A6A] dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+    >
+      {theme === 'dark' ? (
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>
+        </svg>
+      ) : (
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+      )}
+    </button>
+  );
+}
 
 type ActiveRole = PlatformRole;
 
@@ -193,8 +216,8 @@ export default function Navbar() {
         className={clsx(
           'flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all',
           isActive
-            ? 'bg-saffron-50 text-saffron-700'
-            : 'text-[#4A4A6A] hover:bg-[#F7F5F0] hover:text-[#1C1C2E]'
+            ? 'bg-saffron-50 text-saffron-700 dark:bg-saffron-900/30 dark:text-saffron-400'
+            : 'text-[#4A4A6A] dark:text-gray-400 hover:bg-[#F7F5F0] dark:hover:bg-gray-700 hover:text-[#1C1C2E] dark:hover:text-gray-100'
         )}
       >
         <Icon className="w-4 h-4 shrink-0" />
@@ -204,7 +227,7 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-[#E8E4DC] bg-white/95 backdrop-blur-md">
+    <nav className="sticky top-0 z-50 border-b border-[#E8E4DC] dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="h-16 flex items-center justify-between gap-4">
 
@@ -222,7 +245,7 @@ export default function Navbar() {
           </Link>
 
           {/* Desktop nav links */}
-          <div className="hidden lg:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] bg-white p-1 overflow-x-auto max-w-[60vw]">
+          <div className="hidden lg:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] dark:border-gray-700 bg-white dark:bg-gray-800 p-1 overflow-x-auto max-w-[60vw]">
             {navLinks.map(({ href, label, icon }) => (
               <NavLink key={href} href={href} label={label} icon={icon} />
             ))}
@@ -230,6 +253,7 @@ export default function Navbar() {
 
           {/* Desktop right area */}
           <div className="hidden lg:flex items-center gap-2 shrink-0">
+            <ThemeToggle />
             <CommandPalette />
 
             {session.authenticated ? (
@@ -271,6 +295,7 @@ export default function Navbar() {
 
           {/* Mobile right area */}
           <div className="lg:hidden flex items-center gap-2">
+            <ThemeToggle />
             <CommandPalette />
             <button
               onClick={() => setMobileOpen((o) => !o)}
@@ -285,7 +310,7 @@ export default function Navbar() {
 
       {/* Mobile drawer */}
       {mobileOpen && (
-        <div className="lg:hidden border-t border-[#E8E4DC] bg-white">
+        <div className="lg:hidden border-t border-[#E8E4DC] dark:border-gray-700 bg-white dark:bg-gray-900">
           <div className="px-4 py-3 space-y-1">
 
             {/* Role badge (mobile) */}

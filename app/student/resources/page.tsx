@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   FileText,
   Link as LinkIcon,
@@ -79,7 +78,6 @@ const TYPE_OPTIONS: { value: string; label: string }[] = [
 ];
 
 export default function StudentResourcesPage() {
-  const router = useRouter();
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -92,7 +90,7 @@ export default function StudentResourcesPage() {
     try {
       const res = await fetch('/api/student/resources', { cache: 'no-store' });
       if (res.status === 401) {
-        router.push('/student/login');
+        setError('Session expired. Please sign in again.');
         return;
       }
       const body: unknown = await res.json().catch(() => null);

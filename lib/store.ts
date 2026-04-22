@@ -44,6 +44,7 @@ interface ProgressState {
   toggleStudied: (id: string) => void;
   isStudied: (id: string) => boolean;
   getStudiedCount: () => number;
+  hydrate: (ids: string[]) => void;
 }
 
 export const useProgressStore = create<ProgressState>()(
@@ -68,6 +69,7 @@ export const useProgressStore = create<ProgressState>()(
       },
       isStudied: (id) => get().studiedChapterIds.includes(id),
       getStudiedCount: () => get().studiedChapterIds.length,
+      hydrate: (ids) => set({ studiedChapterIds: Array.from(new Set(ids)) }),
     }),
     {
       name: 'vidyapath-progress',

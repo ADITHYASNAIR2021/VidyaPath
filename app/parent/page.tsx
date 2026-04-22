@@ -52,7 +52,7 @@ export default function ParentDashboardPage() {
         const data = unwrap<ParentDashboardData | null>(body);
         if (!res.ok || !data) {
           if (res.status === 401) {
-            router.replace('/parent/login');
+            if (active) setError('Session expired. Please sign in again.');
             return;
           }
           if (active) setError(body?.message || 'Failed to load parent dashboard.');
@@ -67,7 +67,7 @@ export default function ParentDashboardPage() {
     }
     void load();
     return () => { active = false; };
-  }, [router]);
+  }, []);
 
   async function logout() {
     await fetch('/api/parent/session/logout', { method: 'POST' }).catch(() => undefined);
