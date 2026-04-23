@@ -34,6 +34,37 @@ function extractRole(payload: unknown): LoginRole | null {
   return null;
 }
 
+function resolveRoleDefaultPath(role: LoginRole): string {
+  if (role === 'student') return '/chapters';
+  if (role === 'teacher') return '/teacher';
+  if (role === 'admin') return '/admin';
+  return '/developer';
+}
+
+function isNextPathAllowedForRole(nextPath: string, role: LoginRole): boolean {
+  if (nextPath.startsWith('/admin')) return role === 'admin';
+  if (nextPath.startsWith('/teacher')) return role === 'teacher';
+  if (nextPath.startsWith('/developer')) return role === 'developer';
+  if (nextPath.startsWith('/api-lab')) return role === 'admin' || role === 'developer';
+  if (
+    nextPath.startsWith('/student') ||
+    nextPath.startsWith('/dashboard') ||
+    nextPath.startsWith('/bookmarks') ||
+    nextPath.startsWith('/mock-exam') ||
+    nextPath.startsWith('/exam/assignment/')
+  ) {
+    return role === 'student';
+  }
+  return true;
+}
+
+function resolvePostLoginDestination(role: LoginRole, payload: Record<string, unknown>, nextPath: string): string {
+  if (role === 'student' && payload.mustChangePassword === true) return '/student/first-login';
+  if (role === 'teacher' && payload.mustChangePassword === true) return '/teacher/first-login';
+  if (!isNextPathAllowedForRole(nextPath, role)) return resolveRoleDefaultPath(role);
+  return nextPath || resolveRoleDefaultPath(role);
+}
+
 export default function UnifiedLoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -66,27 +97,7 @@ export default function UnifiedLoginPage() {
           : result as Record<string, unknown>;
         const role = extractRole(payload);
         if (!role) return;
-        if (role === 'student') {
-          if (payload.mustChangePassword === true) {
-            navigateAfterLogin('/student/first-login');
-            return;
-          }
-          navigateAfterLogin(nextPath || '/chapters');
-          return;
-        }
-        if (role === 'teacher') {
-          if (payload.mustChangePassword === true) {
-            navigateAfterLogin('/teacher/first-login');
-            return;
-          }
-          navigateAfterLogin(nextPath || '/teacher');
-          return;
-        }
-        if (role === 'admin') {
-          navigateAfterLogin(nextPath || '/admin');
-          return;
-        }
-        navigateAfterLogin(nextPath || '/developer');
+        navigateAfterLogin(resolvePostLoginDestination(role, payload, nextPath));
       })
       .catch(() => undefined);
     return () => {
@@ -122,28 +133,7 @@ export default function UnifiedLoginPage() {
         setError('Unable to resolve account role from login response.');
         return;
       }
-
-      if (role === 'student') {
-        if (payload.mustChangePassword === true) {
-          navigateAfterLogin('/student/first-login');
-          return;
-        }
-        navigateAfterLogin(nextPath || '/chapters');
-        return;
-      }
-      if (role === 'teacher') {
-        if (payload.mustChangePassword === true) {
-          navigateAfterLogin('/teacher/first-login');
-          return;
-        }
-        navigateAfterLogin(nextPath || '/teacher');
-        return;
-      }
-      if (role === 'admin') {
-        navigateAfterLogin(nextPath || '/admin');
-        return;
-      }
-      navigateAfterLogin(nextPath || '/developer');
+      navigateAfterLogin(resolvePostLoginDestination(role, payload, nextPath));
     } catch {
       setError('Failed to login.');
     } finally {
