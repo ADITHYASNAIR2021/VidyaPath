@@ -12,6 +12,14 @@ mermaid.initialize({
   fontFamily: 'inherit',
 });
 
+function sanitizeSvgMarkup(value: string): string {
+  return value
+    .replace(/<\s*(script|foreignObject)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|foreignObject)\b[^>]*\/?\s*>/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*(".*?"|'.*?'|[^\s>]+)/gi, '')
+    .replace(/\s+(?:href|xlink:href)\s*=\s*(['"])\s*javascript:[^'"]*\1/gi, '');
+}
+
 export default function MermaidRenderer({ chart, title = 'Process Diagram' }: { chart?: string, title?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -23,7 +31,7 @@ export default function MermaidRenderer({ chart, title = 'Process Diagram' }: { 
       try {
         const id = `mermaid-svg-${Math.random().toString(36).substring(2, 9)}`;
         const { svg } = await mermaid.render(id, chart);
-        setSvg(svg);
+        setSvg(sanitizeSvgMarkup(svg));
       } catch (err) {
         console.error('Mermaid render error', err);
       }

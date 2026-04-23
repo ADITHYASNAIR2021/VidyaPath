@@ -16,6 +16,7 @@ import { classLevel, nonEmpty } from './base';
 const trimmedString = z.string().trim();
 const optionalTrimmed = trimmedString.optional();
 const optionalNonEmpty = trimmedString.min(1).optional();
+const optionalPromptContext = trimmedString.max(2000).optional();
 
 /** classLevel that may come through as either number or numeric string. */
 const classLevelCoerce = z.coerce.number().refine((value) => value === 10 || value === 12, {
@@ -33,7 +34,7 @@ export const quizRequestSchema = z.object({
   classLevel: z.union([classLevel, z.coerce.number()]).optional(),
   questionCount: z.coerce.number().int().min(1).max(50).optional(),
   difficulty: optionalTrimmed,
-  nccontext: optionalTrimmed,
+  nccontext: optionalPromptContext,
 });
 export type QuizRequest = z.infer<typeof quizRequestSchema>;
 
@@ -46,7 +47,7 @@ export const flashcardsRequestSchema = z.object({
   chapterId: optionalTrimmed,
   chapterTitle: optionalTrimmed,
   classLevel: z.union([classLevel, z.coerce.number()]).optional(),
-  nccontext: optionalTrimmed,
+  nccontext: optionalPromptContext,
 });
 export type FlashcardsRequest = z.infer<typeof flashcardsRequestSchema>;
 
@@ -119,7 +120,7 @@ export const chapterDiagnoseRequestSchema = z.object({
   flashcardsDue: z.coerce.number().optional(),
   studied: z.boolean().optional(),
   bookmarked: z.boolean().optional(),
-  recentMistakes: z.array(trimmedString).optional(),
+  recentMistakes: z.array(trimmedString.max(300)).max(12).optional(),
 });
 export type ChapterDiagnoseRequest = z.infer<typeof chapterDiagnoseRequestSchema>;
 
@@ -129,7 +130,7 @@ export type ChapterDiagnoseRequest = z.infer<typeof chapterDiagnoseRequestSchema
 
 export const chapterRemediateRequestSchema = z.object({
   chapterId: nonEmpty,
-  weakTags: z.array(trimmedString).optional(),
+  weakTags: z.array(trimmedString.max(160)).max(12).optional(),
   availableDays: z.coerce.number().int().optional(),
   dailyMinutes: z.coerce.number().int().optional(),
 });
@@ -207,7 +208,7 @@ export const teacherAiRequestSchema = z
     topics: z.array(z.string()).optional(),
     questionCount: z.coerce.number().int().min(1).max(50).optional(),
     difficulty: optionalTrimmed,
-    customContext: optionalTrimmed,
+    customContext: optionalPromptContext,
   })
   .passthrough();
 export type TeacherAiRequest = z.infer<typeof teacherAiRequestSchema>;

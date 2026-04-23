@@ -73,7 +73,8 @@
       "Bash(grep -E \"\\\\.ts$|^d\")",
       "Bash(awk '{print $NF}')",
       "Bash(cd /d D:\\\\VidyaPath)",
-      "Bash(dir components\\\\FloatingPomodoro.tsx components\\\\AskTeacherButton.tsx app\\\\api\\\\student\\\\questions\\\\route.ts app\\\\api\\\\teacher\\\\questions\\\\route.ts app\\\\teacher\\\\questions\\\\page.tsx app\\\\student\\\\questions\\\\page.tsx)"
+      "Bash(dir components\\\\FloatingPomodoro.tsx components\\\\AskTeacherButton.tsx app\\\\api\\\\student\\\\questions\\\\route.ts app\\\\api\\\\teacher\\\\questions\\\\route.ts app\\\\teacher\\\\questions\\\\page.tsx app\\\\student\\\\questions\\\\page.tsx)",
+      "Bash(git -C /d/VidyaPath status --short)"
     ]
   }
 }

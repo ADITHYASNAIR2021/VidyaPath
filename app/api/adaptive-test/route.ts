@@ -1,5 +1,6 @@
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
@@ -12,11 +13,13 @@ import {
   type MCQItem,
 } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
+import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { adaptiveTestRequestSchema } from '@/lib/schemas/ai';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 interface AdaptiveTestRequest {
   classLevel: 10 | 12;
@@ -159,6 +162,22 @@ export async function POST(req: Request) {
     const { context, response: authResponse } = await requireInteractiveAuth();
     if (authResponse) return authResponse;
 
+    const limit = await checkRateLimit({
+      key: buildRateLimitKey('ai:adaptive-test', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      windowSeconds: 60,
+      maxRequests: 10,
+      blockSeconds: 120,
+    });
+    if (!limit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many adaptive test requests. Please retry shortly.',
+        status: 429,
+        hint: `Retry after ${limit.retryAfterSeconds}s`,
+      });
+    }
+
     const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, adaptiveTestRequestSchema);
     if (!bodyResult.ok) {
       return errorJson({
@@ -197,9 +216,13 @@ export async function POST(req: Request) {
 
     const fallback = buildFallbackQuestions(parsed);
     const chapter = ALL_CHAPTERS.find((item) => item.id === parsed.chapterIds[0]);
-    const pyqSummary = parsed.chapterIds
-      .map((id) => getPYQData(id))
+    const pyqRows = (await Promise.all(
+      parsed.chapterIds.map(async (id) => (await getGroundedPYQData(id)) ?? getPYQData(id))
+    ))
       .filter((item): item is NonNullable<ReturnType<typeof getPYQData>> => !!item)
+      .slice(0, 6);
+    const pyqTopics = pyqRows.flatMap((item) => item.importantTopics ?? []);
+    const pyqSummary = pyqRows
       .slice(0, 4)
       .map((item) => `avg ${item.avgMarks} | topics: ${item.importantTopics.slice(0, 3).join(', ')}`)
       .join('\n');
@@ -263,9 +286,16 @@ ${buildVariationInstruction(variation)}`;
         .slice(0, Math.max(3, parsed.questionCount ?? 10));
       const merged = normalized.length > 0 ? normalized : fallback.questions;
       const finalQuestions = ensureAdaptiveQuestionCount(merged, parsed);
-      const answerKey = finalQuestions.map((question) => question.answer);
+      const topicHints = selectedChapters.flatMap((item) => item.topics ?? []);
+      const annotatedQuestions = annotateQuestionsWithRagMeta(finalQuestions, {
+        chapterTitle: chapter?.title,
+        chapterTopics: topicHints,
+        pyqTopics,
+        contextSnippets: contextPack.snippets,
+      });
+      const answerKey = annotatedQuestions.map((question) => question.answer);
       const response: AdaptiveTestResponse = {
-        questions: finalQuestions,
+        questions: annotatedQuestions,
         answerKey,
         topicCoverage: cleanTextList(
           Array.isArray(data.topicCoverage) ? data.topicCoverage : fallback.topicCoverage,
@@ -288,7 +318,22 @@ ${buildVariationInstruction(variation)}`;
       return dataJson({ requestId, data: response });
     } catch (aiError) {
       console.error('[adaptive-test] AI fallback triggered', aiError);
-      return dataJson({ requestId, data: fallback });
+      const selectedChapters = ALL_CHAPTERS.filter((item) => parsed.chapterIds.includes(item.id));
+      const topicHints = selectedChapters.flatMap((item) => item.topics ?? []);
+      const fallbackQuestions = annotateQuestionsWithRagMeta(fallback.questions, {
+        chapterTitle: chapter?.title,
+        chapterTopics: topicHints,
+        pyqTopics,
+        contextSnippets: contextPack.snippets,
+      });
+      return dataJson({
+        requestId,
+        data: {
+          ...fallback,
+          questions: fallbackQuestions,
+          answerKey: fallbackQuestions.map((question) => question.answer),
+        },
+      });
     }
   } catch (error) {
     console.error('[adaptive-test] error', error);

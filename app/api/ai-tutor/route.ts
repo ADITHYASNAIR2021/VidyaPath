@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskText, type ChatMessage } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
@@ -186,7 +187,9 @@ export async function POST(req: NextRequest) {
     }
 
     const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
-    const pyq = chapterContext?.chapterId ? getPYQData(chapterContext.chapterId) : null;
+    const pyq = chapterContext?.chapterId
+      ? (await getGroundedPYQData(chapterContext.chapterId)) ?? getPYQData(chapterContext.chapterId)
+      : null;
     const contextPack = chapterContext
       ? await getContextPack({
           task: 'chat',

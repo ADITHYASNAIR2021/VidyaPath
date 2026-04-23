@@ -110,9 +110,10 @@ async function parseSignedSessionToken(
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const singleEnvMode = process.env.SINGLE_ENV_MODE === '1';
+  const method = request.method.toUpperCase();
   const isProtectedApiMutation =
     pathname.startsWith('/api/') &&
-    !['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase());
+    !['GET', 'HEAD', 'OPTIONS'].includes(method);
   if (isProtectedApiMutation && !csrfAllowedForMutation(request)) {
     return NextResponse.json(
       {
@@ -135,6 +136,88 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
   if (pathname.startsWith('/api/')) {
+    const isAdminApi = pathname.startsWith('/api/admin');
+    const isDeveloperApi = pathname.startsWith('/api/developer');
+    const isTeacherApi = pathname.startsWith('/api/teacher');
+    const isStudentApi = pathname.startsWith('/api/student');
+    const isParentApi = pathname.startsWith('/api/parent');
+    const isExamApi = pathname.startsWith('/api/exam/session') || pathname.startsWith('/api/mock-exam');
+    const isRoleSwitchApi = pathname === '/api/auth/role/switch';
+    const isPublicTeacherRead = isTeacherApi && pathname === '/api/teacher' && (method === 'GET' || method === 'HEAD');
+    const isAdminLoginApi = pathname === '/api/admin/session/bootstrap';
+    const isTeacherLoginApi = pathname === '/api/teacher/session/login';
+    const isStudentLoginApi = pathname === '/api/student/session/login';
+    const isDeveloperLoginApi = pathname === '/api/developer/session/login';
+    const isParentLoginApi = pathname === '/api/parent/session/login';
+
+    const requiresAdmin = isAdminApi && !isAdminLoginApi;
+    const requiresDeveloperLike = isDeveloperApi && !isDeveloperLoginApi;
+    const requiresTeacher =
+      isTeacherApi &&
+      !isPublicTeacherRead &&
+      !isTeacherLoginApi &&
+      method !== 'GET' &&
+      method !== 'HEAD';
+    const requiresStudent = (isStudentApi && !isStudentLoginApi) || isExamApi;
+    const requiresParent = isParentApi && !isParentLoginApi;
+    const requiresAnySession = isRoleSwitchApi;
+
+    if (
+      !requiresAdmin &&
+      !requiresDeveloperLike &&
+      !requiresTeacher &&
+      !requiresStudent &&
+      !requiresParent &&
+      !requiresAnySession
+    ) {
+      return NextResponse.next();
+    }
+
+    const sessionSecret = resolveSessionSecret();
+    const adminToken = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
+    const teacherToken = request.cookies.get(TEACHER_SESSION_COOKIE)?.value;
+    const studentToken = request.cookies.get(STUDENT_SESSION_COOKIE)?.value;
+    const developerToken = request.cookies.get(DEVELOPER_SESSION_COOKIE)?.value;
+    const parentToken = request.cookies.get(PARENT_SESSION_COOKIE)?.value;
+
+    const [adminSession, teacherSession, studentSession, developerSession, parentSession] = await Promise.all([
+      parseSignedSessionToken(adminToken, 'admin', sessionSecret),
+      parseSignedSessionToken(teacherToken, 'teacher', sessionSecret),
+      parseSignedSessionToken(studentToken, 'student', sessionSecret),
+      parseSignedSessionToken(developerToken, 'developer', sessionSecret),
+      parseSignedSessionToken(parentToken, 'parent', sessionSecret),
+    ]);
+    const hasAdminSession = !!adminSession;
+    const hasTeacherSession = !!teacherSession;
+    const hasStudentSession = !!studentSession;
+    const hasParentSession = !!parentSession;
+    const hasDeveloperLikeSession = !!developerSession || (singleEnvMode && hasAdminSession);
+
+    const unauthorizedApiResponse = NextResponse.json(
+      {
+        ok: false,
+        errorCode: 'unauthorized',
+        message: 'Unauthorized API access.',
+      },
+      { status: 401 }
+    );
+
+    if (requiresAdmin && !hasAdminSession) return unauthorizedApiResponse;
+    if (requiresDeveloperLike && !hasDeveloperLikeSession) return unauthorizedApiResponse;
+    if (requiresTeacher && !hasTeacherSession) return unauthorizedApiResponse;
+    if (requiresStudent && !hasStudentSession) return unauthorizedApiResponse;
+    if (requiresParent && !hasParentSession) return unauthorizedApiResponse;
+    if (
+      requiresAnySession &&
+      !hasAdminSession &&
+      !hasTeacherSession &&
+      !hasStudentSession &&
+      !hasParentSession &&
+      !hasDeveloperLikeSession
+    ) {
+      return unauthorizedApiResponse;
+    }
+
     return NextResponse.next();
   }
   const sessionSecret = resolveSessionSecret();
@@ -148,6 +231,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/api-lab');
   const needsDeveloper =
     pathname.startsWith('/developer') ||
+    pathname.startsWith('/api-lab') ||
     (singleEnvMode && pathname.startsWith('/admin'));
   const needsTeacher = pathname.startsWith('/teacher');
   const needsStudent =

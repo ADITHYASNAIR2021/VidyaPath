@@ -28,6 +28,13 @@ interface ChapterDrillData {
     options: string[];
     answer: number;
     explanation: string;
+    ragMeta?: {
+      askedInPastExam: boolean;
+      pyqTag: 'asked-before' | 'pyq-inspired' | 'new';
+      years?: number[];
+      qualityBand?: 'high' | 'medium' | 'baseline';
+      qualityScore?: number;
+    };
   }>;
 }
 
@@ -50,6 +57,13 @@ interface ChapterRemediateData {
   }>;
   checkpoints: string[];
   expectedScoreLift: string;
+}
+
+function unwrapApiPayload<T>(payload: unknown): T {
+  if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) {
+    return (payload as { data: T }).data;
+  }
+  return payload as T;
 }
 
 function getFlashcardsDue(chapterId: string, flashcardCount: number): number {
@@ -180,12 +194,14 @@ export default function ChapterIntelligenceHub({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chapterId }),
       });
-      const data = await response.json().catch(() => ({}));
+      const body = await response.json().catch(() => ({}));
+      const data = unwrapApiPayload<ChapterPackData>(body);
       if (!response.ok) {
-        setError(data.error || 'Failed to build chapter pack.');
+        const message = (body && typeof body === 'object' ? (body as Record<string, unknown>).message : null) as string | null;
+        setError(message || 'Failed to build chapter pack.');
         return;
       }
-      setPackData(data as ChapterPackData);
+      setPackData(data);
     } catch {
       setError('Network error while generating chapter pack.');
     } finally {
@@ -206,12 +222,14 @@ export default function ChapterIntelligenceHub({
           difficulty,
         }),
       });
-      const data = await response.json().catch(() => ({}));
+      const body = await response.json().catch(() => ({}));
+      const data = unwrapApiPayload<ChapterDrillData>(body);
       if (!response.ok) {
-        setError(data.error || 'Failed to create chapter drill.');
+        const message = (body && typeof body === 'object' ? (body as Record<string, unknown>).message : null) as string | null;
+        setError(message || 'Failed to create chapter drill.');
         return;
       }
-      setDrillData(data as ChapterDrillData);
+      setDrillData(data);
     } catch {
       setError('Network error while generating drill set.');
     } finally {
@@ -234,12 +252,14 @@ export default function ChapterIntelligenceHub({
           bookmarked: localPerformance.bookmarked,
         }),
       });
-      const data = await response.json().catch(() => ({}));
+      const body = await response.json().catch(() => ({}));
+      const data = unwrapApiPayload<ChapterDiagnoseData>(body);
       if (!response.ok) {
-        setError(data.error || 'Failed to diagnose this chapter.');
+        const message = (body && typeof body === 'object' ? (body as Record<string, unknown>).message : null) as string | null;
+        setError(message || 'Failed to diagnose this chapter.');
         return;
       }
-      setDiagnoseData(data as ChapterDiagnoseData);
+      setDiagnoseData(data);
     } catch {
       setError('Network error while running diagnosis.');
     } finally {
@@ -261,12 +281,14 @@ export default function ChapterIntelligenceHub({
           dailyMinutes: 45,
         }),
       });
-      const data = await response.json().catch(() => ({}));
+      const body = await response.json().catch(() => ({}));
+      const data = unwrapApiPayload<ChapterRemediateData>(body);
       if (!response.ok) {
-        setError(data.error || 'Failed to build remediation plan.');
+        const message = (body && typeof body === 'object' ? (body as Record<string, unknown>).message : null) as string | null;
+        setError(message || 'Failed to build remediation plan.');
         return;
       }
-      setRemediateData(data as ChapterRemediateData);
+      setRemediateData(data);
     } catch {
       setError('Network error while building remediation plan.');
     } finally {
@@ -376,6 +398,27 @@ export default function ChapterIntelligenceHub({
                 <p className="font-semibold">
                   {index + 1}. {question.question}
                 </p>
+                {question.ragMeta && (
+                  <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
+                    <span className="rounded-full border border-emerald-200 bg-emerald-100/60 px-1.5 py-0.5 text-emerald-800">
+                      {question.ragMeta.pyqTag === 'asked-before'
+                        ? 'Asked before'
+                        : question.ragMeta.pyqTag === 'pyq-inspired'
+                          ? 'PYQ-inspired'
+                          : 'Fresh'}
+                    </span>
+                    {Array.isArray(question.ragMeta.years) && question.ragMeta.years.length > 0 && (
+                      <span className="rounded-full border border-sky-200 bg-sky-100/70 px-1.5 py-0.5 text-sky-800">
+                        Years: {question.ragMeta.years.slice(0, 2).join(', ')}
+                      </span>
+                    )}
+                    {question.ragMeta.qualityBand && (
+                      <span className="rounded-full border border-violet-200 bg-violet-100/70 px-1.5 py-0.5 text-violet-800">
+                        Quality: {question.ragMeta.qualityBand}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="mt-1 text-[11px] text-emerald-600">
                   {question.options.map((option, optionIndex) => (
                     <p key={`${index}-${optionIndex}-${option.slice(0, 24)}`}>

@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { getServiceClient } from '@/lib/supabase-rest';
+import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 
 const PUSH_TABLE = 'push_subscriptions';
 
@@ -25,10 +25,11 @@ export async function POST(req: NextRequest) {
     return errorJson({ requestId, errorCode: 'missing-fields', message: 'endpoint, keys.p256dh, and keys.auth are required.', status: 400 });
   }
 
-  const client = getServiceClient();
-  if (!client) {
+  const resolution = resolveRequestSupabaseClient(req, 'user-first');
+  if (!resolution) {
     return errorJson({ requestId, errorCode: 'db-unavailable', message: 'Database not configured.', status: 503 });
   }
+  const client = resolution.client;
 
   try {
     const { data: existing } = await client

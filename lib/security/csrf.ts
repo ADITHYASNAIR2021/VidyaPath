@@ -56,7 +56,16 @@ export function hasCookieHeader(req: Request): boolean {
 
 export function csrfAllowedForMutation(req: Request): boolean {
   if (!isMutationMethod(req.method)) return true;
-  if (!hasCookieHeader(req)) return true;
   if (!hasSafeFetchSite(req)) return false;
-  return isSameOriginRequest(req) || isTrustedReferer(req);
+  if (isSameOriginRequest(req) || isTrustedReferer(req)) return true;
+
+  // For non-browser service calls (e.g. backend cron), allow only when no browser-origin signals exist.
+  if (!hasCookieHeader(req)) {
+    const hasOrigin = !!normalizeOrigin(req.headers.get('origin')?.trim());
+    const hasReferer = !!normalizeOrigin(req.headers.get('referer')?.trim());
+    const fetchSite = (req.headers.get('sec-fetch-site') || '').trim().toLowerCase();
+    return !hasOrigin && !hasReferer && (!fetchSite || fetchSite === 'none');
+  }
+
+  return false;
 }

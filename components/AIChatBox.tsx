@@ -189,6 +189,14 @@ function formatAIResponse(text: string): string {
   return processed;
 }
 
+function sanitizeRenderedHtml(value: string): string {
+  return value
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta|base)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta|base)\b[^>]*\/?\s*>/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*(".*?"|'.*?'|[^\s>]+)/gi, '')
+    .replace(/\s+(?:href|src|xlink:href)\s*=\s*(['"])\s*javascript:[^'"]*\1/gi, '');
+}
+
 const QUICK_QUESTIONS = (chapterTitle: string, topics: string[]) => [
   `Explain ${topics[0] ?? 'this topic'} simply`,
   `Important formulas in ${chapterTitle}?`,
@@ -422,7 +430,7 @@ export default function AIChatBox({
                     {msg.role === 'assistant' ? (
                       <div
                         dangerouslySetInnerHTML={{
-                          __html: formatAIResponse(msg.content),
+                          __html: sanitizeRenderedHtml(formatAIResponse(msg.content)),
                         }}
                       />
                     ) : (

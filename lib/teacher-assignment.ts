@@ -1,8 +1,10 @@
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { generateTaskJson } from '@/lib/ai/generator';
+import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
 import {
   cleanTextList,
   normalizeMCQs,
@@ -168,10 +170,10 @@ function buildFallbackFormulaDrill(chapterId: string, includeFormulaDrill: boole
   }));
 }
 
-function buildFallbackCommonMistakes(chapterId: string): string[] {
+async function buildFallbackCommonMistakes(chapterId: string): Promise<string[]> {
   const chapter = getChapterById(chapterId);
   if (!chapter) return [];
-  const pyq = getPYQData(chapterId);
+  const pyq = (await getGroundedPYQData(chapterId)) ?? getPYQData(chapterId);
   const pyqMistakes = (pyq?.importantTopics ?? []).slice(0, 4).map(
     (topic) => `Weak handling of ${topic} during board-style answers.`
   );
@@ -234,26 +236,47 @@ function ensureExactMcqCount(items: MCQItem[], chapterId: string, questionCount:
   return normalizeMCQs(output).slice(0, questionCount);
 }
 
+function parseAnswerTokenToIndex(token: string, optionCount: number): number | null {
+  const clean = token.trim().toUpperCase();
+  if (!clean) return null;
+  if (/^[A-Z]$/.test(clean)) {
+    const letterIndex = clean.charCodeAt(0) - 'A'.charCodeAt(0);
+    return letterIndex >= 0 && letterIndex < optionCount ? letterIndex : null;
+  }
+  if (/^\d+$/.test(clean)) {
+    const value = Number(clean);
+    if (value >= 0 && value < optionCount) return value;
+    if (value >= 1 && value <= optionCount) return value - 1;
+  }
+  return null;
+}
+
+function parseIndexedAnswerList(value: string, optionCount: number): number[] {
+  const indexes = value
+    .split(/[^A-Za-z0-9]+/)
+    .map((token) => parseAnswerTokenToIndex(token, optionCount))
+    .filter((entry): entry is number => entry !== null);
+  return Array.from(new Set(indexes)).sort((a, b) => a - b);
+}
+
 function guessOptionIndex(answerText: string, options: string[]): number | null {
   const clean = answerText.trim();
   if (!clean) return null;
 
-  const optionIndexMatch = clean.match(/option\s*[:=-]?\s*([0-3])/i);
+  const optionCount = options.length;
+  const optionIndexMatch = clean.match(/option\s*[:=-]?\s*([A-Za-z0-9]+)/i);
   if (optionIndexMatch) {
-    const idx = Number(optionIndexMatch[1]);
-    return idx >= 0 && idx <= 3 ? idx : null;
+    return parseAnswerTokenToIndex(optionIndexMatch[1], optionCount);
   }
 
-  const oneBasedMatch = clean.match(/^\s*([1-4])\s*$/);
-  if (oneBasedMatch) {
-    const idx = Number(oneBasedMatch[1]) - 1;
-    return idx >= 0 && idx <= 3 ? idx : null;
-  }
-
-  const letterMatch = clean.match(/\b([A-D])\b/i);
-  if (letterMatch) {
-    const idx = letterMatch[1].toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
-    return idx >= 0 && idx <= 3 ? idx : null;
+  const singleTokenMatch = clean.match(/^\s*([A-Za-z0-9]+)\s*$/);
+  if (singleTokenMatch) {
+    if (/^\d+$/.test(singleTokenMatch[1])) {
+      const numeric = Number(singleTokenMatch[1]);
+      if (numeric >= 1 && numeric <= optionCount) return numeric - 1;
+    }
+    const parsed = parseAnswerTokenToIndex(singleTokenMatch[1], optionCount);
+    if (parsed !== null) return parsed;
   }
 
   const lowered = clean.toLowerCase();
@@ -264,6 +287,26 @@ function guessOptionIndex(answerText: string, options: string[]): number | null 
   }
 
   return null;
+}
+
+function parseMultipleOptionIndexes(answerText: string, options: string[]): number[] {
+  const clean = answerText.trim();
+  if (!clean) return [];
+  const optionCount = options.length;
+  const prefixedListMatch = clean.match(/options?\s*[:=-]\s*(.+)$/i);
+  if (prefixedListMatch) {
+    return parseIndexedAnswerList(prefixedListMatch[1], optionCount);
+  }
+  if (/[,\|;/]/.test(clean)) {
+    return parseIndexedAnswerList(clean, optionCount);
+  }
+  const letterMatches = [...clean.toUpperCase().matchAll(/\b([A-Z])\b/g)]
+    .map((match) => parseAnswerTokenToIndex(match[1], optionCount))
+    .filter((entry): entry is number => entry !== null);
+  if (letterMatches.length >= 2) {
+    return Array.from(new Set(letterMatches)).sort((a, b) => a - b);
+  }
+  return [];
 }
 
 function sanitizeAnswers(answers: TeacherSubmissionAnswer[]): TeacherSubmissionAnswer[] {
@@ -294,7 +337,7 @@ export async function buildTeacherAssignmentPackDraft(
   const fallbackShortAnswers = buildFallbackShortAnswers(chapter.id, includeShortAnswers);
   const fallbackLongAnswers = includeLongAnswers ? buildFallbackLongAnswers(chapter.id) : [];
   const fallbackFormulaDrill = buildFallbackFormulaDrill(chapter.id, includeFormulaDrill);
-  const fallbackMistakes = buildFallbackCommonMistakes(chapter.id);
+  const fallbackMistakes = await buildFallbackCommonMistakes(chapter.id);
   const fallbackEstimatedTime = Math.max(
     20,
     questionCount * 2 + (includeShortAnswers ? fallbackShortAnswers.length * 5 : 0)
@@ -316,7 +359,13 @@ export async function buildTeacherAssignmentPackDraft(
     difficulty: difficultyMix,
   });
 
-  const pyq = getPYQData(chapter.id);
+  const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
+  const annotatedFallbackMcqs = annotateQuestionsWithRagMeta(fallbackMcqs, {
+    chapterTitle: chapter.title,
+    chapterTopics: chapter.topics,
+    pyqTopics: pyq?.importantTopics ?? [],
+    contextSnippets: contextPack.snippets,
+  });
   const prompt = `Create a teacher-ready assignment pack for CBSE chapter practice.
 Chapter: ${chapter.title} (${chapter.subject}, Class ${chapter.classLevel}, id ${chapter.id})
 Requested MCQs: ${questionCount}
@@ -357,7 +406,15 @@ ${buildVariationInstruction(variation)}`;
       validate: isAssignmentDraftResponse,
     });
 
-    const mcqs = withFallbackMcqs(data.mcqs, fallbackMcqs, chapter.id, questionCount);
+    const mcqs = annotateQuestionsWithRagMeta(
+      withFallbackMcqs(data.mcqs, annotatedFallbackMcqs, chapter.id, questionCount),
+      {
+        chapterTitle: chapter.title,
+        chapterTopics: chapter.topics,
+        pyqTopics: pyq?.importantTopics ?? [],
+        contextSnippets: contextPack.snippets,
+      }
+    );
     const shortAnswers = includeShortAnswers
       ? cleanTextList(data.shortAnswers, 12).length > 0
         ? cleanTextList(data.shortAnswers, 12)
@@ -404,7 +461,7 @@ ${buildVariationInstruction(variation)}`;
       dueDate: request.dueDate ? sanitizeText(request.dueDate, 40) : undefined,
       includeShortAnswers,
       includeFormulaDrill,
-      mcqs: fallbackMcqs,
+      mcqs: annotatedFallbackMcqs,
       shortAnswers: fallbackShortAnswers,
       longAnswers: fallbackLongAnswers,
       formulaDrill: fallbackFormulaDrill,
@@ -439,7 +496,24 @@ export function evaluateTeacherAssignmentSubmission(
     const studentAnswer = answerMap.get(questionNo);
     const question = pack.mcqs[idx];
     const prompt = sanitizeText(question.question, 320);
-    const expectedAnswer = `${String.fromCharCode(65 + question.answer)}. ${question.options[question.answer] ?? ''}`;
+    const optionLabels = question.options.length >= 5 ? 'A/B/C/D/E' : 'A/B/C/D';
+    const multiAnswerIndexes = Array.isArray(question.answers)
+      ? Array.from(
+          new Set(
+            question.answers.filter(
+              (entry) => Number.isInteger(entry) && entry >= 0 && entry < question.options.length
+            )
+          )
+        ).sort((a, b) => a - b)
+      : [];
+    const isMultiple = question.answerMode === 'multiple' && multiAnswerIndexes.length >= 2;
+    const singleIndex = Number.isInteger(question.answer) && question.answer >= 0 && question.answer < question.options.length
+      ? question.answer
+      : 0;
+    const correctIndexes = isMultiple ? multiAnswerIndexes : [singleIndex];
+    const expectedAnswer = correctIndexes
+      .map((correctIndex) => `${String.fromCharCode(65 + correctIndex)}. ${question.options[correctIndex] ?? ''}`)
+      .join(' | ');
     if (!studentAnswer) {
       mistakes.push(`${questionNo}: left unanswered.`);
       weakTopicTokens.push(...(question.question.toLowerCase().match(/[a-z]{4,}/g) ?? []).slice(0, 2));
@@ -458,9 +532,87 @@ export function evaluateTeacherAssignmentSubmission(
       continue;
     }
 
+    if (isMultiple) {
+      const parsedIndexes = parseMultipleOptionIndexes(studentAnswer, question.options);
+      const fallbackSingle = guessOptionIndex(studentAnswer, question.options);
+      const selectedIndexes = parsedIndexes.length > 0
+        ? parsedIndexes
+        : (fallbackSingle !== null ? [fallbackSingle] : []);
+      if (selectedIndexes.length === 0) {
+        mistakes.push(`${questionNo}: answer format unclear; choose ${optionLabels} explicitly.`);
+        weakTopicTokens.push(...(question.question.toLowerCase().match(/[a-z]{4,}/g) ?? []).slice(0, 2));
+        wrongCount += 1;
+        questionResults.push({
+          questionNo,
+          kind: 'mcq',
+          prompt,
+          studentAnswer,
+          expectedAnswer,
+          verdict: 'wrong',
+          scoreAwarded: 0,
+          maxScore: 1,
+          feedback: `Answer format unclear. Use ${optionLabels} or option indexes.`,
+        });
+        continue;
+      }
+      const selectedSet = new Set(selectedIndexes);
+      const correctSet = new Set(correctIndexes);
+      const overlapCount = [...selectedSet].filter((entry) => correctSet.has(entry)).length;
+      const isExact = selectedSet.size === correctSet.size && [...selectedSet].every((entry) => correctSet.has(entry));
+      if (isExact) {
+        mcqPoints += 1;
+        correctCount += 1;
+        questionResults.push({
+          questionNo,
+          kind: 'mcq',
+          prompt,
+          studentAnswer,
+          expectedAnswer,
+          verdict: 'correct',
+          scoreAwarded: 1,
+          maxScore: 1,
+          feedback: 'All correct options selected.',
+        });
+        continue;
+      }
+      if (overlapCount > 0) {
+        mcqPoints += 0.5;
+        partialCount += 1;
+        mistakes.push(`${questionNo}: partially correct multi-select answer. Review missed or extra options.`);
+        weakTopicTokens.push(...(question.question.toLowerCase().match(/[a-z]{4,}/g) ?? []).slice(0, 2));
+        questionResults.push({
+          questionNo,
+          kind: 'mcq',
+          prompt,
+          studentAnswer,
+          expectedAnswer,
+          verdict: 'partial',
+          scoreAwarded: 0.5,
+          maxScore: 1,
+          feedback: 'Partially correct. You selected some correct options but missed or added others.',
+        });
+        continue;
+      }
+      mistakes.push(`${questionNo}: incorrect options selected. Recheck the core concept and condition.`);
+      weakTopicTokens.push(...(question.question.toLowerCase().match(/[a-z]{4,}/g) ?? []).slice(0, 3));
+      wrongCount += 1;
+      questionResults.push({
+        questionNo,
+        kind: 'mcq',
+        prompt,
+        studentAnswer,
+        expectedAnswer,
+        verdict: 'wrong',
+        scoreAwarded: 0,
+        maxScore: 1,
+        feedback: 'Incorrect options selected.',
+      });
+      continue;
+    }
+
     const selected = guessOptionIndex(studentAnswer, question.options);
     if (selected === null) {
-      mistakes.push(`${questionNo}: answer format unclear; choose A/B/C/D explicitly.`);
+      mistakes.push(`${questionNo}: answer format unclear; choose ${optionLabels} explicitly.`);
       weakTopicTokens.push(...(question.question.toLowerCase().match(/[a-z]{4,}/g) ?? []).slice(0, 2));
       wrongCount += 1;
       questionResults.push({
@@ -472,12 +624,12 @@ export function evaluateTeacherAssignmentSubmission(
         verdict: 'wrong',
         scoreAwarded: 0,
         maxScore: 1,
-        feedback: 'Answer format unclear. Use A/B/C/D or option index.',
+        feedback: `Answer format unclear. Use ${optionLabels} or option index.`,
       });
       continue;
     }
 
-    if (selected === question.answer) {
+    if (selected === singleIndex) {
       mcqPoints += 1;
       correctCount += 1;
       questionResults.push({

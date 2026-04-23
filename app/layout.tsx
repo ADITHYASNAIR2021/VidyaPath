@@ -4,10 +4,12 @@ import './globals.css';
 import Navbar from '@/components/Navbar';
 import MobileBottomNav from '@/components/MobileBottomNav';
 import FloatingAIButton from '@/components/FloatingAIButton';
+import FloatingPomodoro from '@/components/FloatingPomodoro';
 import PrivacyAnalytics from '@/components/PrivacyAnalytics';
 import SiteFooter from '@/components/SiteFooter';
 import AppMainShell from '@/components/AppMainShell';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 const fraunces = Fraunces({
   subsets: ['latin'],
@@ -30,7 +32,10 @@ const jetbrainsMono = JetBrains_Mono({
 const BASE_URL = 'https://sreyas-vidyapath.vercel.com';
 
 export const viewport: Viewport = {
-  themeColor: '#8B5CF6',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#FDFAF6' },
+    { media: '(prefers-color-scheme: dark)', color: '#0A1220' },
+  ],
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -111,9 +116,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <head>
         <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var saved=localStorage.getItem('vp-theme');var dark=saved?saved==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',dark);document.documentElement.style.colorScheme=dark?'dark':'light';}catch(e){}})();",
+          }}
+        />
+        <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
+        <meta name="color-scheme" content="light dark" />
         {/* iOS PWA */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -134,11 +146,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <AppMainShell>{children}</AppMainShell>
           <SiteFooter />
           <MobileBottomNav />
+          <PwaInstallPrompt />
+          <FloatingPomodoro />
           <FloatingAIButton />
         </ThemeProvider>
       </body>
     </html>
   );
 }
-
-

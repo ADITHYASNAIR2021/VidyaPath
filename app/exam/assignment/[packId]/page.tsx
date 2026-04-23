@@ -63,6 +63,31 @@ function extractApiError(payload: unknown, fallback: string): string {
   return String(raw.message || raw.error || fallback);
 }
 
+function renderQuestionRagMeta(meta: TeacherAssignmentPack['mcqs'][number]['ragMeta']) {
+  if (!meta) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
+      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-semibold text-indigo-700">
+        {meta.pyqTag === 'asked-before'
+          ? 'Asked in previous exams'
+          : meta.pyqTag === 'pyq-inspired'
+            ? 'PYQ-inspired'
+            : 'Fresh pattern'}
+      </span>
+      {Array.isArray(meta.years) && meta.years.length > 0 && (
+        <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-semibold text-sky-700">
+          Years: {meta.years.slice(0, 2).join(', ')}
+        </span>
+      )}
+      {meta.qualityBand && (
+        <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-semibold text-violet-700">
+          Quality: {meta.qualityBand}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function ProctoredExamPage() {
   const params = useParams<{ packId: string }>();
   const packId = String(params.packId ?? '').trim();
@@ -76,7 +101,7 @@ export default function ProctoredExamPage() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<ExamSubmitResponse | null>(null);
-  const [mcqAnswers, setMcqAnswers] = useState<Record<string, number>>({});
+  const [mcqAnswers, setMcqAnswers] = useState<Record<string, number[]>>({});
   const [shortAnswers, setShortAnswers] = useState<Record<string, string>>({});
   const [longAnswers, setLongAnswers] = useState<Record<string, string>>({});
   const [violationCount, setViolationCount] = useState(0);
@@ -223,6 +248,35 @@ export default function ProctoredExamPage() {
     return [...mcq, ...shorts, ...longs];
   }, [pack]);
 
+  function getSelectedMcqAnswers(questionNo: string): number[] {
+    const selected = mcqAnswers[questionNo];
+    if (!Array.isArray(selected)) return [];
+    return Array.from(new Set(selected.filter((item) => Number.isInteger(item))));
+  }
+
+  function setSingleMcqAnswer(questionNo: string, optionIndex: number) {
+    setMcqAnswers((prev) => ({ ...prev, [questionNo]: [optionIndex] }));
+  }
+
+  function toggleMultipleMcqAnswer(questionNo: string, optionIndex: number) {
+    setMcqAnswers((prev) => {
+      const current = Array.isArray(prev[questionNo]) ? prev[questionNo] : [];
+      const next = current.includes(optionIndex)
+        ? current.filter((item) => item !== optionIndex)
+        : [...current, optionIndex];
+      return { ...prev, [questionNo]: Array.from(new Set(next)).sort((a, b) => a - b) };
+    });
+  }
+
+  function serializeMcqAnswer(questionNo: string, optionCount: number, answerMode?: 'single' | 'multiple'): string {
+    const selected = getSelectedMcqAnswers(questionNo).filter((item) => item >= 0 && item < optionCount);
+    if (answerMode === 'multiple') {
+      return selected.length > 0 ? `options:${selected.join(',')}` : '';
+    }
+    const first = selected[0];
+    return Number.isInteger(first) ? `option:${first}` : '';
+  }
+
   async function startExam() {
     if (!pack || !studentSession?.studentId || !studentSession.rollCode || !agreed) {
       setError('Student session not found. Login again and accept the integrity pledge.');
@@ -259,7 +313,11 @@ export default function ProctoredExamPage() {
       const answers = [
         ...(pack.mcqs ?? []).map((_, idx) => ({
           questionNo: `Q${idx + 1}`,
-          answerText: typeof mcqAnswers[`Q${idx + 1}`] === 'number' ? `option:${mcqAnswers[`Q${idx + 1}`]}` : '',
+          answerText: serializeMcqAnswer(
+            `Q${idx + 1}`,
+            pack.mcqs?.[idx]?.options?.length ?? 0,
+            pack.mcqs?.[idx]?.answerMode
+          ),
         })),
         ...(pack.shortAnswers ?? []).map((_, idx) => ({
           questionNo: `S${idx + 1}`,
@@ -375,15 +433,25 @@ export default function ProctoredExamPage() {
               <p className="text-sm font-semibold text-[#1F1F35]">
                 {idx + 1}. {entry.kind === 'mcq' ? entry.value.question : entry.value}
               </p>
+              {entry.kind === 'mcq' && renderQuestionRagMeta(entry.value.ragMeta)}
               {entry.kind === 'mcq' && (
                 <div className="mt-2 space-y-1.5">
+                  {entry.value.answerMode === 'multiple' && (
+                    <p className="text-[11px] font-medium text-violet-700">Select all correct options.</p>
+                  )}
                   {entry.value.options.map((option, optIdx) => (
                     <label key={`${entry.key}-${optIdx}`} className="flex items-start gap-2 text-sm text-[#3D3B4D]">
                       <input
-                        type="radio"
-                        name={entry.key}
-                        checked={mcqAnswers[entry.key] === optIdx}
-                        onChange={() => setMcqAnswers((prev) => ({ ...prev, [entry.key]: optIdx }))}
+                        type={entry.value.answerMode === 'multiple' ? 'checkbox' : 'radio'}
+                        name={entry.value.answerMode === 'multiple' ? undefined : entry.key}
+                        checked={getSelectedMcqAnswers(entry.key).includes(optIdx)}
+                        onChange={() => {
+                          if (entry.value.answerMode === 'multiple') {
+                            toggleMultipleMcqAnswer(entry.key, optIdx);
+                            return;
+                          }
+                          setSingleMcqAnswer(entry.key, optIdx);
+                        }}
                         className="mt-1"
                       />
                       <span>{String.fromCharCode(65 + optIdx)}. {option}</span>

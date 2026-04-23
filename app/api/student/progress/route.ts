@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { getStudentSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { getServiceClient } from '@/lib/supabase-rest';
+import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
 
 const PROGRESS_TABLE = 'student_chapter_progress';
 
@@ -12,8 +12,9 @@ export async function GET(req: NextRequest) {
   const studentSession = await getStudentSessionFromRequestCookies();
   if (!studentSession) return unauthorizedJson('Student session required.', requestId);
 
-  const client = getServiceClient();
-  if (!client) return dataJson({ requestId, data: { studiedChapterIds: [] } });
+  const resolution = resolveRequestSupabaseClient(req, 'user-first');
+  if (!resolution) return dataJson({ requestId, data: { studiedChapterIds: [] } });
+  const client = resolution.client;
 
   try {
     const { data, error } = await client
@@ -49,8 +50,9 @@ export async function POST(req: NextRequest) {
     ? body.studiedChapterIds.filter((id): id is string => typeof id === 'string')
     : [];
 
-  const client = getServiceClient();
-  if (!client) return dataJson({ requestId, data: { saved: false } });
+  const resolution = resolveRequestSupabaseClient(req, 'user-first');
+  if (!resolution) return dataJson({ requestId, data: { saved: false } });
+  const client = resolution.client;
 
   try {
     const { error } = await client.from(PROGRESS_TABLE).upsert(

@@ -14,6 +14,19 @@ function resolvePortalDefaultNext(portal: string | null): string {
   return '/chapters';
 }
 
+function normalizeNextPath(rawNext: string | null, portal: string | null): string {
+  const fallback = resolvePortalDefaultNext(portal);
+  const next = (rawNext || '').trim();
+  if (!next) return fallback;
+  if (!/^\/(?!\/)/.test(next)) return fallback;
+  if (
+    /^\/(login|student\/login|teacher\/login|admin\/login|developer\/login|parent\/login)(\/|$)/.test(next)
+  ) {
+    return fallback;
+  }
+  return next;
+}
+
 function extractRole(payload: unknown): LoginRole | null {
   if (!payload || typeof payload !== 'object') return null;
   const role = (payload as Record<string, unknown>).role;
@@ -25,7 +38,7 @@ export default function UnifiedLoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const portal = searchParams.get('portal');
-  const nextPath = searchParams.get('next')?.trim() || resolvePortalDefaultNext(portal);
+  const nextPath = normalizeNextPath(searchParams.get('next'), portal);
   const reason = searchParams.get('reason')?.trim() || '';
 
   const [identifier, setIdentifier] = useState('');
@@ -33,6 +46,14 @@ export default function UnifiedLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  function navigateAfterLogin(path: string) {
+    if (typeof window !== 'undefined') {
+      window.location.assign(path);
+      return;
+    }
+    router.replace(path);
+  }
 
   useEffect(() => {
     let active = true;
@@ -47,25 +68,25 @@ export default function UnifiedLoginPage() {
         if (!role) return;
         if (role === 'student') {
           if (payload.mustChangePassword === true) {
-            router.replace('/student/first-login');
+            navigateAfterLogin('/student/first-login');
             return;
           }
-          router.replace(nextPath || '/chapters');
+          navigateAfterLogin(nextPath || '/chapters');
           return;
         }
         if (role === 'teacher') {
           if (payload.mustChangePassword === true) {
-            router.replace('/teacher/first-login');
+            navigateAfterLogin('/teacher/first-login');
             return;
           }
-          router.replace(nextPath || '/teacher');
+          navigateAfterLogin(nextPath || '/teacher');
           return;
         }
         if (role === 'admin') {
-          router.replace(nextPath || '/admin');
+          navigateAfterLogin(nextPath || '/admin');
           return;
         }
-        router.replace(nextPath || '/developer');
+        navigateAfterLogin(nextPath || '/developer');
       })
       .catch(() => undefined);
     return () => {
@@ -104,25 +125,25 @@ export default function UnifiedLoginPage() {
 
       if (role === 'student') {
         if (payload.mustChangePassword === true) {
-          router.replace('/student/first-login');
+          navigateAfterLogin('/student/first-login');
           return;
         }
-        router.replace(nextPath || '/chapters');
+        navigateAfterLogin(nextPath || '/chapters');
         return;
       }
       if (role === 'teacher') {
         if (payload.mustChangePassword === true) {
-          router.replace('/teacher/first-login');
+          navigateAfterLogin('/teacher/first-login');
           return;
         }
-        router.replace(nextPath || '/teacher');
+        navigateAfterLogin(nextPath || '/teacher');
         return;
       }
       if (role === 'admin') {
-        router.replace(nextPath || '/admin');
+        navigateAfterLogin(nextPath || '/admin');
         return;
       }
-      router.replace(nextPath || '/developer');
+      navigateAfterLogin(nextPath || '/developer');
     } catch {
       setError('Failed to login.');
     } finally {

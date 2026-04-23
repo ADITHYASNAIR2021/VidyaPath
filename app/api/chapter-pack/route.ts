@@ -1,5 +1,6 @@
 import { getChapterById } from '@/lib/data';
 import { getFrequencyLabel, getPYQData } from '@/lib/pyq';
+import { getGroundedFrequencyLabel, getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
@@ -30,10 +31,13 @@ function parseRequest(body: unknown): ChapterPackRequest | null {
   return { chapterId };
 }
 
-function buildFallbackPack(chapterId: string, contextPack: Awaited<ReturnType<typeof getContextPack>>): ChapterPackResponse | null {
+async function buildFallbackPack(
+  chapterId: string,
+  contextPack: Awaited<ReturnType<typeof getContextPack>>
+): Promise<ChapterPackResponse | null> {
   const chapter = getChapterById(chapterId);
   if (!chapter) return null;
-  const pyq = getPYQData(chapterId);
+  const pyq = (await getGroundedPYQData(chapterId)) ?? getPYQData(chapterId);
   const highYieldTopics = [
     ...(pyq?.importantTopics ?? []),
     ...chapter.topics,
@@ -46,7 +50,7 @@ function buildFallbackPack(chapterId: string, contextPack: Awaited<ReturnType<ty
       year: snippet.year,
     }))
   );
-  const frequency = getFrequencyLabel(chapterId)?.label ?? 'Regular';
+  const frequency = (await getGroundedFrequencyLabel(chapterId))?.label ?? getFrequencyLabel(chapterId)?.label ?? 'Regular';
 
   return {
     chapterId: chapter.id,
@@ -155,7 +159,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const pyq = getPYQData(parsed.chapterId);
+    const pyq = (await getGroundedPYQData(parsed.chapterId)) ?? getPYQData(parsed.chapterId);
     const contextPack = await getContextPack({
       task: 'chapter-pack',
       classLevel: chapter.classLevel,
@@ -166,7 +170,7 @@ export async function POST(req: Request) {
       topK: 6,
     });
 
-    const fallback = buildFallbackPack(parsed.chapterId, contextPack);
+    const fallback = await buildFallbackPack(parsed.chapterId, contextPack);
     if (!fallback) {
       return errorJson({
         requestId,
@@ -176,6 +180,7 @@ export async function POST(req: Request) {
       });
     }
 
+    const groundedFrequency = await getGroundedFrequencyLabel(parsed.chapterId);
     const pyqSummary = pyq
       ? `PYQ years: ${[...pyq.yearsAsked].sort((a, b) => b - a).join(', ')} | avg marks: ${pyq.avgMarks} | important topics: ${pyq.importantTopics.join(', ')}`
       : 'No PYQ record available.';
@@ -240,7 +245,7 @@ Return ONLY JSON:
           avgMarks: Number.isFinite(Number(data.pyqTrend?.avgMarks))
             ? Number(data.pyqTrend.avgMarks)
             : fallback.pyqTrend.avgMarks,
-          frequencyLabel: stripSourceTags(data.pyqTrend?.frequencyLabel || fallback.pyqTrend.frequencyLabel),
+          frequencyLabel: stripSourceTags(data.pyqTrend?.frequencyLabel || groundedFrequency?.label || fallback.pyqTrend.frequencyLabel),
         },
         commonMistakes: cleanTextList(data.commonMistakes, 6).length > 0 ? cleanTextList(data.commonMistakes, 6) : fallback.commonMistakes,
         examStrategy: cleanTextList(data.examStrategy, 6).length > 0 ? cleanTextList(data.examStrategy, 6) : fallback.examStrategy,

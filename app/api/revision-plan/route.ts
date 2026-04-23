@@ -1,5 +1,6 @@
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
@@ -57,7 +58,7 @@ function computeWeeks(examDate?: string): number {
   return Math.max(2, Math.min(16, diffWeeks));
 }
 
-function buildHeuristicPlan(req: RevisionRequest): RevisionPlanResponse {
+async function buildHeuristicPlan(req: RevisionRequest): Promise<RevisionPlanResponse> {
   const chapters = ALL_CHAPTERS.filter((chapter) => {
     if (chapter.classLevel !== req.classLevel) return false;
     if (req.subject && req.subject !== 'All' && chapter.subject.toLowerCase() !== req.subject.toLowerCase()) return false;
@@ -65,12 +66,21 @@ function buildHeuristicPlan(req: RevisionRequest): RevisionPlanResponse {
   });
 
   const weakSet = new Set(req.weakChapterIds ?? []);
-  const prioritized = [...(chapters.length > 0 ? chapters : ALL_CHAPTERS.filter((chapter) => chapter.classLevel === req.classLevel))].sort((a, b) => {
+  const chapterPool = chapters.length > 0 ? chapters : ALL_CHAPTERS.filter((chapter) => chapter.classLevel === req.classLevel);
+  const pyqAvgByChapter = new Map<string, number>();
+  await Promise.all(
+    chapterPool.map(async (chapter) => {
+      const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
+      pyqAvgByChapter.set(chapter.id, pyq?.avgMarks ?? 0);
+    })
+  );
+
+  const prioritized = [...chapterPool].sort((a, b) => {
     const weakA = weakSet.has(a.id) ? 1 : 0;
     const weakB = weakSet.has(b.id) ? 1 : 0;
     if (weakA !== weakB) return weakB - weakA;
-    const pyqA = getPYQData(a.id)?.avgMarks ?? 0;
-    const pyqB = getPYQData(b.id)?.avgMarks ?? 0;
+    const pyqA = pyqAvgByChapter.get(a.id) ?? 0;
+    const pyqB = pyqAvgByChapter.get(b.id) ?? 0;
     return pyqB - pyqA;
   });
 
@@ -83,7 +93,7 @@ function buildHeuristicPlan(req: RevisionRequest): RevisionPlanResponse {
     const selected = prioritized.slice(start, start + perWeekChapterCount);
     const fallback = prioritized.slice(0, perWeekChapterCount);
     const focus = (selected.length > 0 ? selected : fallback).map((chapter) => chapter.id);
-    const targetMarks = focus.reduce((sum, chapterId) => sum + (getPYQData(chapterId)?.avgMarks ?? 4), 0);
+    const targetMarks = focus.reduce((sum, chapterId) => sum + (pyqAvgByChapter.get(chapterId) ?? 4), 0);
     weeks.push({
       week,
       focusChapters: focus,
@@ -159,7 +169,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const fallback = buildHeuristicPlan(parsed);
+    const fallback = await buildHeuristicPlan(parsed);
     const weakChapterId = parsed.weakChapterIds?.[0] ?? fallback.planWeeks[0]?.focusChapters?.[0];
     const weakChapter = weakChapterId ? ALL_CHAPTERS.find((chapter) => chapter.id === weakChapterId) : undefined;
 

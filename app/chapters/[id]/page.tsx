@@ -24,6 +24,11 @@ import clsx from 'clsx';
 import { ALL_CHAPTERS, getChapterById, getAdjacentChapters } from '@/lib/data';
 import { getChapterCareerMap } from '@/lib/career-catalog';
 import { getPYQData, getFrequencyLabel } from '@/lib/pyq';
+import {
+  getGroundedFrequencyLabel,
+  getGroundedPYQData,
+  getGroundedPaperYearUniverse,
+} from '@/lib/pyq-grounded';
 import { chapterNotesSlug, slugify } from '@/lib/seo-notes';
 import AIChatBox from '@/components/AIChatBox';
 import BookmarkButton from '@/components/BookmarkButton';
@@ -150,7 +155,7 @@ const RELEVANCE_DESC: Record<string, string> = {
   NEET: 'Important for NEET-UG',
 };
 
-export default function ChapterDetailPage({
+export default async function ChapterDetailPage({
   params,
   searchParams,
 }: {
@@ -164,7 +169,9 @@ export default function ChapterDetailPage({
   const style = SUBJECT_STYLES[chapter.subject] ?? SUBJECT_STYLES.Physics;
   const SubjectIcon = style.icon ?? Atom;
   const section = typeof searchParams?.section === 'string' ? searchParams.section.trim() : '';
-  const chapterPyq = getPYQData(chapter.id);
+  const chapterPyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
+  const groundedFrequency = await getGroundedFrequencyLabel(chapter.id);
+  const paperYearUniverse = await getGroundedPaperYearUniverse();
   const careerMap = getChapterCareerMap(chapter.id);
 
   const youtubeUrl = `https://www.youtube.com/results?search_query=CBSE+Class+${chapter.classLevel}+${chapter.subject}+${encodeURIComponent(chapter.title)}+NCERT`;
@@ -324,15 +331,17 @@ export default function ChapterDetailPage({
             {/* ── PYQ Analysis ──────────────────────────────────── */}
             {(() => {
               const pyq = chapterPyq;
-              const freq = getFrequencyLabel(chapter.id);
+              const freq = groundedFrequency ?? getFrequencyLabel(chapter.id);
               if (!pyq) return null;
               const recentYears = pyq.yearsAsked.filter(y => y >= 2019).sort((a,b) => b-a);
               const olderYears = pyq.yearsAsked.filter(y => y < 2019).sort((a,b) => b-a);
               const allYears = [...pyq.yearsAsked].sort((a, b) => b - a);
               const oldestKnownYear = allYears[allYears.length - 1];
               const latestKnownYear = allYears[0];
-              const archivedPaperRange = '2009-2025';
-              const archiveYears = Array.from({ length: 2025 - 2009 + 1 }, (_, index) => 2025 - index);
+              const archiveYears = paperYearUniverse.length > 0 ? paperYearUniverse : allYears;
+              const archivedPaperRange = archiveYears.length > 0
+                ? `${archiveYears[archiveYears.length - 1]}-${archiveYears[0]}`
+                : 'No confirmed range yet';
               return (
                 <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
                   <div className="flex items-center justify-between mb-4">
@@ -367,7 +376,7 @@ export default function ChapterDetailPage({
 
                   {/* Year dots — recent */}
                   <div className="mb-3">
-                    <div className="text-xs font-semibold text-[#4A4A6A] mb-2">Paper archive timeline (2009-2025)</div>
+                    <div className="text-xs font-semibold text-[#4A4A6A] mb-2">Paper archive timeline ({archivedPaperRange})</div>
                     <div className="flex flex-wrap gap-1.5">
                       {archiveYears.map((yr) => {
                         const isAskedYear = pyq.yearsAsked.includes(yr);
@@ -395,9 +404,11 @@ export default function ChapterDetailPage({
                         ? ' no confirmed pre-2019 records in current chapter map.'
                         : ` includes ${olderYears.length} pre-2019 year(s).`}
                     </div>
-                    <div className="mt-1 text-[11px] text-[#8A8AAA]">
-                      Full paper archive on VidyaPath spans {archivedPaperRange}. 2026+ papers are not released yet.
-                    </div>
+                    {archiveYears.length > 0 && (
+                      <div className="mt-1 text-[11px] text-[#8A8AAA]">
+                        Full paper archive on VidyaPath currently spans {archivedPaperRange} based on indexed papers.
+                      </div>
+                    )}
                     <div className="mt-1 text-[11px] text-[#8A8AAA]">
                       Recent asked years: {recentYears.length > 0 ? recentYears.join(', ') : 'none in current map'}.
                     </div>
@@ -623,4 +634,3 @@ export default function ChapterDetailPage({
     </StudentSubjectGate>
   );
 }
-

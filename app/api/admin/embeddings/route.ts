@@ -3,15 +3,9 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { getEmbeddingCoverageStats } from '@/lib/admin-embeddings-db';
 
 export const dynamic = 'force-dynamic';
-
-interface CoverageRow {
-  class_level: number;
-  subject: string;
-  total_chunks: number;
-  with_embedding: number;
-}
 
 async function countJsonlLines(filePath: string): Promise<number> {
   try {
@@ -19,16 +13,6 @@ async function countJsonlLines(filePath: string): Promise<number> {
     return content.split('\n').filter((line) => line.trim().length > 0).length;
   } catch {
     return 0;
-  }
-}
-
-async function getCoverageStats(): Promise<CoverageRow[]> {
-  try {
-    const { isSupabaseServiceConfigured, supabaseRpc } = await import('@/lib/supabase-rest');
-    if (!isSupabaseServiceConfigured()) return [];
-    return await supabaseRpc<CoverageRow[]>('get_embedding_coverage_stats', {});
-  } catch {
-    return [];
   }
 }
 
@@ -43,7 +27,7 @@ export async function GET(req: Request) {
     const [papersCount, textbookCount, dbStats] = await Promise.all([
       countJsonlLines(path.join(contextDir, 'chunks.jsonl')),
       countJsonlLines(path.join(contextDir, 'textbook_chunks.jsonl')),
-      getCoverageStats(),
+      getEmbeddingCoverageStats(),
     ]);
 
     const totalInDb = dbStats.reduce((sum, row) => sum + row.total_chunks, 0);

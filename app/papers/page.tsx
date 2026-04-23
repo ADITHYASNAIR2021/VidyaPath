@@ -306,7 +306,7 @@ export default function PapersPage() {
               <StatBadge icon={FileText}   value={stats.board}         label="Board Papers"    color="bg-white/15" />
               <StatBadge icon={BookOpen}   value={stats.sample}        label="Sample Papers"   color="bg-white/15" />
               <StatBadge icon={Shield}     value={stats.compartment}   label="Compartment"     color="bg-white/15" />
-              <StatBadge icon={Calendar}   value={`${stats.yearsSpanned}`} label="Years (2009-2025)" color="bg-white/15" />
+              <StatBadge icon={Calendar}   value={`${stats.yearsSpanned}`} label="Indexed Years" color="bg-white/15" />
             </div>
           </motion.div>
         </div>

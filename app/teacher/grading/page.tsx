@@ -25,6 +25,44 @@ function apiError(payload: unknown, fallback: string): string {
   return String(r.message || r.error || fallback);
 }
 
+function parseAnswerTokenToIndex(token: string, optionCount: number): number | null {
+  const clean = token.trim().toUpperCase();
+  if (!clean) return null;
+  if (/^[A-Z]$/.test(clean)) {
+    const letterIndex = clean.charCodeAt(0) - 'A'.charCodeAt(0);
+    return letterIndex >= 0 && letterIndex < optionCount ? letterIndex : null;
+  }
+  if (/^\d+$/.test(clean)) {
+    const value = Number(clean);
+    if (value >= 0 && value < optionCount) return value;
+    if (value >= 1 && value <= optionCount) return value - 1;
+  }
+  return null;
+}
+
+function parseMcqSelections(answerText: string, optionCount: number): number[] {
+  const clean = answerText.trim();
+  if (!clean) return [];
+  const explicitList = clean.match(/options?\s*[:=-]\s*(.+)$/i);
+  if (explicitList) {
+    const explicitIndexes = explicitList[1]
+      .split(/[^A-Za-z0-9]+/)
+      .map((token) => parseAnswerTokenToIndex(token, optionCount))
+      .filter((entry): entry is number => entry !== null);
+    return Array.from(new Set(explicitIndexes)).sort((a, b) => a - b);
+  }
+  if (/^\d+$/.test(clean)) {
+    const numeric = Number(clean);
+    if (numeric >= 1 && numeric <= optionCount) return [numeric - 1];
+  }
+  const direct = parseAnswerTokenToIndex(clean, optionCount);
+  if (direct !== null) return [direct];
+  const letterMatches = [...clean.toUpperCase().matchAll(/\b([A-Z])\b/g)]
+    .map((match) => parseAnswerTokenToIndex(match[1], optionCount))
+    .filter((entry): entry is number => entry !== null);
+  return Array.from(new Set(letterMatches)).sort((a, b) => a - b);
+}
+
 interface SubmissionDetail {
   submissionId: string;
   packId: string;
@@ -123,13 +161,18 @@ function SubmissionPanel({
               const idx = Number(questionNo.slice(1)) - 1;
               const mcq = mcqs[idx];
               if (!mcq) return null;
-              const studentPick = studentAnswer ? parseInt(studentAnswer, 10) : -1;
-              const correctIdx = mcq.answer;
+              const studentPicks = parseMcqSelections(studentAnswer, mcq.options.length);
+              const multiAnswers = Array.isArray(mcq.answers)
+                ? mcq.answers.filter((entry) => Number.isInteger(entry) && entry >= 0 && entry < mcq.options.length)
+                : [];
+              const correctIndexes = mcq.answerMode === 'multiple' && multiAnswers.length > 0
+                ? multiAnswers
+                : [mcq.answer];
               return (
                 <div className="grid grid-cols-2 gap-2 px-4 py-3">
                   {mcq.options.map((opt, j) => {
-                    const isCorrect = j === correctIdx;
-                    const isStudentPick = j === studentPick;
+                    const isCorrect = correctIndexes.includes(j);
+                    const isStudentPick = studentPicks.includes(j);
                     return (
                       <div
                         key={j}
@@ -149,7 +192,8 @@ function SubmissionPanel({
                           {String.fromCharCode(65 + j)}
                         </span>
                         {opt}
-                        {isStudentPick && <span className="ml-auto text-[9px] font-bold uppercase tracking-wide opacity-70">{isCorrect ? '✓ Correct' : '✗ Wrong'}</span>}
+                        {isStudentPick && <span className="ml-auto text-[9px] font-bold uppercase tracking-wide opacity-70">{isCorrect ? 'Correct' : 'Wrong'}</span>}
+                        {!isStudentPick && isCorrect && <span className="ml-auto text-[9px] font-bold uppercase tracking-wide opacity-70">Answer</span>}
                       </div>
                     );
                   })}

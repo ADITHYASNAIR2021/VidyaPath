@@ -65,11 +65,12 @@ function parseDateMs(value: string | null | undefined): number | null {
 }
 
 function shouldFailOpen(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
   const configured = (process.env.RATE_LIMIT_FAIL_OPEN || '').trim().toLowerCase();
   if (configured === '1' || configured === 'true' || configured === 'yes') return true;
   if (configured === '0' || configured === 'false' || configured === 'no') return false;
-  // Local/dev default remains fail-open for smoother setup; production defaults fail-closed.
-  return process.env.NODE_ENV !== 'production';
+  // Local/dev default remains fail-open for smoother setup.
+  return true;
 }
 
 function fallbackDecision(limit: number): RateLimitDecision {

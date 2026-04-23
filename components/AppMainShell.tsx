@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
+import { fetchClientAuthSession } from '@/lib/client-auth-session';
 
 interface AuthSnapshot {
   role: 'student' | 'teacher' | 'admin' | 'developer' | 'anonymous';
@@ -24,22 +25,17 @@ export default function AppMainShell({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     let active = true;
-    fetch('/api/auth/session', { cache: 'no-store', credentials: 'include' })
-      .then(async (res) => {
-        const payload = await res.json().catch(() => null);
-        const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
-          ? payload.data as Record<string, unknown>
-          : payload as Record<string, unknown> | null;
-        if (!active || !data) return;
-        const roleRaw = typeof data.role === 'string' ? data.role : 'anonymous';
-        const role =
-          roleRaw === 'student' || roleRaw === 'teacher' || roleRaw === 'admin' || roleRaw === 'developer'
-            ? roleRaw
-            : 'anonymous';
+    fetchClientAuthSession()
+      .then((data) => {
+        if (!active) return;
+        if (data.role !== 'student' && data.role !== 'teacher' && data.role !== 'admin' && data.role !== 'developer') {
+          setAuth({ role: 'anonymous', authenticated: false });
+          return;
+        }
         setAuth({
-          role,
-          authenticated: !!data.authenticated && role !== 'anonymous',
-          displayName: typeof data.displayName === 'string' ? data.displayName : undefined,
+          role: data.role,
+          authenticated: !!data.authenticated && data.role !== 'anonymous',
+          displayName: data.displayName,
         });
       })
       .catch(() => {

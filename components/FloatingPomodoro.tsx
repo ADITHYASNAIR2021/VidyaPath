@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { Timer, X, Play, Pause, RotateCcw, Coffee, BookOpen, Volume2, VolumeX } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -14,6 +15,7 @@ interface FloatingPomodoroProps {
 }
 
 export default function FloatingPomodoro({ chapterTitle, pyqStats }: FloatingPomodoroProps) {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
 
@@ -93,9 +95,14 @@ export default function FloatingPomodoro({ chapterTitle, pyqStats }: FloatingPom
     : ((5 * 60 - timeLeft) / (5 * 60)) * 100;
 
   const timeDisplay = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  const isExamRoute = pathname.startsWith('/exam/');
+  const isChapterRoute = pathname.startsWith('/chapters/');
+
+  if (isExamRoute) return null;
+  if (!chapterTitle && isChapterRoute) return null;
 
   return (
-    <div ref={popupRef} className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+    <div ref={popupRef} className="fixed bottom-36 right-4 md:bottom-24 md:right-6 z-[148] flex flex-col items-end gap-3">
       {/* Popup panel */}
       {open && (
         <div className="w-72 sm:w-80 bg-white rounded-2xl border border-[#E8E4DC] shadow-2xl overflow-hidden">

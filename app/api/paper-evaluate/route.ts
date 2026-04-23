@@ -1,6 +1,7 @@
 import { ALL_CHAPTERS } from '@/lib/data';
 import { ALL_PAPERS } from '@/lib/papers';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
@@ -150,14 +151,25 @@ export async function POST(req: Request) {
     const subject = parsed.subject ?? paper?.subject ?? 'Physics';
     const fallback = buildHeuristicEvaluation(parsed);
 
-    const chapterPool = ALL_CHAPTERS.filter(
+    const subjectChapters = ALL_CHAPTERS.filter(
       (chapter) => chapter.classLevel === classLevel && chapter.subject.toLowerCase() === subject.toLowerCase()
-    )
-      .sort((a, b) => (getPYQData(b.id)?.avgMarks ?? 0) - (getPYQData(a.id)?.avgMarks ?? 0))
-      .slice(0, 6);
+    );
+    const chapterPyqMap = new Map<string, number>();
+    const groundedRows = await Promise.all(
+      subjectChapters.map(async (chapter) => {
+        const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
+        const avgMarks = pyq?.avgMarks ?? 0;
+        chapterPyqMap.set(chapter.id, avgMarks);
+        return { chapter, avgMarks };
+      })
+    );
+    const chapterPool = groundedRows
+      .sort((a, b) => b.avgMarks - a.avgMarks)
+      .slice(0, 6)
+      .map((entry) => entry.chapter);
 
     const weakTopicsHint = chapterPool
-      .map((chapter) => `${chapter.id}: ${chapter.title} (avg ${getPYQData(chapter.id)?.avgMarks ?? 0}M)`)
+      .map((chapter) => `${chapter.id}: ${chapter.title} (avg ${chapterPyqMap.get(chapter.id) ?? 0}M)`)
       .join('\n');
 
     const contextPack = await getContextPack({

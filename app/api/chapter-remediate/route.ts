@@ -1,5 +1,6 @@
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
@@ -51,10 +52,10 @@ function parseRequest(body: unknown): ChapterRemediateRequest | null {
   };
 }
 
-function buildFallbackPlan(payload: ChapterRemediateRequest): ChapterRemediateResponse | null {
+async function buildFallbackPlan(payload: ChapterRemediateRequest): Promise<ChapterRemediateResponse | null> {
   const chapter = getChapterById(payload.chapterId);
   if (!chapter) return null;
-  const pyq = getPYQData(payload.chapterId);
+  const pyq = (await getGroundedPYQData(payload.chapterId)) ?? getPYQData(payload.chapterId);
 
   const dayPlan: ChapterRemediateDay[] = [];
   const focusTopics = (pyq?.importantTopics ?? chapter.topics).slice(0, Math.min(payload.availableDays, 10));
@@ -169,7 +170,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const pyq = getPYQData(parsed.chapterId);
+    const pyq = (await getGroundedPYQData(parsed.chapterId)) ?? getPYQData(parsed.chapterId);
     const contextPack = await getContextPack({
       task: 'chapter-remediate',
       classLevel: chapter.classLevel,
@@ -180,7 +181,7 @@ export async function POST(req: Request) {
       topK: 5,
     });
 
-    const fallback = buildFallbackPlan(parsed);
+    const fallback = await buildFallbackPlan(parsed);
     if (!fallback) {
       return errorJson({
         requestId,

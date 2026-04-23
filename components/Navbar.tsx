@@ -29,6 +29,8 @@ import CommandPalette from '@/components/CommandPalette';
 import { useTheme } from '@/components/ThemeProvider';
 import type { PlatformRole } from '@/lib/auth/roles';
 import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
+import { clearClientAuthSessionCache, fetchClientAuthSession } from '@/lib/client-auth-session';
+import { clearClientStudentSessionCache } from '@/lib/client-student-session';
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -154,21 +156,18 @@ export default function Navbar() {
 
   useEffect(() => {
     let active = true;
-    const controller = new AbortController();
-    fetch('/api/auth/session', { signal: controller.signal, cache: 'no-store', credentials: 'include' })
-      .then(async (res) => {
-        const payload = await res.json().catch(() => null);
-        const data = payload?.data ?? payload;
-        if (!active || !data || typeof data.role !== 'string') return;
+    fetchClientAuthSession()
+      .then((data) => {
+        if (!active) return;
         const role = data.role as ActiveRole;
         setSession({
           role,
           authenticated: !!data.authenticated && role !== 'anonymous',
-          displayName: typeof data.displayName === 'string' ? data.displayName : undefined,
+          displayName: data.displayName,
         });
       })
       .catch(() => undefined);
-    return () => { active = false; controller.abort(); };
+    return () => { active = false; };
   }, [pathname]);
 
   async function logout() {
@@ -177,6 +176,8 @@ export default function Navbar() {
     try {
       await callLogout(session.role);
     } finally {
+      clearClientAuthSessionCache();
+      clearClientStudentSessionCache();
       setLoggingOut(false);
       setMobileOpen(false);
       setSession({ role: 'anonymous', authenticated: false });
@@ -237,10 +238,10 @@ export default function Navbar() {
               <GraduationCap className="w-5 h-5" />
             </div>
             <div className="leading-tight">
-              <div className="font-fraunces text-xl font-bold text-navy-700">
+              <div className="font-fraunces text-xl font-bold text-navy-700 dark:text-gray-100">
                 Vidya<span className="text-saffron-500">Path</span>
               </div>
-              <div className="text-[10px] uppercase tracking-wide text-[#8A8AAA]">Board prep toolkit</div>
+              <div className="text-[10px] uppercase tracking-wide text-[#8A8AAA] dark:text-gray-400">Board prep toolkit</div>
             </div>
           </Link>
 
@@ -270,7 +271,7 @@ export default function Navbar() {
                 )}
                 {/* AI access badge for non-students */}
                 {(session.role === 'teacher' || session.role === 'admin' || session.role === 'developer') && (
-                  <span className="inline-flex items-center gap-1 rounded-xl border border-saffron-200 bg-saffron-50 px-2 py-1.5 text-[11px] font-semibold text-saffron-700">
+                  <span className="inline-flex items-center gap-1 rounded-xl border border-saffron-200 dark:border-saffron-800 bg-saffron-50 dark:bg-saffron-900/20 px-2 py-1.5 text-[11px] font-semibold text-saffron-700 dark:text-saffron-300">
                     <Zap className="w-3 h-3" />
                     AI
                   </span>
@@ -278,15 +279,15 @@ export default function Navbar() {
                 <button
                   onClick={logout}
                   disabled={loggingOut}
-                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/35 transition-colors disabled:opacity-60"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  {loggingOut ? 'Signing out…' : 'Logout'}
+                  {loggingOut ? 'Signing out...' : 'Logout'}
                 </button>
               </div>
             ) : (
               <div className="flex items-center gap-1.5">
-                <Link href="/login" className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors">
+                <Link href="/login" className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-900/35 transition-colors">
                   Login
                 </Link>
               </div>
@@ -299,7 +300,7 @@ export default function Navbar() {
             <CommandPalette />
             <button
               onClick={() => setMobileOpen((o) => !o)}
-              className="p-2 rounded-xl text-[#4A4A6A] hover:bg-gray-100 transition-colors"
+              className="p-2 rounded-xl text-[#4A4A6A] dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               aria-label="Toggle navigation menu"
             >
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -318,7 +319,7 @@ export default function Navbar() {
               <div className={clsx('mb-2 inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold', roleMeta.chip)}>
                 {session.displayName ? session.displayName : roleMeta.label}
                 {(session.role === 'teacher' || session.role === 'admin' || session.role === 'developer') && (
-                  <span className="ml-1 inline-flex items-center gap-0.5 text-saffron-600"><Zap className="w-3 h-3" />AI</span>
+                  <span className="ml-1 inline-flex items-center gap-0.5 text-saffron-600 dark:text-saffron-400"><Zap className="w-3 h-3" />AI</span>
                 )}
               </div>
             )}
@@ -331,17 +332,17 @@ export default function Navbar() {
               <button
                 onClick={logout}
                 disabled={loggingOut}
-                className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm font-semibold px-3 py-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 disabled:opacity-60"
+                className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm font-semibold px-3 py-2.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 disabled:opacity-60"
               >
                 <LogOut className="w-4 h-4" />
-                {loggingOut ? 'Signing out…' : 'Logout'}
+                {loggingOut ? 'Signing out...' : 'Logout'}
               </button>
             ) : (
               <div className="pt-2">
                 <Link
                   href="/login"
                   onClick={() => setMobileOpen(false)}
-                  className="block text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700"
+                  className="block text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-200"
                 >
                   Login
                 </Link>
@@ -353,3 +354,4 @@ export default function Navbar() {
     </nav>
   );
 }
+

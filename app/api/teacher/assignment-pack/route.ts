@@ -96,7 +96,9 @@ export async function GET(req: Request) {
         });
       }
       const packSchoolId = await getAssignmentPackSchoolId(pack.packId);
-      if (!studentSession.schoolId || !packSchoolId || packSchoolId !== studentSession.schoolId) {
+      const hasSchoolContext = !!studentSession.schoolId && !!packSchoolId;
+      const hasSchoolMismatch = hasSchoolContext && packSchoolId !== studentSession.schoolId;
+      if (!studentSession.schoolId || !packSchoolId || hasSchoolMismatch) {
         return errorJson({
           requestId,
           errorCode: 'school-mismatch',
@@ -175,11 +177,10 @@ export async function GET(req: Request) {
     return dataJson({ requestId, data: pack });
   } catch (error) {
     console.error('[teacher-assignment-pack:get] error', error);
-    const message = error instanceof Error ? error.message : 'Failed to load assignment pack.';
     return errorJson({
       requestId,
       errorCode: 'assignment-pack-read-failed',
-      message,
+      message: 'Failed to load assignment pack.',
       status: 500,
     });
   }
@@ -278,12 +279,14 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error('[teacher-assignment-pack:post] error', error);
-    const message = error instanceof Error ? error.message : 'Failed to create assignment pack.';
-    const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
+    const errorMessage = error instanceof Error ? error.message : '';
+    const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(errorMessage) ? 503 : 500;
     return errorJson({
       requestId,
       errorCode: 'assignment-pack-create-failed',
-      message,
+      message: status === 503
+        ? 'Assignment pack service is temporarily unavailable.'
+        : 'Failed to create assignment pack.',
       status,
     });
   }

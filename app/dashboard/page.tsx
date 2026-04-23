@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import {
   Target, Trophy, BrainCircuit, Activity, BookOpen, ChevronRight,
   TrendingUp, Zap, CheckCircle2, Clock, Star, Award, BarChart2,
-  Atom, FlaskConical, Leaf, Calculator, FileText, Briefcase, LineChart, Users,
+  Atom, FlaskConical, Leaf, Calculator, FileText, Briefcase, LineChart, Users, Link2,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { ALL_CHAPTERS } from '@/lib/data';
@@ -143,6 +143,14 @@ interface TeacherAssignmentSnapshot {
   estimatedTimeMinutes: number;
 }
 
+interface TeacherQuizLinkSnapshot {
+  chapterId: string;
+  url: string;
+  subject: string;
+  classLevel: 10 | 12;
+  section?: string;
+}
+
 interface TeacherAnnouncementSnapshot {
   id: string;
   title: string;
@@ -203,6 +211,7 @@ export default function DashboardPage() {
   const [weakProfiles, setWeakProfiles] = useState<LearningProfile[]>([]);
   const [studentSession, setStudentSession] = useState<StudentSessionSnapshot | null>(null);
   const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignmentSnapshot[]>([]);
+  const [teacherQuizLinks, setTeacherQuizLinks] = useState<TeacherQuizLinkSnapshot[]>([]);
   const [teacherAnnouncements, setTeacherAnnouncements] = useState<TeacherAnnouncementSnapshot[]>([]);
   const [attendanceSummary, setAttendanceSummary] = useState<DashboardAttendanceSummary | null>(null);
   const [resourceFeed, setResourceFeed] = useState<DashboardResourceItem[]>([]);
@@ -356,6 +365,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!studentSession) {
       setTeacherAssignments([]);
+      setTeacherQuizLinks([]);
       setTeacherAnnouncements([]);
       return;
     }
@@ -378,6 +388,9 @@ export default function DashboardPage() {
         if (!active || !scopeFeed) return;
         const assignmentPacks = Array.isArray(scopeFeed.assignmentPacks)
           ? scopeFeed.assignmentPacks
+          : [];
+        const quizLinks = Array.isArray(scopeFeed.quizLinks)
+          ? scopeFeed.quizLinks
           : [];
         const announcements = Array.isArray(scopeFeed.announcements)
           ? scopeFeed.announcements
@@ -411,6 +424,27 @@ export default function DashboardPage() {
           .filter((item): item is TeacherAssignmentSnapshot => !!item)
           .slice(0, 6);
 
+        const nextQuizLinks = quizLinks
+          .map((item): TeacherQuizLinkSnapshot | null => {
+            if (!item || typeof item !== 'object') return null;
+            const record = item as Record<string, unknown>;
+            const classLevelRaw = Number(record.classLevel);
+            if (classLevelRaw !== 10 && classLevelRaw !== 12) return null;
+            const chapterId = typeof record.chapterId === 'string' ? record.chapterId.trim() : '';
+            const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
+            const url = typeof record.url === 'string' ? record.url.trim() : '';
+            if (!chapterId || !subject || !url) return null;
+            return {
+              chapterId,
+              subject,
+              url,
+              classLevel: classLevelRaw,
+              section: typeof record.section === 'string' ? record.section.trim() || undefined : undefined,
+            };
+          })
+          .filter((item): item is TeacherQuizLinkSnapshot => !!item)
+          .slice(0, 6);
+
         const nextAnnouncements = announcements
           .map((item): TeacherAnnouncementSnapshot | null => {
             if (!item || typeof item !== 'object') return null;
@@ -434,11 +468,13 @@ export default function DashboardPage() {
           .filter((item): item is TeacherAnnouncementSnapshot => !!item)
           .slice(0, 6);
         setTeacherAssignments(nextAssignments);
+        setTeacherQuizLinks(nextQuizLinks);
         setTeacherAnnouncements(nextAnnouncements);
       })
       .catch(() => {
         if (!active) return;
         setTeacherAssignments([]);
+        setTeacherQuizLinks([]);
         setTeacherAnnouncements([]);
       });
     return () => {
@@ -815,7 +851,7 @@ export default function DashboardPage() {
               </Link>
             </div>
 
-            {(teacherAssignments.length > 0 || teacherAnnouncements.length > 0) && (
+            {(teacherAssignments.length > 0 || teacherQuizLinks.length > 0 || teacherAnnouncements.length > 0) && (
               <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
                 <h2 className="font-fraunces text-base font-bold text-navy-700 mb-3 flex items-center gap-2">
                   <Users className="w-4 h-4 text-indigo-500" />
@@ -838,6 +874,27 @@ export default function DashboardPage() {
                           <p className="text-[11px] text-indigo-700/80">Due: {pack.dueDate}</p>
                         )}
                       </Link>
+                    ))}
+                  </div>
+                )}
+                {teacherQuizLinks.length > 0 && (
+                  <div className={teacherAssignments.length > 0 ? 'mt-3 space-y-2' : 'space-y-2'}>
+                    {teacherQuizLinks.slice(0, 3).map((quiz, index) => (
+                      <a
+                        key={`${quiz.chapterId}-${index}`}
+                        href={quiz.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2 hover:bg-cyan-100"
+                      >
+                        <p className="text-xs font-semibold text-cyan-900 truncate">
+                          {chapterById.get(quiz.chapterId)?.title || quiz.subject} Quiz
+                        </p>
+                        <p className="text-[11px] text-cyan-700 flex items-center gap-1">
+                          <Link2 className="w-3 h-3" />
+                          Open quiz link
+                        </p>
+                      </a>
                     ))}
                   </div>
                 )}
@@ -1060,4 +1117,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-

@@ -1,5 +1,6 @@
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
@@ -13,6 +14,7 @@ import {
   type MCQItem,
 } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
+import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
@@ -228,7 +230,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const pyq = getPYQData(parsed.chapterId);
+    const pyq = (await getGroundedPYQData(parsed.chapterId)) ?? getPYQData(parsed.chapterId);
     const contextPack = await getContextPack({
       task: 'chapter-drill',
       classLevel: chapter.classLevel,
@@ -248,6 +250,17 @@ export async function POST(req: Request) {
         status: 500,
       });
     }
+    const fallbackQuestions = annotateQuestionsWithRagMeta(fallback.questions, {
+      chapterTitle: chapter.title,
+      chapterTopics: chapter.topics,
+      pyqTopics: pyq?.importantTopics ?? [],
+      contextSnippets: contextPack.snippets,
+    });
+    const annotatedFallback: ChapterDrillResponse = {
+      ...fallback,
+      questions: fallbackQuestions,
+      answerKey: fallbackQuestions.map((item) => item.answer),
+    };
 
     const prompt = `Create a chapter-wise CBSE drill set.
 Chapter: ${chapter.title} (${chapter.subject}, Class ${chapter.classLevel}, id ${chapter.id})
@@ -307,18 +320,24 @@ ${buildVariationInstruction(variation)}`;
       }
       const questions = ensureExactDrillCount(
         toppedUp,
-        fallback.questions,
+        annotatedFallback.questions,
         chapter.title,
         chapter.topics,
         parsed.questionCount
       );
-      if (questions.length === 0) return dataJson({ requestId, data: fallback });
+      if (questions.length === 0) return dataJson({ requestId, data: annotatedFallback });
+      const annotatedQuestions = annotateQuestionsWithRagMeta(questions, {
+        chapterTitle: chapter.title,
+        chapterTopics: chapter.topics,
+        pyqTopics: pyq?.importantTopics ?? [],
+        contextSnippets: contextPack.snippets,
+      });
 
       const response: ChapterDrillResponse = {
         chapterId: chapter.id,
         difficulty: stripSourceTags(data.difficulty || parsed.difficulty),
-        questions,
-        answerKey: questions.map((item) => item.answer),
+        questions: annotatedQuestions,
+        answerKey: annotatedQuestions.map((item) => item.answer),
         topicCoverage: cleanTextList(
           Array.isArray(data.topicCoverage) ? data.topicCoverage : fallback.topicCoverage,
           12
@@ -343,7 +362,7 @@ ${buildVariationInstruction(variation)}`;
     } catch (aiError) {
       const reason = aiError instanceof Error ? aiError.message : String(aiError);
       console.warn(`[chapter-drill] AI fallback triggered: ${reason}`);
-      return dataJson({ requestId, data: fallback });
+      return dataJson({ requestId, data: annotatedFallback });
     }
   } catch (error) {
     console.error('[chapter-drill] error', error);

@@ -20,6 +20,28 @@ export interface ApiSuccessBody<T> {
   [key: string]: unknown;
 }
 
+function sanitizeServerErrorMessage(message: string): string {
+  const clean = String(message || '').trim();
+  if (!clean) return 'Internal server error. Please try again later.';
+  if (/temporarily unavailable|service unavailable|please try again later/i.test(clean)) {
+    return clean.slice(0, 180);
+  }
+  return 'Internal server error. Please try again later.';
+}
+
+const SENSITIVE_ERROR_PATTERN =
+  /(supabase|postgres|postgresql|redis|upstash|database|sql|table|column|relation|schema|econn|enoent|eacces|permission denied|scripts\/sql|stack trace|traceback|[a-z]:\\|\/(?:var|home|tmp|usr|opt|etc)\b)/i;
+
+function sanitizePublicErrorMessage(message: string, status: number): string {
+  const clean = String(message || '').trim();
+  if (status >= 500) return sanitizeServerErrorMessage(clean);
+  if (!clean) return 'Request failed.';
+  if (clean.length > 220 || SENSITIVE_ERROR_PATTERN.test(clean)) {
+    return 'Request could not be processed. Please review input and try again.';
+  }
+  return clean;
+}
+
 function extractLegacyAliases(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const source = value as Record<string, unknown>;
@@ -59,11 +81,12 @@ export function errorJson(input: {
   issues?: Array<{ path: string; message: string }>;
 }): NextResponse {
   const status = Number.isFinite(input.status) ? Number(input.status) : 400;
+  const safeMessage = sanitizePublicErrorMessage(input.message, status);
   const body: ApiErrorBody = {
     ok: false,
     errorCode: input.errorCode,
-    message: input.message,
-    error: input.message,
+    message: safeMessage,
+    error: safeMessage,
     requestId: input.requestId,
     hint: input.hint,
     issues: input.issues,

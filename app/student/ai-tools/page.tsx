@@ -14,6 +14,13 @@ interface MCQItem {
   options: string[];
   answer: number;
   explanation: string;
+  ragMeta?: {
+    askedInPastExam: boolean;
+    pyqTag: 'asked-before' | 'pyq-inspired' | 'new';
+    years?: number[];
+    qualityBand?: 'high' | 'medium' | 'baseline';
+    qualityScore?: number;
+  };
 }
 
 interface FlashcardItem {
@@ -56,6 +63,7 @@ function MCQViewer({ questions }: { questions: MCQItem[] }) {
   const [counted, setCounted] = useState<boolean[]>(() => new Array(questions.length).fill(false));
 
   const q = questions[current];
+  const ragMeta = q.ragMeta;
 
   function reveal() {
     if (selected === null || revealed) return;
@@ -80,6 +88,37 @@ function MCQViewer({ questions }: { questions: MCQItem[] }) {
       </div>
 
       <p className="text-sm font-semibold text-gray-900 leading-relaxed">{q.question}</p>
+      {ragMeta && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={clsx(
+              'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+              ragMeta.pyqTag === 'asked-before'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : ragMeta.pyqTag === 'pyq-inspired'
+                  ? 'border-amber-200 bg-amber-50 text-amber-700'
+                  : 'border-gray-200 bg-gray-50 text-gray-600'
+            )}
+          >
+            {ragMeta.pyqTag === 'asked-before'
+              ? 'Asked in previous exams'
+              : ragMeta.pyqTag === 'pyq-inspired'
+                ? 'PYQ-inspired'
+                : 'Fresh pattern'}
+          </span>
+          {Array.isArray(ragMeta.years) && ragMeta.years.length > 0 && (
+            <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+              Years: {ragMeta.years.slice(0, 3).join(', ')}
+            </span>
+          )}
+          {ragMeta.qualityBand && (
+            <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+              Quality: {ragMeta.qualityBand}
+              {Number.isFinite(Number(ragMeta.qualityScore)) ? ` (${Number(ragMeta.qualityScore)})` : ''}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2">
         {q.options.map((opt, i) => (
@@ -344,7 +383,7 @@ export default function StudentAIToolsPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <BackButton href="/student" label="Dashboard" />
+      <BackButton href="/dashboard" label="Dashboard" />
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">

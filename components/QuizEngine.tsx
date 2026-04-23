@@ -10,6 +10,12 @@ interface Quiz {
   options: string[];
   correctAnswerIndex: number;
   explanation?: string;
+  ragMeta?: {
+    pyqTag: 'asked-before' | 'pyq-inspired' | 'new';
+    years?: number[];
+    qualityBand?: 'high' | 'medium' | 'baseline';
+    qualityScore?: number;
+  };
 }
 
 function toQuiz(item: unknown): Quiz | null {
@@ -21,8 +27,11 @@ function toQuiz(item: unknown): Quiz | null {
     : [];
   const answer = typeof record.answer === 'number' ? record.answer : Number(record.answer);
   const explanation = typeof record.explanation === 'string' ? record.explanation : undefined;
+  const ragMeta = record.ragMeta && typeof record.ragMeta === 'object'
+    ? (record.ragMeta as Quiz['ragMeta'])
+    : undefined;
 
-  if (!question || options.length !== 4 || Number.isNaN(answer) || answer < 0 || answer > 3) {
+  if (!question || options.length < 4 || options.length > 5 || Number.isNaN(answer) || answer < 0 || answer >= options.length) {
     return null;
   }
 
@@ -31,6 +40,7 @@ function toQuiz(item: unknown): Quiz | null {
     options,
     correctAnswerIndex: answer,
     explanation,
+    ragMeta,
   };
 }
 
@@ -250,7 +260,28 @@ export default function QuizEngine({ chapterId, quizzes: initialQuizzes, subject
         </div>
       </div>
 
-      <h3 className="text-lg font-semibold text-navy-700 mb-6">{q.question}</h3>
+      <h3 className="text-lg font-semibold text-navy-700 mb-2">{q.question}</h3>
+      {q.ragMeta && (
+        <div className="mb-4 flex flex-wrap gap-1 text-[10px]">
+          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-semibold text-indigo-700">
+            {q.ragMeta.pyqTag === 'asked-before'
+              ? 'Asked in previous exams'
+              : q.ragMeta.pyqTag === 'pyq-inspired'
+                ? 'PYQ-inspired'
+                : 'Fresh pattern'}
+          </span>
+          {Array.isArray(q.ragMeta.years) && q.ragMeta.years.length > 0 && (
+            <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-semibold text-sky-700">
+              Years: {q.ragMeta.years.slice(0, 2).join(', ')}
+            </span>
+          )}
+          {q.ragMeta.qualityBand && (
+            <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-semibold text-violet-700">
+              Quality: {q.ragMeta.qualityBand}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="space-y-3">
         {q.options.map((opt, idx) => {

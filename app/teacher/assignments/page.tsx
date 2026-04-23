@@ -36,7 +36,68 @@ const STATUS_LABELS: Record<string, { label: string; className: string }> = {
   archived:  { label: 'Archived',  className: 'bg-gray-50 text-gray-500 border-gray-200'          },
 };
 
-const OPTION_LABELS = ['A', 'B', 'C', 'D'];
+const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E'];
+
+function renderRagMeta(meta: MCQItem['ragMeta']) {
+  if (!meta) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-semibold text-indigo-700">
+        {meta.pyqTag === 'asked-before'
+          ? 'Asked before'
+          : meta.pyqTag === 'pyq-inspired'
+            ? 'PYQ-inspired'
+            : 'Fresh'}
+      </span>
+      {Array.isArray(meta.years) && meta.years.length > 0 && (
+        <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-semibold text-sky-700">
+          Years: {meta.years.slice(0, 3).join(', ')}
+        </span>
+      )}
+      {meta.qualityBand && (
+        <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-semibold text-violet-700">
+          Quality: {meta.qualityBand}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function normalizeEditableMcq(item: MCQItem): MCQItem {
+  const options = (Array.isArray(item.options) ? item.options : [])
+    .map((option) => String(option ?? '').trim())
+    .slice(0, 5);
+  while (options.length < 4) options.push('');
+  const answerMode: 'single' | 'multiple' = item.answerMode === 'multiple' ? 'multiple' : 'single';
+  const baseAnswer = Number.isInteger(Number(item.answer)) ? Number(item.answer) : 0;
+  const normalizedAnswers = Array.from(
+    new Set(
+      (Array.isArray(item.answers) ? item.answers : [])
+        .map((entry) => Number(entry))
+        .filter((entry) => Number.isInteger(entry) && entry >= 0 && entry < options.length)
+    )
+  ).sort((a, b) => a - b);
+  const safeSingle = baseAnswer >= 0 && baseAnswer < options.length ? baseAnswer : (normalizedAnswers[0] ?? 0);
+  if (answerMode === 'multiple') {
+    const answers = normalizedAnswers.length >= 2
+      ? normalizedAnswers
+      : [safeSingle, Math.min(options.length - 1, safeSingle + 1)].filter((value, index, arr) => arr.indexOf(value) === index);
+    return {
+      ...item,
+      options,
+      answerMode: 'multiple',
+      answers,
+      answer: answers[0] ?? 0,
+    };
+  }
+  return {
+    ...item,
+    options,
+    answerMode: 'single',
+    answers: undefined,
+    answer: safeSingle,
+  };
+}
 
 /* ── Difficulty slider helper ─────────────────────────────────────────── */
 function DifficultySliders({
@@ -105,62 +166,153 @@ function MCQEditor({
   mcqs: MCQItem[];
   onChange: (updated: MCQItem[]) => void;
 }) {
-  function updateQuestion(i: number, field: keyof MCQItem, value: string | number | string[]) {
-    const next = mcqs.map((q, idx) => idx === i ? { ...q, [field]: value } : q);
+  function updateQuestion(i: number, updater: (current: MCQItem) => MCQItem) {
+    const next = mcqs.map((q, idx) => (idx === i ? normalizeEditableMcq(updater(q)) : q));
     onChange(next);
   }
+
   function updateOption(qi: number, oi: number, val: string) {
-    const opts = [...mcqs[qi].options];
-    opts[oi] = val;
-    updateQuestion(qi, 'options', opts);
+    updateQuestion(qi, (current) => {
+      const normalized = normalizeEditableMcq(current);
+      const opts = [...normalized.options];
+      opts[oi] = val;
+      return { ...normalized, options: opts };
+    });
+  }
+
+  function setOptionsCount(qi: number, count: 4 | 5) {
+    updateQuestion(qi, (current) => {
+      const normalized = normalizeEditableMcq(current);
+      const opts = [...normalized.options];
+      if (count === 5 && opts.length < 5) opts.push('');
+      if (count === 4 && opts.length > 4) opts.pop();
+      return { ...normalized, options: opts };
+    });
+  }
+
+  function setAnswerMode(qi: number, mode: 'single' | 'multiple') {
+    updateQuestion(qi, (current) => ({ ...current, answerMode: mode }));
+  }
+
+  function setSingleAnswer(qi: number, answer: number) {
+    updateQuestion(qi, (current) => ({
+      ...current,
+      answerMode: 'single',
+      answer,
+      answers: undefined,
+    }));
+  }
+
+  function toggleMultipleAnswer(qi: number, answer: number) {
+    updateQuestion(qi, (current) => {
+      const normalized = normalizeEditableMcq({ ...current, answerMode: 'multiple' });
+      const currentAnswers = Array.isArray(normalized.answers) ? [...normalized.answers] : [];
+      const hasAnswer = currentAnswers.includes(answer);
+      const nextAnswers = hasAnswer
+        ? currentAnswers.filter((entry) => entry !== answer)
+        : [...currentAnswers, answer];
+      const unique = Array.from(new Set(nextAnswers)).sort((a, b) => a - b);
+      return {
+        ...normalized,
+        answerMode: 'multiple',
+        answers: unique,
+        answer: unique[0] ?? 0,
+      };
+    });
   }
 
   return (
     <div className="space-y-4">
-      {mcqs.map((q, i) => (
-        <div key={i} className="rounded-xl border border-amber-200 bg-white p-4 space-y-3">
-          <div className="flex items-start gap-2">
-            <span className="text-xs font-bold text-amber-700 mt-2">Q{i + 1}</span>
-            <textarea
-              rows={2}
-              value={q.question}
-              onChange={(e) => updateQuestion(i, 'question', e.target.value)}
-              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm resize-none"
-              placeholder="Question text…"
-            />
+      {mcqs.map((rawQuestion, i) => {
+        const q = normalizeEditableMcq(rawQuestion);
+        const isMultiple = q.answerMode === 'multiple';
+        return (
+          <div key={i} className="rounded-xl border border-amber-200 bg-white p-4 space-y-3">
+            <div className="flex items-start gap-2">
+              <span className="text-xs font-bold text-amber-700 mt-2">Q{i + 1}</span>
+              <textarea
+                rows={2}
+                value={q.question}
+                onChange={(e) => updateQuestion(i, (current) => ({ ...current, question: e.target.value }))}
+                className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm resize-none"
+                placeholder="Question text..."
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAnswerMode(i, 'single')}
+                className={clsx(
+                  'px-2.5 py-1 rounded-lg text-[11px] font-semibold border',
+                  !isMultiple
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                )}
+              >
+                Single Choice
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnswerMode(i, 'multiple')}
+                className={clsx(
+                  'px-2.5 py-1 rounded-lg text-[11px] font-semibold border',
+                  isMultiple
+                    ? 'bg-violet-50 text-violet-700 border-violet-200'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                )}
+              >
+                Multiple Choice
+              </button>
+              <button
+                type="button"
+                onClick={() => setOptionsCount(i, (q.options?.length ?? 4) >= 5 ? 4 : 5)}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+              >
+                {(q.options?.length ?? 4) >= 5 ? 'Use 4 options' : 'Use 5 options'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {(q.options ?? []).map((opt, j) => (
+                <div key={j} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => (isMultiple ? toggleMultipleAnswer(i, j) : setSingleAnswer(i, j))}
+                    className={clsx(
+                      'w-6 h-6 rounded-full border-2 flex-shrink-0 text-[10px] font-bold transition-colors',
+                      isMultiple
+                        ? ((q.answers ?? []).includes(j)
+                          ? 'border-violet-500 bg-violet-500 text-white'
+                          : 'border-gray-300 text-gray-500 hover:border-violet-400')
+                        : (q.answer === j
+                          ? 'border-emerald-500 bg-emerald-500 text-white'
+                          : 'border-gray-300 text-gray-500 hover:border-emerald-400')
+                    )}
+                  >
+                    {OPTION_LABELS[j]}
+                  </button>
+                  <input
+                    value={opt}
+                    onChange={(e) => updateOption(i, j, e.target.value)}
+                    className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                    placeholder={`Option ${OPTION_LABELS[j]}`}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <input
+                value={q.explanation ?? ''}
+                onChange={(e) => updateQuestion(i, (current) => ({ ...current, explanation: e.target.value }))}
+                className="w-full rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5 text-xs text-gray-600"
+                placeholder="Explanation (optional)..."
+              />
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {(q.options ?? []).map((opt, j) => (
-              <div key={j} className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => updateQuestion(i, 'answer', j)}
-                  className={clsx(
-                    'w-6 h-6 rounded-full border-2 flex-shrink-0 text-[10px] font-bold transition-colors',
-                    q.answer === j ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-gray-300 text-gray-500 hover:border-emerald-400'
-                  )}
-                >
-                  {OPTION_LABELS[j]}
-                </button>
-                <input
-                  value={opt}
-                  onChange={(e) => updateOption(i, j, e.target.value)}
-                  className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
-                  placeholder={`Option ${OPTION_LABELS[j]}`}
-                />
-              </div>
-            ))}
-          </div>
-          <div>
-            <input
-              value={q.explanation ?? ''}
-              onChange={(e) => updateQuestion(i, 'explanation', e.target.value)}
-              className="w-full rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5 text-xs text-gray-600"
-              placeholder="Explanation (optional)…"
-            />
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -335,19 +487,40 @@ export default function TeacherAssignmentsPage() {
 
   function startEditing(pack: TeacherAssignmentPack) {
     setEditingPackId(pack.packId);
-    setEditDraft((prev) => ({ ...prev, [pack.packId]: (pack.mcqs ?? []).map((q) => ({ ...q })) }));
+    setEditDraft((prev) => ({
+      ...prev,
+      [pack.packId]: (pack.mcqs ?? []).map((q) => normalizeEditableMcq({ ...q })),
+    }));
   }
 
   async function saveEdits(packId: string) {
     const mcqs = editDraft[packId];
     if (!mcqs) return;
+    const normalizedMcqs = mcqs.map((item) => normalizeEditableMcq(item));
+    const invalidMultipleIndex = normalizedMcqs.findIndex(
+      (item) => item.answerMode === 'multiple' && (!Array.isArray(item.answers) || item.answers.length < 2)
+    );
+    if (invalidMultipleIndex >= 0) {
+      setError(`Question ${invalidMultipleIndex + 1} needs at least 2 correct answers for multiple choice mode.`);
+      return;
+    }
+    const questions = normalizedMcqs.map((item, index) => ({
+      questionNo: `Q${index + 1}`,
+      prompt: item.question,
+      kind: 'mcq' as const,
+      options: item.options,
+      answerMode: item.answerMode === 'multiple' ? 'multiple' : 'single',
+      answerIndex: item.answerMode === 'multiple' ? undefined : item.answer,
+      answerIndexes: item.answerMode === 'multiple' ? item.answers : undefined,
+      rubric: item.explanation || undefined,
+    }));
     setSavingEdit(true);
     setError('');
     try {
       const res = await fetch(`/api/teacher/assignment-pack/${encodeURIComponent(packId)}/edit-questions`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mcqs }),
+        body: JSON.stringify({ packId, questions }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) { setError(apiError(body, 'Failed to save edits.')); return; }
@@ -603,7 +776,7 @@ export default function TeacherAssignmentsPage() {
                   {isEditing && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <p className="text-xs font-semibold text-violet-700">Editing MCQs — click the lettered circle to change the correct answer</p>
+                        <p className="text-xs font-semibold text-violet-700">Editing MCQs — choose single/multiple mode, set 4 or 5 options, and mark the correct options</p>
                         <div className="flex gap-2">
                           <button
                             onClick={() => saveEdits(pack.packId)}
@@ -635,10 +808,32 @@ export default function TeacherAssignmentsPage() {
                         {displayMcqs.map((q, i) => (
                           <div key={i} className="rounded-lg bg-white border border-gray-100 p-3 text-xs">
                             <p className="font-medium text-gray-700">Q{i + 1}. {q.question}</p>
+                            {renderRagMeta(q.ragMeta)}
+                            {q.answerMode === 'multiple' && (
+                              <p className="mt-1 text-[10px] font-semibold text-violet-600">Multiple correct answers</p>
+                            )}
                             <div className="mt-1 grid grid-cols-2 gap-1">
-                              {q.options?.map((opt, j) => (
-                                <span key={j} className={clsx('px-2 py-1 rounded', j === q.answer ? 'bg-emerald-100 text-emerald-700 font-medium' : 'text-gray-500')}>{opt}</span>
-                              ))}
+                              {q.options?.map((opt, j) => {
+                                const multipleAnswers = Array.isArray(q.answers)
+                                  ? q.answers.filter((entry) => Number.isInteger(entry))
+                                  : [];
+                                const correctIndexes = q.answerMode === 'multiple' && multipleAnswers.length > 0
+                                  ? multipleAnswers
+                                  : [q.answer];
+                                return (
+                                  <span
+                                    key={j}
+                                    className={clsx(
+                                      'px-2 py-1 rounded',
+                                      correctIndexes.includes(j)
+                                        ? 'bg-emerald-100 text-emerald-700 font-medium'
+                                        : 'text-gray-500'
+                                    )}
+                                  >
+                                    {opt}
+                                  </span>
+                                );
+                              })}
                             </div>
                           </div>
                         ))}

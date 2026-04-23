@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { chapterNotesSlug, parseChapterFromNotesSlug, slugify } from '@/lib/seo-notes';
 
 interface NotesParams {
@@ -21,10 +22,10 @@ export function generateStaticParams(): NotesParams[] {
     }));
 }
 
-export function generateMetadata({ params }: { params: NotesParams }): Metadata {
+export async function generateMetadata({ params }: { params: NotesParams }): Promise<Metadata> {
   const chapter = parseChapterFromNotesSlug(params.classLevel, params.subject, params.chapterSlug);
   if (!chapter) return { title: 'CBSE Notes | VidyaPath' };
-  const pyq = getPYQData(chapter.id);
+  const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
   const baseTitle = `CBSE Class ${chapter.classLevel} ${chapter.subject} ${chapter.title} Notes`;
   return {
     title: `${baseTitle} | VidyaPath`,
@@ -40,10 +41,10 @@ export function generateMetadata({ params }: { params: NotesParams }): Metadata 
   };
 }
 
-export default function CbseNotesChapterPage({ params }: { params: NotesParams }) {
+export default async function CbseNotesChapterPage({ params }: { params: NotesParams }) {
   const chapter = parseChapterFromNotesSlug(params.classLevel, params.subject, params.chapterSlug);
   if (!chapter) notFound();
-  const pyq = getPYQData(chapter.id);
+  const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
   const formulaNames = (chapter.formulas ?? []).map((formula) => formula.name).slice(0, 6);
   const highYieldTopics = pyq?.importantTopics?.slice(0, 8) ?? chapter.topics.slice(0, 8);
   const yearsAsked = pyq?.yearsAsked ? [...pyq.yearsAsked].sort((a, b) => b - a) : [];

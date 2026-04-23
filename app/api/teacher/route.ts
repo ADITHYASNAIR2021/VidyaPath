@@ -2,13 +2,64 @@ import { randomUUID } from 'node:crypto';
 import { buildTeacherAssignmentPackDraft, buildTeacherPackUrls, sanitizePackTitle, toAnswerKey } from '@/lib/teacher-assignment';
 import { getStudentSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { ALL_CHAPTERS } from '@/lib/data';
+import { getSubjectsForAcademicTrack } from '@/lib/academic-taxonomy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { z } from 'zod';
-// Strict on 'action' field; payload varies per-action (validated inline below)
-const teacherActionBaseSchema = z.object({
-  action: z.enum(['set-important-topics', 'set-quiz-link', 'add-announcement', 'remove-announcement', 'create-assignment-pack']),
-}).passthrough();
+
+const teacherActionSchema = z.enum([
+  'set-important-topics',
+  'set-quiz-link',
+  'add-announcement',
+  'remove-announcement',
+  'create-assignment-pack',
+]);
+const teacherActionEnvelopeSchema = z.record(z.string(), z.unknown());
+const sectionSchema = z.string().trim().max(40).optional();
+const chapterIdSchema = z.string().trim().min(1).max(80);
+const dueDateSchema = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const setImportantTopicsActionSchema = z.object({
+  action: z.literal('set-important-topics'),
+  chapterId: chapterIdSchema,
+  topics: z.array(z.string().trim().max(140)).max(20).optional().default([]),
+  section: sectionSchema,
+}).strict();
+
+const setQuizLinkActionSchema = z.object({
+  action: z.literal('set-quiz-link'),
+  chapterId: chapterIdSchema,
+  url: z.string().trim().max(500),
+  section: sectionSchema,
+}).strict();
+
+const addAnnouncementActionSchema = z.object({
+  action: z.literal('add-announcement'),
+  title: z.string().trim().min(1).max(140),
+  body: z.string().trim().min(1).max(800),
+  chapterId: z.string().trim().max(80).optional(),
+  section: sectionSchema,
+  batch: z.string().trim().max(80).optional(),
+  deliveryScope: z.enum(['class', 'section', 'batch', 'chapter']).optional(),
+}).strict();
+
+const removeAnnouncementActionSchema = z.object({
+  action: z.literal('remove-announcement'),
+  id: z.string().trim().min(1).max(80),
+}).strict();
+
+const createAssignmentPackActionSchema = z.object({
+  action: z.literal('create-assignment-pack'),
+  chapterId: chapterIdSchema,
+  classLevel: z.coerce.number().refine((value) => value === 10 || value === 12),
+  subject: z.string().trim().min(1).max(80),
+  questionCount: z.coerce.number().int().min(1).max(24).optional(),
+  difficultyMix: z.string().trim().max(100).optional(),
+  includeShortAnswers: z.boolean().optional(),
+  includeFormulaDrill: z.boolean().optional(),
+  dueDate: dueDateSchema.optional(),
+  section: sectionSchema,
+}).strict();
 import {
   addAnnouncement,
   getPrivateTeacherConfig,
@@ -33,6 +84,13 @@ type TeacherAction =
 
 function safeClassLevel(value: unknown): 10 | 12 {
   return Number(value) === 10 ? 10 : 12;
+}
+
+function zodIssuesToApi(issues: z.ZodIssue[]): Array<{ path: string; message: string }> {
+  return issues.map((issue) => ({
+    path: Array.isArray(issue.path) ? issue.path.map((part) => String(part)).join('.') : '',
+    message: issue.message,
+  }));
 }
 
 function filterPublicConfigBySubjects(config: Record<string, unknown>, allowedSubjects: Set<string>) {
@@ -127,26 +185,12 @@ export async function GET(req: Request) {
     });
     if (studentSession?.studentId) {
       const enrolledSubjects = await getStudentEnrolledSubjects(studentSession.studentId, studentSession.schoolId);
-      const allowedSubjects = new Set(enrolledSubjects);
-      if (allowedSubjects.size > 0) {
-        return dataJson({
-          requestId,
-          data: filterPublicConfigBySubjects(config as unknown as Record<string, unknown>, allowedSubjects),
-        });
-      }
+      const fallbackSubjects = getSubjectsForAcademicTrack(studentSession.classLevel, studentSession.stream);
+      const allowedSubjects = new Set(enrolledSubjects.length > 0 ? enrolledSubjects : fallbackSubjects);
+      if (allowedSubjects.size === 0) return dataJson({ requestId, data: config });
       return dataJson({
         requestId,
-        data: {
-          ...config,
-          announcements: [],
-          scopeFeed: {
-            ...(config.scopeFeed || {}),
-            announcements: [],
-            assignmentPacks: [],
-            quizLinks: [],
-            importantTopics: [],
-          },
-        },
+        data: filterPublicConfigBySubjects(config as unknown as Record<string, unknown>, allowedSubjects),
       });
     }
     return dataJson({ requestId, data: config });
@@ -175,7 +219,7 @@ export async function POST(req: Request) {
     }
     await assertTeacherStorageWritable();
 
-    const bodyResult = await parseAndValidateJsonBody(req, 128 * 1024, teacherActionBaseSchema);
+    const bodyResult = await parseAndValidateJsonBody(req, 128 * 1024, teacherActionEnvelopeSchema);
     if (!bodyResult.ok) {
       return errorJson({
         requestId,
@@ -185,27 +229,36 @@ export async function POST(req: Request) {
         issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value;
-    const action = String((body as Record<string, unknown>).action ?? '') as TeacherAction;
-    const chapterId = String((body as Record<string, unknown>).chapterId ?? '').trim();
-    const section = typeof (body as Record<string, unknown>).section === 'string'
-      ? String((body as Record<string, unknown>).section).trim()
-      : undefined;
+    const body = bodyResult.value as Record<string, unknown>;
+    const actionResult = z.object({ action: teacherActionSchema }).safeParse(body);
+    if (!actionResult.success) {
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-input',
+        message: 'Action is required.',
+        status: 400,
+        issues: zodIssuesToApi(actionResult.error.issues),
+      });
+    }
+    const action = actionResult.data.action as TeacherAction;
 
     if (action === 'set-important-topics') {
-      const topics = Array.isArray((body as Record<string, unknown>).topics)
-        ? ((body as Record<string, unknown>).topics as unknown[])
-            .filter((item): item is string => typeof item === 'string')
-        : [];
-      if (!chapterId) {
+      const parsedAction = setImportantTopicsActionSchema.safeParse(body);
+      if (!parsedAction.success) {
         return errorJson({
           requestId,
-          errorCode: 'missing-chapter-id',
-          message: 'chapterId is required.',
+          errorCode: 'invalid-input',
+          message: 'Invalid set-important-topics payload.',
           status: 400,
+          issues: zodIssuesToApi(parsedAction.error.issues),
         });
       }
-      const config = await setImportantTopics({ teacherId: session.teacher.id, chapterId, topics, section });
+      const config = await setImportantTopics({
+        teacherId: session.teacher.id,
+        chapterId: parsedAction.data.chapterId,
+        topics: parsedAction.data.topics,
+        section: parsedAction.data.section,
+      });
       const committedAt = new Date().toISOString();
       await recordAuditEvent({
         requestId,
@@ -213,7 +266,7 @@ export async function POST(req: Request) {
         action: 'teacher-set-important-topics',
         statusCode: 200,
         actorRole: 'teacher',
-        metadata: { teacherId: session.teacher.id, chapterId, committedAt },
+        metadata: { teacherId: session.teacher.id, chapterId: parsedAction.data.chapterId, committedAt },
       });
       return dataJson({
         requestId,
@@ -223,16 +276,22 @@ export async function POST(req: Request) {
     }
 
     if (action === 'set-quiz-link') {
-      const url = String((body as Record<string, unknown>).url ?? '').trim();
-      if (!chapterId) {
+      const parsedAction = setQuizLinkActionSchema.safeParse(body);
+      if (!parsedAction.success) {
         return errorJson({
           requestId,
-          errorCode: 'missing-chapter-id',
-          message: 'chapterId is required.',
+          errorCode: 'invalid-input',
+          message: 'Invalid set-quiz-link payload.',
           status: 400,
+          issues: zodIssuesToApi(parsedAction.error.issues),
         });
       }
-      const config = await setQuizLink({ teacherId: session.teacher.id, chapterId, url, section });
+      const config = await setQuizLink({
+        teacherId: session.teacher.id,
+        chapterId: parsedAction.data.chapterId,
+        url: parsedAction.data.url,
+        section: parsedAction.data.section,
+      });
       const committedAt = new Date().toISOString();
       await recordAuditEvent({
         requestId,
@@ -240,7 +299,7 @@ export async function POST(req: Request) {
         action: 'teacher-set-quiz-link',
         statusCode: 200,
         actorRole: 'teacher',
-        metadata: { teacherId: session.teacher.id, chapterId, committedAt },
+        metadata: { teacherId: session.teacher.id, chapterId: parsedAction.data.chapterId, committedAt },
       });
       return dataJson({
         requestId,
@@ -250,24 +309,24 @@ export async function POST(req: Request) {
     }
 
     if (action === 'add-announcement') {
-      const title = String((body as Record<string, unknown>).title ?? '').trim();
-      const message = String((body as Record<string, unknown>).body ?? '').trim();
-      const rawDeliveryScope = (body as Record<string, unknown>).deliveryScope;
-      const deliveryScope =
-        rawDeliveryScope === 'class' || rawDeliveryScope === 'section' || rawDeliveryScope === 'batch' || rawDeliveryScope === 'chapter'
-          ? rawDeliveryScope
-          : undefined;
-      const targetBatch = typeof (body as Record<string, unknown>).batch === 'string'
-        ? String((body as Record<string, unknown>).batch).trim() || undefined
-        : undefined;
+      const parsedAction = addAnnouncementActionSchema.safeParse(body);
+      if (!parsedAction.success) {
+        return errorJson({
+          requestId,
+          errorCode: 'invalid-input',
+          message: 'Invalid add-announcement payload.',
+          status: 400,
+          issues: zodIssuesToApi(parsedAction.error.issues),
+        });
+      }
       const config = await addAnnouncement({
         teacherId: session.teacher.id,
-        title,
-        body: message,
-        chapterId: chapterId || undefined,
-        section,
-        batch: targetBatch,
-        deliveryScope,
+        title: parsedAction.data.title,
+        body: parsedAction.data.body,
+        chapterId: parsedAction.data.chapterId || undefined,
+        section: parsedAction.data.section,
+        batch: parsedAction.data.batch,
+        deliveryScope: parsedAction.data.deliveryScope,
       });
       const committedAt = new Date().toISOString();
       await recordAuditEvent({
@@ -276,7 +335,7 @@ export async function POST(req: Request) {
         action: 'teacher-add-announcement',
         statusCode: 200,
         actorRole: 'teacher',
-        metadata: { teacherId: session.teacher.id, chapterId: chapterId || undefined, committedAt },
+        metadata: { teacherId: session.teacher.id, chapterId: parsedAction.data.chapterId || undefined, committedAt },
       });
       return dataJson({
         requestId,
@@ -286,8 +345,17 @@ export async function POST(req: Request) {
     }
 
     if (action === 'remove-announcement') {
-      const id = String((body as Record<string, unknown>).id ?? '').trim();
-      const config = await removeAnnouncement({ teacherId: session.teacher.id, id });
+      const parsedAction = removeAnnouncementActionSchema.safeParse(body);
+      if (!parsedAction.success) {
+        return errorJson({
+          requestId,
+          errorCode: 'invalid-input',
+          message: 'Invalid remove-announcement payload.',
+          status: 400,
+          issues: zodIssuesToApi(parsedAction.error.issues),
+        });
+      }
+      const config = await removeAnnouncement({ teacherId: session.teacher.id, id: parsedAction.data.id });
       const committedAt = new Date().toISOString();
       await recordAuditEvent({
         requestId,
@@ -295,7 +363,7 @@ export async function POST(req: Request) {
         action: 'teacher-remove-announcement',
         statusCode: 200,
         actorRole: 'teacher',
-        metadata: { teacherId: session.teacher.id, announcementId: id, committedAt },
+        metadata: { teacherId: session.teacher.id, announcementId: parsedAction.data.id, committedAt },
       });
       return dataJson({
         requestId,
@@ -305,27 +373,24 @@ export async function POST(req: Request) {
     }
 
     if (action === 'create-assignment-pack') {
-      const classLevel = safeClassLevel((body as Record<string, unknown>).classLevel);
-      const subject = typeof (body as Record<string, unknown>).subject === 'string'
-        ? String((body as Record<string, unknown>).subject).trim()
-        : '';
-      const questionCount = Number((body as Record<string, unknown>).questionCount);
-      const difficultyMix = typeof (body as Record<string, unknown>).difficultyMix === 'string'
-        ? String((body as Record<string, unknown>).difficultyMix).trim()
-        : '40% easy, 40% medium, 20% hard';
-      const includeShortAnswers = (body as Record<string, unknown>).includeShortAnswers !== false;
-      const includeFormulaDrill = (body as Record<string, unknown>).includeFormulaDrill !== false;
-      const dueDate = typeof (body as Record<string, unknown>).dueDate === 'string'
-        ? String((body as Record<string, unknown>).dueDate).trim()
-        : undefined;
-      if (!chapterId) {
+      const parsedAction = createAssignmentPackActionSchema.safeParse(body);
+      if (!parsedAction.success) {
         return errorJson({
           requestId,
-          errorCode: 'missing-chapter-id',
-          message: 'chapterId is required.',
+          errorCode: 'invalid-input',
+          message: 'Invalid create-assignment-pack payload.',
           status: 400,
+          issues: zodIssuesToApi(parsedAction.error.issues),
         });
       }
+      const classLevel = safeClassLevel(parsedAction.data.classLevel);
+      const chapterId = parsedAction.data.chapterId;
+      const subject = parsedAction.data.subject;
+      const questionCount = Number(parsedAction.data.questionCount);
+      const difficultyMix = parsedAction.data.difficultyMix ?? '40% easy, 40% medium, 20% hard';
+      const includeShortAnswers = parsedAction.data.includeShortAnswers !== false;
+      const includeFormulaDrill = parsedAction.data.includeFormulaDrill !== false;
+      const dueDate = parsedAction.data.dueDate;
 
       const draft = await buildTeacherAssignmentPackDraft({
         chapterId,
@@ -347,7 +412,7 @@ export async function POST(req: Request) {
         answerKey: toAnswerKey(draft.mcqs),
         shareUrl: urls.shareUrl,
         printUrl: urls.printUrl,
-        section,
+        section: parsedAction.data.section,
       });
       const committedAt = new Date().toISOString();
       await recordAuditEvent({

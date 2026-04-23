@@ -11,22 +11,66 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue>({ theme: 'light', toggle: () => {} });
 
+function getSystemTheme(): Theme {
+  if (typeof window === 'undefined') return 'light';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function getInitialThemePreference(): Theme {
+  if (typeof window === 'undefined') return 'light';
+  const saved = localStorage.getItem('vp-theme');
+  if (saved === 'light' || saved === 'dark') return saved;
+  return getSystemTheme();
+}
+
+function applyTheme(theme: Theme): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+  document.documentElement.style.colorScheme = theme;
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('light');
+  const [theme, setTheme] = useState<Theme>(() => getInitialThemePreference());
 
   useEffect(() => {
-    const saved = localStorage.getItem('vp-theme') as Theme | null;
-    if (saved === 'dark') {
-      setTheme('dark');
-      document.documentElement.classList.add('dark');
-    }
+    const preferred = getInitialThemePreference();
+    setTheme(preferred);
+    applyTheme(preferred);
+  }, []);
+
+  useEffect(() => {
+    applyTheme(theme);
+    localStorage.setItem('vp-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const onMediaChange = () => {
+      const saved = localStorage.getItem('vp-theme');
+      if (saved === 'light' || saved === 'dark') return;
+      setTheme(media.matches ? 'dark' : 'light');
+    };
+    media.addEventListener('change', onMediaChange);
+    return () => media.removeEventListener('change', onMediaChange);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== 'vp-theme') return;
+      if (event.newValue === 'light' || event.newValue === 'dark') {
+        setTheme(event.newValue);
+        return;
+      }
+      setTheme(getSystemTheme());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   function toggle() {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    document.documentElement.classList.toggle('dark', next === 'dark');
-    localStorage.setItem('vp-theme', next);
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }
 
   return <ThemeContext.Provider value={{ theme, toggle }}>{children}</ThemeContext.Provider>;

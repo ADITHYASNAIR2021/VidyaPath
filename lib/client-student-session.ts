@@ -14,6 +14,11 @@ export interface ClientStudentSession {
   enrolledSubjects: Subject[];
 }
 
+interface CachedStudentSession {
+  value: ClientStudentSession | null;
+  expiresAt: number;
+}
+
 const SUPPORTED_SUBJECTS: Subject[] = [
   'Physics',
   'Chemistry',
@@ -26,15 +31,21 @@ const SUPPORTED_SUBJECTS: Subject[] = [
   'Social Science',
 ];
 
+const STUDENT_SESSION_CACHE_TTL_MS = 45_000;
+let cachedStudentSession: CachedStudentSession | null = null;
+let inFlightStudentSession: Promise<ClientStudentSession | null> | null = null;
+
 function isSupportedSubject(value: string): value is Subject {
   return SUPPORTED_SUBJECTS.includes(value as Subject);
 }
 
-export async function fetchClientStudentSession(): Promise<ClientStudentSession | null> {
-  const response = await fetch('/api/student/session/me', { cache: 'no-store' }).catch(() => null);
+async function readStudentSession(): Promise<ClientStudentSession | null> {
+  const response = await fetch('/api/student/session/me', { cache: 'no-store', credentials: 'include' }).catch(() => null);
   if (!response?.ok) return null;
+
   const payload = await response.json().catch(() => null);
   if (!payload || typeof payload !== 'object') return null;
+
   const data = payload.data && typeof payload.data === 'object'
     ? payload.data as Record<string, unknown>
     : payload as Record<string, unknown>;
@@ -59,4 +70,29 @@ export async function fetchClientStudentSession(): Promise<ClientStudentSession 
     stream: normalizeAcademicStream(data.stream),
     enrolledSubjects,
   };
+}
+
+export async function fetchClientStudentSession(options?: { forceRefresh?: boolean }): Promise<ClientStudentSession | null> {
+  const forceRefresh = options?.forceRefresh === true;
+  const now = Date.now();
+
+  if (!forceRefresh && cachedStudentSession && cachedStudentSession.expiresAt > now) {
+    return cachedStudentSession.value;
+  }
+  if (!forceRefresh && inFlightStudentSession) return inFlightStudentSession;
+
+  inFlightStudentSession = readStudentSession().finally(() => {
+    inFlightStudentSession = null;
+  });
+  const value = await inFlightStudentSession;
+
+  cachedStudentSession = {
+    value,
+    expiresAt: now + STUDENT_SESSION_CACHE_TTL_MS,
+  };
+  return value;
+}
+
+export function clearClientStudentSessionCache(): void {
+  cachedStudentSession = null;
 }

@@ -1,5 +1,6 @@
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
+import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
@@ -66,10 +67,10 @@ function inferRiskLevel(weakTags: string[], quizScore: number | null, pyqAvgMark
   return 'low';
 }
 
-function buildFallbackDiagnosis(payload: ChapterDiagnoseRequest): ChapterDiagnoseResponse | null {
+async function buildFallbackDiagnosis(payload: ChapterDiagnoseRequest): Promise<ChapterDiagnoseResponse | null> {
   const chapter = getChapterById(payload.chapterId);
   if (!chapter) return null;
-  const pyq = getPYQData(payload.chapterId);
+  const pyq = (await getGroundedPYQData(payload.chapterId)) ?? getPYQData(payload.chapterId);
 
   const profile = buildLearningProfile({
     chapterId: chapter.id,
@@ -195,7 +196,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const pyq = getPYQData(parsed.chapterId);
+    const pyq = (await getGroundedPYQData(parsed.chapterId)) ?? getPYQData(parsed.chapterId);
     const contextPack = await getContextPack({
       task: 'chapter-diagnose',
       classLevel: chapter.classLevel,
@@ -206,7 +207,7 @@ export async function POST(req: Request) {
       topK: 4,
     });
 
-    const fallback = buildFallbackDiagnosis(parsed);
+    const fallback = await buildFallbackDiagnosis(parsed);
     if (!fallback) {
       return errorJson({
         requestId,

@@ -290,6 +290,25 @@ function sanitizeText(value: string, max = 240): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+function sanitizePlainText(value: string, max = 240): string {
+  return sanitizeText(value.replace(/<[^>]*>/g, ' '), max);
+}
+
+function normalizeQuizUrl(value: string): string {
+  const clean = sanitizeText(value, 500);
+  if (!clean) return '';
+  let parsed: URL;
+  try {
+    parsed = new URL(clean);
+  } catch {
+    throw new Error('Quiz URL must be a valid absolute URL.');
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Quiz URL must use http or https.');
+  }
+  return parsed.toString();
+}
+
 function normalizeOptionalId(value: string | null | undefined, max = 80): string | null {
   if (typeof value !== 'string') return null;
   const clean = sanitizeText(value, max);
@@ -434,9 +453,20 @@ function toQuestionBankItem(row: TeacherQuestionBankRow): TeacherQuestionBankIte
   };
 }
 
+const ALLOWED_SUBJECTS_BY_CLASS = ALL_CHAPTERS.reduce<Record<10 | 12, Set<string>>>(
+  (acc, chapter) => {
+    if (chapter.classLevel === 10 || chapter.classLevel === 12) {
+      acc[chapter.classLevel].add(chapter.subject.toLowerCase());
+    }
+    return acc;
+  },
+  { 10: new Set<string>(), 12: new Set<string>() }
+);
+
 function isSubjectAllowedForClass(classLevel: 10 | 12, subject: string): boolean {
-  void classLevel;
-  return sanitizeText(subject, 80).length > 0;
+  const normalized = sanitizeText(subject, 80).toLowerCase();
+  if (!normalized) return false;
+  return ALLOWED_SUBJECTS_BY_CLASS[classLevel].has(normalized);
 }
 
 function toScope(row: TeacherScopeRow): TeacherScope | null {
@@ -1488,7 +1518,8 @@ export async function getPublicTeacherConfig(input?: {
     };
   }
   const scopedSchoolId = sanitizeText(input?.schoolId || '', 80);
-  if (!scopedSchoolId) {
+  const allowGlobalFallback = process.env.SINGLE_ENV_MODE === '1' && !scopedSchoolId;
+  if (!scopedSchoolId && !allowGlobalFallback) {
     return {
       updatedAt: new Date().toISOString(),
       importantTopics: {},
@@ -1501,7 +1532,9 @@ export async function getPublicTeacherConfig(input?: {
   }
   const schoolTeacherRows = await supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
     select: 'id,school_id,name,status',
-    filters: [{ column: 'school_id', value: scopedSchoolId }, { column: 'status', value: 'active' }],
+    filters: scopedSchoolId
+      ? [{ column: 'school_id', value: scopedSchoolId }, { column: 'status', value: 'active' }]
+      : [{ column: 'status', value: 'active' }],
     limit: 2500,
   }).catch(() => []);
   const allowedTeacherIds = new Set(
@@ -2117,7 +2150,7 @@ export async function setQuizLink(input: { teacherId: string; chapterId: string;
   if (!chapter) throw new Error('Valid chapterId is required.');
   const scope = await resolveTeacherScopeForChapter(input.teacherId, chapter.id, input.section);
   if (!scope) throw new Error('Teacher does not have scope for this chapter.');
-  const url = sanitizeText(input.url, 500);
+  const url = normalizeQuizUrl(input.url);
   const existing = await supabaseSelect<TeacherQuizLinkRow>(TABLES.quizLinks, {
     select: '*',
     filters: [
@@ -2154,8 +2187,8 @@ export async function setQuizLink(input: { teacherId: string; chapterId: string;
 }
 
 export async function addAnnouncement(input: { teacherId: string; title: string; body: string; chapterId?: string; section?: string; batch?: string; deliveryScope?: 'class' | 'section' | 'batch' | 'chapter' }): Promise<PublicTeacherConfig> {
-  const title = sanitizeText(input.title, 140);
-  const body = sanitizeText(input.body, 800);
+  const title = sanitizePlainText(input.title, 140);
+  const body = sanitizePlainText(input.body, 800);
   if (!title || !body) throw new Error('Announcement title and body are required.');
 
   const teacherSession = await getTeacherSessionById(input.teacherId);

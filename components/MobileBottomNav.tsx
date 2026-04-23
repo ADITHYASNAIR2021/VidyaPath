@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
+import { fetchClientAuthSession } from '@/lib/client-auth-session';
 
 type Role = 'student' | 'teacher' | 'admin' | 'developer' | 'anonymous';
 
@@ -81,13 +82,17 @@ export default function MobileBottomNav() {
 
   useEffect(() => {
     let active = true;
-    fetch('/api/auth/session', { cache: 'no-store', credentials: 'include' })
-      .then(async (res) => {
-        const payload = await res.json().catch(() => null);
-        const data = payload?.data ?? payload;
-        if (!active || !data || typeof data.role !== 'string') return;
-        const r = data.role as Role;
-        if (active) setRole(r);
+    fetchClientAuthSession()
+      .then((session) => {
+        if (!active) return;
+        const nextRole =
+          session.role === 'student' ||
+          session.role === 'teacher' ||
+          session.role === 'admin' ||
+          session.role === 'developer'
+            ? session.role
+            : 'anonymous';
+        if (active) setRole(nextRole);
       })
       .catch(() => undefined);
     return () => { active = false; };
@@ -98,7 +103,7 @@ export default function MobileBottomNav() {
   const navItems = getNavItems(role);
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#E8E4DC] z-50 pb-safe">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-[#E8E4DC] dark:border-gray-700 z-50 pb-safe">
       <div className="flex items-center justify-around px-2 py-2">
         {navItems.map(({ href, label, icon: Icon }) => {
           const hrefPath = href.split('?')[0];
@@ -107,17 +112,17 @@ export default function MobileBottomNav() {
             <Link
               key={href}
               href={href}
-              className={clsx(
-                'flex flex-col items-center justify-center w-full py-1 gap-1 flex-1',
-                isActive ? 'text-saffron-600' : 'text-[#8A8AAA] hover:text-navy-700'
-              )}
-            >
-              <div
                 className={clsx(
-                  'flex items-center justify-center w-8 h-8 rounded-full transition-colors',
-                  isActive ? 'bg-saffron-50' : 'bg-transparent'
+                  'flex flex-col items-center justify-center w-full py-1 gap-1 flex-1',
+                  isActive ? 'text-saffron-600 dark:text-saffron-400' : 'text-[#8A8AAA] dark:text-gray-400 hover:text-navy-700 dark:hover:text-gray-100'
                 )}
               >
+                <div
+                  className={clsx(
+                    'flex items-center justify-center w-8 h-8 rounded-full transition-colors',
+                    isActive ? 'bg-saffron-50 dark:bg-saffron-900/30' : 'bg-transparent'
+                  )}
+                >
                 <Icon
                   className={clsx('w-5 h-5', isActive ? 'text-saffron-500' : '')}
                   strokeWidth={isActive ? 2.5 : 2}
