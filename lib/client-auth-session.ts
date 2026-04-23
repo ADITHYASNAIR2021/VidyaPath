@@ -1,6 +1,8 @@
 'use client';
 
-export type ClientAuthRole = 'student' | 'teacher' | 'admin' | 'developer' | 'parent' | 'anonymous';
+import type { PlatformRole } from '@/lib/auth/roles';
+
+export type ClientAuthRole = PlatformRole;
 
 export interface ClientAuthSession {
   role: ClientAuthRole;
@@ -35,8 +37,7 @@ function toClientAuthSession(payload: unknown): ClientAuthSession {
     roleRaw === 'student' ||
     roleRaw === 'teacher' ||
     roleRaw === 'admin' ||
-    roleRaw === 'developer' ||
-    roleRaw === 'parent'
+    roleRaw === 'developer'
       ? roleRaw
       : 'anonymous';
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import {
@@ -59,15 +59,15 @@ const SUBJECT_PILL_STYLES: Record<string, string> = {
 };
 
 const SUBJECT_PILL_INACTIVE: Record<string, string> = {
-  All: 'bg-white text-[#4A4A6A] border-gray-200 hover:border-navy-300',
-  Physics: 'bg-white text-sky-700 border-sky-200 hover:border-sky-400',
-  Chemistry: 'bg-white text-emerald-700 border-emerald-200 hover:border-emerald-400',
-  Biology: 'bg-white text-green-700 border-green-200 hover:border-green-400',
-  Math: 'bg-white text-purple-700 border-purple-200 hover:border-purple-400',
-  Accountancy: 'bg-white text-amber-700 border-amber-200 hover:border-amber-400',
-  'Business Studies': 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400',
-  Economics: 'bg-white text-rose-700 border-rose-200 hover:border-rose-400',
-  'English Core': 'bg-white text-cyan-700 border-cyan-200 hover:border-cyan-400',
+  All: 'bg-white dark:bg-gray-950 text-[#4A4A6A] dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-navy-300 dark:hover:border-gray-500',
+  Physics: 'bg-white dark:bg-gray-950 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800 hover:border-sky-400',
+  Chemistry: 'bg-white dark:bg-gray-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:border-emerald-400',
+  Biology: 'bg-white dark:bg-gray-950 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800 hover:border-green-400',
+  Math: 'bg-white dark:bg-gray-950 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 hover:border-purple-400',
+  Accountancy: 'bg-white dark:bg-gray-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:border-amber-400',
+  'Business Studies': 'bg-white dark:bg-gray-950 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:border-indigo-400',
+  Economics: 'bg-white dark:bg-gray-950 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800 hover:border-rose-400',
+  'English Core': 'bg-white dark:bg-gray-950 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800 hover:border-cyan-400',
 };
 
 function ChaptersContent() {
@@ -90,6 +90,7 @@ function ChaptersContent() {
     enrolledSubjects: [],
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const trackedNoResultQueries = useRef(new Set<string>());
   const { studiedChapterIds } = useProgressStore();
 
@@ -214,14 +215,14 @@ function ChaptersContent() {
   }, [chapterSearchDocs]);
 
   const searchOrder = useMemo(() => {
-    const query = searchQuery.trim();
+    const query = deferredSearchQuery.trim();
     if (!query) return null;
     const ordered = new Map<string, number>();
     chapterFuse.search(query).forEach((hit, idx) => {
       ordered.set(hit.item.id, idx);
     });
     return ordered;
-  }, [chapterFuse, searchQuery]);
+  }, [chapterFuse, deferredSearchQuery]);
 
   const filtered = useMemo(() => {
     const base = ALL_CHAPTERS.filter((ch) => {
@@ -235,12 +236,12 @@ function ChaptersContent() {
       return true;
     });
 
-    const query = searchQuery.trim();
+    const query = deferredSearchQuery.trim();
     if (!query || !searchOrder) return base;
 
     const filteredBySearch = base.filter((chapter) => searchOrder.has(chapter.id));
     return filteredBySearch.sort((a, b) => (searchOrder.get(a.id) ?? 9999) - (searchOrder.get(b.id) ?? 9999));
-  }, [enrolledSubjectSet, searchOrder, searchQuery, selectedClass, selectedSubject, studentSession.classLevel, studentSession.isStudent]);
+  }, [deferredSearchQuery, enrolledSubjectSet, searchOrder, selectedClass, selectedSubject, studentSession.classLevel, studentSession.isStudent]);
 
   const headerScope = useMemo(() => {
     if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
@@ -308,13 +309,13 @@ function ChaptersContent() {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-[#FDFAF6] dark:bg-navy-900 text-[#1C1C2E] dark:text-gray-100">
       <ScrollToTopOnMount />
       {/* Header */}
-      <div className="bg-gradient-to-br from-navy-700 to-navy-800 text-white px-4 py-12">
+      <div className="bg-gradient-to-br from-navy-700 to-navy-800 text-white px-4 py-10 sm:py-12">
         <div className="max-w-5xl mx-auto">
           <h1 className="font-fraunces text-3xl sm:text-4xl font-bold mb-2">Chapter Library</h1>
-          <p className="text-navy-200 text-base">
+          <p className="text-navy-200 text-sm sm:text-base">
             {headerScope}
           </p>
           <div className="mt-4 flex items-center gap-4 flex-wrap">
@@ -340,31 +341,31 @@ function ChaptersContent() {
       </div>
 
       {/* Filters */}
-      <div className="sticky top-16 z-30 bg-[#FDFAF6]/95 backdrop-blur border-b border-[#E8E4DC] px-4 py-3">
+      <div className="sticky top-16 z-30 bg-[#FDFAF6]/95 dark:bg-navy-900/95 backdrop-blur border-b border-[#E8E4DC] dark:border-gray-700 px-3 sm:px-4 py-3">
         <div className="max-w-5xl mx-auto space-y-3">
           {/* Search */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8A8AAA]" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8A8AAA] dark:text-gray-400" />
             <input
               type="text"
               placeholder="Search chapters, topics, or subjects..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 text-sm bg-white border border-[#E8E4DC] rounded-xl focus:outline-none focus:ring-2 focus:ring-saffron-400 focus:border-transparent placeholder:text-[#8A8AAA]"
+              className="w-full pl-9 pr-4 py-2.5 text-sm bg-white dark:bg-gray-950 border border-[#E8E4DC] dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-saffron-400 focus:border-transparent placeholder:text-[#8A8AAA] dark:placeholder:text-gray-500 text-[#1C1C2E] dark:text-gray-100"
             />
           </div>
 
           {/* Class Tabs */}
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5 snap-x snap-mandatory">
             {classTabs.map(({ label, value }) => (
               <button
                 key={value}
                 onClick={() => setSelectedClass(value)}
                 className={clsx(
-                  'flex-shrink-0 text-sm font-medium px-4 py-1.5 rounded-xl border transition-all duration-150',
+                  'snap-start flex-shrink-0 text-sm font-medium px-4 py-1.5 rounded-xl border transition-all duration-150',
                   selectedClass === value
                     ? 'bg-navy-700 text-white border-navy-700 shadow-sm'
-                    : 'bg-white text-[#4A4A6A] border-gray-200 hover:border-navy-300'
+                    : 'bg-white dark:bg-gray-950 text-[#4A4A6A] dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-navy-300 dark:hover:border-gray-500'
                 )}
               >
                 {label}
@@ -373,7 +374,7 @@ function ChaptersContent() {
           </div>
 
           {/* Subject Pills */}
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5 snap-x snap-mandatory">
             {availableSubjects.map(({ label, value, icon: Icon }) => {
               const SafeIcon = Icon ?? SlidersHorizontal;
               return (
@@ -381,7 +382,7 @@ function ChaptersContent() {
                 key={value}
                 onClick={() => setSelectedSubject(value)}
                 className={clsx(
-                  'flex-shrink-0 flex items-center gap-1.5 text-sm font-medium px-4 py-1.5 rounded-xl border transition-all duration-150',
+                  'snap-start flex-shrink-0 flex items-center gap-1.5 text-sm font-medium px-4 py-1.5 rounded-xl border transition-all duration-150',
                   selectedSubject === value
                     ? SUBJECT_PILL_STYLES[value]
                     : SUBJECT_PILL_INACTIVE[value]
@@ -397,24 +398,24 @@ function ChaptersContent() {
       </div>
 
       {/* Results */}
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
         {filtered.length === 0 ? (
           <div className="text-center py-20">
-            <Search className="w-12 h-12 text-[#C7C5BD] mx-auto mb-4" />
-            <h3 className="font-fraunces text-xl font-bold text-navy-700 mb-2">No chapters found</h3>
-            <p className="text-[#4A4A6A]">Try changing your filters or search query.</p>
+            <Search className="w-12 h-12 text-[#C7C5BD] dark:text-gray-600 mx-auto mb-4" />
+            <h3 className="font-fraunces text-xl font-bold text-navy-700 dark:text-gray-100 mb-2">No chapters found</h3>
+            <p className="text-[#4A4A6A] dark:text-gray-300">Try changing your filters or search query.</p>
           </div>
         ) : (
           <>
-            <p className="text-sm text-[#8A8AAA] mb-5">
+            <p className="text-sm text-[#8A8AAA] dark:text-gray-400 mb-5">
               Showing <span className="font-semibold text-navy-700">{filtered.length}</span> chapter
               {filtered.length !== 1 ? 's' : ''}
               {selectedClass !== 0 ? ` - Class ${selectedClass}` : ''}
               {selectedSubject !== 'All' ? ` - ${selectedSubject}` : ''}
-              {searchQuery ? ` for "${searchQuery}"` : ''}
+              {deferredSearchQuery ? ` for "${deferredSearchQuery}"` : ''}
             </p>
             {sessionLoaded && studentSession.isStudent && (
-              <p className="mb-4 text-xs font-semibold text-indigo-700">
+              <p className="mb-4 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
                 {studentSession.classLevel === 10
                   ? `Showing Class 10 core subjects: ${Array.from(CLASS10_PUBLIC_SUBJECTS).join(', ')}.`
                   : `Showing only your enrolled subjects: ${Array.from(enrolledSubjectSet ?? []).join(', ') || 'None assigned yet'}.`}
@@ -431,9 +432,9 @@ function ChaptersContent() {
                   >
                     <ChapterCard chapter={chapter} />
                     {pyqInsight && (
-                      <div className="mt-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2">
-                        <div className="text-[11px] font-semibold text-indigo-700">PYQ Hit</div>
-                        <p className="text-xs text-indigo-900 mt-0.5">
+                      <div className="mt-2 rounded-xl border border-indigo-100 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 px-3 py-2">
+                        <div className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">PYQ Hit</div>
+                        <p className="text-xs text-indigo-900 dark:text-indigo-200 mt-0.5">
                           <span className="font-semibold">{pyqInsight.topic}</span>
                           {' '}asked in {pyqInsight.years} - avg {pyqInsight.avgMarks} marks
                         </p>
@@ -453,10 +454,10 @@ function ChaptersContent() {
 export default function ChaptersPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-[#FDFAF6] dark:bg-navy-900">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-saffron-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-[#4A4A6A] text-sm">Loading chapters...</p>
+          <p className="text-[#4A4A6A] dark:text-gray-300 text-sm">Loading chapters...</p>
         </div>
       </div>
     }>

@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useTheme } from '@/components/ThemeProvider';
+import { clearClientAuthSessionCache } from '@/lib/client-auth-session';
+import { clearClientStudentSessionCache } from '@/lib/client-student-session';
 
 type Role = 'student' | 'teacher' | 'admin' | 'developer';
 
@@ -171,6 +173,8 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
   async function handleLogout() {
     setLoggingOut(true);
     await fetch(cfg.logoutUrl, { method: 'POST', credentials: 'include' }).catch(() => undefined);
+    clearClientAuthSessionCache();
+    clearClientStudentSessionCache();
     router.replace(cfg.logoutRedirect);
   }
 
@@ -272,7 +276,7 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
           title={collapsed ? 'Logout' : undefined}
         >
           <LogOut className="w-4 h-4 flex-shrink-0" />
-          {!collapsed && <span>{loggingOut ? 'Logging out…' : 'Logout'}</span>}
+          {!collapsed && <span>{loggingOut ? 'Logging out...' : 'Logout'}</span>}
         </button>
       </div>
     </div>
@@ -320,3 +324,4 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
     </>
   );
 }
+

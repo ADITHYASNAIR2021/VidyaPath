@@ -34,7 +34,7 @@ export default function AppMainShell({ children }: { children: React.ReactNode }
         }
         setAuth({
           role: data.role,
-          authenticated: !!data.authenticated && data.role !== 'anonymous',
+          authenticated: !!data.authenticated,
           displayName: data.displayName,
         });
       })

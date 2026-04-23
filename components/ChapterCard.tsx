@@ -24,51 +24,51 @@ const SUBJECT_STYLES: Record<
   { bg: string; badge: string; icon: React.ElementType; headerBg: string }
 > = {
   Physics: {
-    bg: 'border-sky-100',
-    badge: 'bg-sky-100 text-sky-700',
-    headerBg: 'bg-sky-50',
+    bg: 'border-sky-100 dark:border-sky-900/40',
+    badge: 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300',
+    headerBg: 'bg-sky-50 dark:bg-sky-950/20',
     icon: Atom,
   },
   Chemistry: {
-    bg: 'border-emerald-100',
-    badge: 'bg-emerald-100 text-emerald-700',
-    headerBg: 'bg-emerald-50',
+    bg: 'border-emerald-100 dark:border-emerald-900/40',
+    badge: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+    headerBg: 'bg-emerald-50 dark:bg-emerald-950/20',
     icon: FlaskConical,
   },
   Biology: {
-    bg: 'border-green-100',
-    badge: 'bg-green-100 text-green-700',
-    headerBg: 'bg-green-50',
+    bg: 'border-green-100 dark:border-green-900/40',
+    badge: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300',
+    headerBg: 'bg-green-50 dark:bg-green-950/20',
     icon: Leaf,
   },
   Math: {
-    bg: 'border-purple-100',
-    badge: 'bg-purple-100 text-purple-700',
-    headerBg: 'bg-purple-50',
+    bg: 'border-purple-100 dark:border-purple-900/40',
+    badge: 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300',
+    headerBg: 'bg-purple-50 dark:bg-purple-950/20',
     icon: Calculator,
   },
   Accountancy: {
-    bg: 'border-amber-100',
-    badge: 'bg-amber-100 text-amber-700',
-    headerBg: 'bg-amber-50',
+    bg: 'border-amber-100 dark:border-amber-900/40',
+    badge: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
+    headerBg: 'bg-amber-50 dark:bg-amber-950/20',
     icon: Briefcase,
   },
   'Business Studies': {
-    bg: 'border-indigo-100',
-    badge: 'bg-indigo-100 text-indigo-700',
-    headerBg: 'bg-indigo-50',
+    bg: 'border-indigo-100 dark:border-indigo-900/40',
+    badge: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300',
+    headerBg: 'bg-indigo-50 dark:bg-indigo-950/20',
     icon: LineChart,
   },
   Economics: {
-    bg: 'border-rose-100',
-    badge: 'bg-rose-100 text-rose-700',
-    headerBg: 'bg-rose-50',
+    bg: 'border-rose-100 dark:border-rose-900/40',
+    badge: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300',
+    headerBg: 'bg-rose-50 dark:bg-rose-950/20',
     icon: LineChart,
   },
   'English Core': {
-    bg: 'border-cyan-100',
-    badge: 'bg-cyan-100 text-cyan-700',
-    headerBg: 'bg-cyan-50',
+    bg: 'border-cyan-100 dark:border-cyan-900/40',
+    badge: 'bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300',
+    headerBg: 'bg-cyan-50 dark:bg-cyan-950/20',
     icon: BookOpen,
   },
 };
@@ -80,9 +80,9 @@ const CLASS_STYLES: Record<number, string> = {
 };
 
 const RELEVANCE_STYLES: Record<string, string> = {
-  Board: 'bg-amber-50 text-amber-700 border-amber-200',
-  JEE: 'bg-sky-50 text-sky-700 border-sky-200',
-  NEET: 'bg-green-50 text-green-700 border-green-200',
+  Board: 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+  JEE: 'bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800',
+  NEET: 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800',
 };
 
 export default function ChapterCard({ chapter }: { chapter: Chapter }) {
@@ -103,9 +103,9 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
     <motion.div
       whileHover={{ y: -3, boxShadow: '0 8px 24px -4px rgba(0,0,0,0.12)' }}
       className={clsx(
-        'bg-white rounded-2xl border shadow-sm transition-all flex flex-col overflow-hidden relative',
+        'bg-white dark:bg-gray-900 rounded-2xl border shadow-sm transition-all flex flex-col overflow-hidden relative',
         style.bg,
-        studied && 'ring-2 ring-emerald-400 ring-offset-1'
+        studied && 'ring-2 ring-emerald-400 ring-offset-1 dark:ring-offset-gray-900'
       )}
     >
       {/* Studied checkmark badge */}
@@ -118,11 +118,11 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
       )}
 
       {/* Card Header */}
-      <div className={clsx('px-5 pt-5 pb-4', style.headerBg)}>
+      <div className={clsx('px-4 sm:px-5 pt-4 sm:pt-5 pb-4', style.headerBg)}>
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <div className={clsx('p-1.5 rounded-lg', style.badge.split(' ')[0])}>
-              <SubjectIcon className={clsx('w-4 h-4', style.badge.split(' ')[1])} />
+            <div className={clsx('p-1.5 rounded-lg', style.badge)}>
+              <SubjectIcon className="w-4 h-4" />
             </div>
             <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded-full', style.badge)}>
               {chapter.subject}
@@ -139,7 +139,7 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
               onClick={(e) => { e.preventDefault(); toggleBookmark(chapter.id); }}
               className={clsx(
                 'p-1.5 rounded-md hover:bg-black/5 transition-colors',
-                bookmarked ? 'text-pink-500' : 'text-gray-400'
+                bookmarked ? 'text-pink-500' : 'text-gray-400 dark:text-gray-500'
               )}
               aria-label="Toggle Bookmark"
             >
@@ -148,28 +148,28 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
           </div>
         </div>
 
-        <div className="text-xs text-[#8A8AAA] font-medium mb-1">Ch {chapter.chapterNumber}</div>
-        <h3 className="font-fraunces font-bold text-navy-700 text-base leading-snug">
+        <div className="text-xs text-[#8A8AAA] dark:text-gray-400 font-medium mb-1">Ch {chapter.chapterNumber}</div>
+        <h3 className="font-fraunces font-bold text-navy-700 dark:text-gray-100 text-base leading-snug">
           {chapter.title}
         </h3>
-        <p className="text-xs text-[#4A4A6A] mt-1.5 leading-relaxed line-clamp-2">
+        <p className="text-xs text-[#4A4A6A] dark:text-gray-300 mt-1.5 leading-relaxed line-clamp-2">
           {chapter.description}
         </p>
       </div>
 
       {/* Topics */}
-      <div className="px-5 py-3 flex-1">
+      <div className="px-4 sm:px-5 py-3 flex-1">
         <div className="flex flex-wrap gap-1.5">
           {visibleTopics.map((topic) => (
             <span
               key={topic}
-              className="text-xs bg-gray-100 text-[#4A4A6A] px-2 py-0.5 rounded-full border border-gray-200"
+              className="text-xs bg-gray-100 dark:bg-gray-800 text-[#4A4A6A] dark:text-gray-300 px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-700"
             >
               {topic}
             </span>
           ))}
           {extraTopics > 0 && (
-            <span className="text-xs bg-saffron-50 text-saffron-600 px-2 py-0.5 rounded-full border border-saffron-100 font-medium">
+            <span className="text-xs bg-saffron-50 dark:bg-saffron-900/20 text-saffron-600 dark:text-saffron-300 px-2 py-0.5 rounded-full border border-saffron-100 dark:border-saffron-800 font-medium">
               +{extraTopics} more
             </span>
           )}
@@ -178,7 +178,7 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
 
       {/* Exam Relevance */}
       {chapter.examRelevance && chapter.examRelevance.length > 0 && (
-        <div className="px-5 pb-3 flex gap-1.5 flex-wrap">
+        <div className="px-4 sm:px-5 pb-3 flex gap-1.5 flex-wrap">
           {chapter.examRelevance.map((tag) => (
             <span
               key={tag}
@@ -191,7 +191,7 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
       )}
 
       {/* Actions */}
-      <div className="px-5 pb-5 pt-2 grid grid-cols-3 gap-2 border-t border-gray-100">
+      <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-2 grid grid-cols-3 gap-2 border-t border-gray-100 dark:border-gray-800">
         <Link
           href={`/chapters/${chapter.id}`}
           scroll
@@ -207,7 +207,7 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
           href={chapter.ncertPdfUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-center gap-1.5 bg-white hover:bg-gray-50 active:scale-95 text-[#4A4A6A] text-xs font-medium px-3 py-2 rounded-xl border border-gray-200 transition-all"
+          className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 active:scale-95 text-[#4A4A6A] dark:text-gray-300 text-xs font-medium px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 transition-all"
         >
           <ExternalLink className="w-3.5 h-3.5" />
           NCERT
@@ -216,7 +216,7 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
           href={youtubeUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-center gap-1.5 bg-red-50 hover:bg-red-100 active:scale-95 text-red-600 text-xs font-medium px-3 py-2 rounded-xl border border-red-100 transition-all"
+          className="flex items-center justify-center gap-1.5 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/35 active:scale-95 text-red-600 dark:text-red-300 text-xs font-medium px-3 py-2 rounded-xl border border-red-100 dark:border-red-800 transition-all"
         >
           <Play className="w-3.5 h-3.5" />
           Watch

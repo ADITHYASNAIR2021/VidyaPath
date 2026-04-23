@@ -13,6 +13,13 @@
   --color-text-secondary: #4A4A6A;
 }
 
+.dark {
+  --color-background: #0A1220;
+  --color-border: #2B3447;
+  --color-text: #E5E7EB;
+  --color-text-secondary: #CBD5E1;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -27,6 +34,11 @@ body {
   font-family: var(--font-dm-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color-scheme: light;
+}
+
+.dark body {
+  color-scheme: dark;
 }
 
 /* Headings use Fraunces */
@@ -235,6 +247,31 @@ h1, h2, h3 {
 :focus-visible {
   outline: 3px solid #1f4fd6;
   outline-offset: 2px;
+}
+
+/* Dark-mode fallback for recurring custom-tailwind token classes */
+.dark [class*='bg-[#FDFAF6]'] {
+  background-color: #0A1220 !important;
+}
+
+.dark [class*='bg-[#FAF9F5]'],
+.dark [class*='bg-[#FCFBF8]'] {
+  background-color: #111827 !important;
+}
+
+.dark [class*='border-[#E8E4DC]'] {
+  border-color: #374151 !important;
+}
+
+.dark [class*='text-[#4A4A6A]'],
+.dark [class*='text-[#6A6A84]'],
+.dark [class*='text-[#6E6984]'],
+.dark [class*='text-[#8A8AAA]'] {
+  color: #CBD5E1 !important;
+}
+
+.dark [class*='text-navy-700'] {
+  color: #E5E7EB !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

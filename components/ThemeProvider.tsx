@@ -40,7 +40,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     applyTheme(theme);
-    localStorage.setItem('vp-theme', theme);
   }, [theme]);
 
   useEffect(() => {
@@ -70,7 +69,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   function toggle() {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('vp-theme', next);
+      return next;
+    });
   }
 
   return <ThemeContext.Provider value={{ theme, toggle }}>{children}</ThemeContext.Provider>;
