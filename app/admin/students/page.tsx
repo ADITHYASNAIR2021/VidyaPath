@@ -43,6 +43,15 @@ export default function AdminStudentsPage() {
         return;
       }
       const body = await studentsRes.json().catch(() => null);
+      if (!studentsRes.ok) {
+        setError(
+          body && typeof body === 'object' && 'message' in (body as Record<string, unknown>)
+            ? String((body as Record<string, unknown>).message)
+            : 'Failed to load students.'
+        );
+        setStudents([]);
+        return;
+      }
       const data = unwrap<{ students?: StudentProfile[] } | null>(body);
       setStudents(data?.students ?? (Array.isArray(unwrap(body)) ? unwrap<StudentProfile[]>(body) : []));
     } catch {

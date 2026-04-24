@@ -2,11 +2,26 @@ import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/aut
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { listClassSectionsForTeacher } from '@/lib/school-management-db';
 import { listStudentsBySection, listAttendanceBySectionRange } from '@/lib/school-ops-db';
+import { teacherHasScopeForTarget } from '@/lib/teacher/scope-guards';
+import type { TeacherSession } from '@/lib/teacher-types';
 
 export const dynamic = 'force-dynamic';
 
 function toIsoDate(d: Date) {
   return d.toISOString().slice(0, 10);
+}
+
+function resolveAnalyticsSection(teacherSession: TeacherSession, sections: Awaited<ReturnType<typeof listClassSectionsForTeacher>>) {
+  const activeSections = sections.managedSections.filter((s) => s.status === 'active');
+  const owned = activeSections.filter((s) => s.classTeacherId === teacherSession.teacher.id);
+  if (owned[0]) {
+    return { section: owned[0], readonly: false };
+  }
+  const scoped = activeSections.find((s) =>
+    teacherHasScopeForTarget(teacherSession, { classLevel: s.classLevel, section: s.section })
+  );
+  if (!scoped) return null;
+  return { section: scoped, readonly: true };
 }
 
 export async function GET(req: Request) {
@@ -26,12 +41,13 @@ export async function GET(req: Request) {
 
   try {
     const sectionsResult = await listClassSectionsForTeacher(teacher.id);
-    const managedSection = sectionsResult.managedSections.find(
-      (s) => s.classTeacherId === teacher.id && s.status === 'active'
-    );
+    const access = resolveAnalyticsSection(teacherSession, sectionsResult);
 
-    if (!managedSection) {
-      return dataJson({ requestId, data: { section: null, students: [], summary: null, fromDate: null, toDate: null, totalDays: 0 } });
+    if (!access) {
+      return dataJson({
+        requestId,
+        data: { section: null, readonly: false, students: [], summary: null, fromDate: null, toDate: null, totalDays: 0 },
+      });
     }
 
     const today = new Date();
@@ -43,14 +59,14 @@ export async function GET(req: Request) {
     const [roster, attendanceRecords] = await Promise.all([
       listStudentsBySection({
         schoolId: teacher.schoolId,
-        classLevel: managedSection.classLevel,
-        section: managedSection.section,
-        batch: managedSection.batch,
+        classLevel: access.section.classLevel,
+        section: access.section.section,
+        batch: access.section.batch,
       }),
       listAttendanceBySectionRange({
         schoolId: teacher.schoolId,
-        classLevel: managedSection.classLevel,
-        section: managedSection.section,
+        classLevel: access.section.classLevel,
+        section: access.section.section,
         fromDate,
         toDate,
       }),
@@ -105,11 +121,12 @@ export async function GET(req: Request) {
       requestId,
       data: {
         section: {
-          id: managedSection.id,
-          classLevel: managedSection.classLevel,
-          section: managedSection.section,
-          batch: managedSection.batch,
+          id: access.section.id,
+          classLevel: access.section.classLevel,
+          section: access.section.section,
+          batch: access.section.batch,
         },
+        readonly: access.readonly,
         fromDate,
         toDate,
         totalDays,

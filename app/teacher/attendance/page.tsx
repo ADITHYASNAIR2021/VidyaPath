@@ -24,6 +24,7 @@ interface RosterStudent {
 
 interface AttendancePayload {
   classSection: ClassSection;
+  readonly?: boolean;
   date: string;
   roster: RosterStudent[];
 }
@@ -102,6 +103,10 @@ export default function AttendancePage() {
 
   async function saveAttendance() {
     if (!payload) return;
+    if (payload.readonly) {
+      setError('Only the class teacher can mark attendance for this section.');
+      return;
+    }
     setSaving(true);
     setError('');
     setSuccess('');
@@ -143,7 +148,7 @@ export default function AttendancePage() {
   }
 
   function markAll(status: Exclude<AttendanceStatus, 'unmarked'>) {
-    if (!payload) return;
+    if (!payload || payload.readonly) return;
     const next = { ...statusMap };
     for (const student of payload.roster) next[student.id] = status;
     setStatusMap(next);
@@ -157,8 +162,17 @@ export default function AttendancePage() {
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <ClipboardCheck className="h-6 w-6 text-amber-600" />
             Attendance
+            {payload?.readonly && (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                View only
+              </span>
+            )}
           </h1>
-          <p className="mt-0.5 text-sm text-gray-500">Mark and publish daily attendance for your managed section.</p>
+          <p className="mt-0.5 text-sm text-gray-500">
+            {payload?.readonly
+              ? 'Read-only attendance view for your scoped section.'
+              : 'Mark and publish daily attendance for your managed section.'}
+          </p>
         </div>
         <button
           onClick={() => void loadAttendance(date)}
@@ -174,6 +188,11 @@ export default function AttendancePage() {
 
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
       {success && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</div>}
+      {payload?.readonly && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Only the class teacher can mark attendance. You have read-only access for this section.
+        </div>
+      )}
 
       <div className="mb-5 rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -197,10 +216,12 @@ export default function AttendancePage() {
             </p>
             {payload?.classSection?.batch && <p className="text-xs text-gray-500">Batch: {payload.classSection.batch}</p>}
           </div>
-          <div className="flex items-end gap-2">
-            <button onClick={() => markAll('present')} type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Mark All Present</button>
-            <button onClick={() => markAll('absent')} type="button" className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700">Mark All Absent</button>
-          </div>
+          {payload && !payload.readonly && (
+            <div className="flex items-end gap-2">
+              <button onClick={() => markAll('present')} type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Mark All Present</button>
+              <button onClick={() => markAll('absent')} type="button" className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700">Mark All Absent</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -252,31 +273,46 @@ export default function AttendancePage() {
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">{student.name}</td>
                   <td className="px-4 py-3 text-xs text-gray-500">{student.rollNo || student.rollCode}</td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-2">
-                      {(['present', 'absent', 'late', 'excused'] as const).map((status) => (
-                        <button
-                          key={status}
-                          type="button"
-                          onClick={() => setStatusMap((prev) => ({ ...prev, [student.id]: status }))}
-                          className={clsx(
-                            'rounded-full border px-2.5 py-1 text-[11px] font-semibold capitalize transition-colors',
-                            statusMap[student.id] === status
-                              ? status === 'present'
-                                ? 'border-emerald-600 bg-emerald-600 text-white'
-                                : status === 'absent'
-                                  ? 'border-rose-600 bg-rose-600 text-white'
-                                  : status === 'late'
-                                    ? 'border-amber-600 bg-amber-600 text-white'
-                                    : 'border-blue-600 bg-blue-600 text-white'
-                              : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                          )}
-                        >
-                          {status}
-                        </button>
-                      ))}
-                      {statusMap[student.id] === 'present' && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
-                      {statusMap[student.id] === 'absent' && <XCircle className="h-4 w-4 text-rose-600" />}
-                    </div>
+                    {payload?.readonly ? (
+                      <span
+                        className={clsx(
+                          'rounded-full border px-2.5 py-1 text-[11px] font-semibold capitalize',
+                          statusMap[student.id] === 'present' && 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                          statusMap[student.id] === 'absent' && 'border-rose-200 bg-rose-50 text-rose-700',
+                          statusMap[student.id] === 'late' && 'border-amber-200 bg-amber-50 text-amber-700',
+                          statusMap[student.id] === 'excused' && 'border-blue-200 bg-blue-50 text-blue-700',
+                          statusMap[student.id] === 'unmarked' && 'border-gray-200 bg-gray-50 text-gray-600'
+                        )}
+                      >
+                        {statusMap[student.id]}
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {(['present', 'absent', 'late', 'excused'] as const).map((status) => (
+                          <button
+                            key={status}
+                            type="button"
+                            onClick={() => setStatusMap((prev) => ({ ...prev, [student.id]: status }))}
+                            className={clsx(
+                              'rounded-full border px-2.5 py-1 text-[11px] font-semibold capitalize transition-colors',
+                              statusMap[student.id] === status
+                                ? status === 'present'
+                                  ? 'border-emerald-600 bg-emerald-600 text-white'
+                                  : status === 'absent'
+                                    ? 'border-rose-600 bg-rose-600 text-white'
+                                    : status === 'late'
+                                      ? 'border-amber-600 bg-amber-600 text-white'
+                                      : 'border-blue-600 bg-blue-600 text-white'
+                                : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                            )}
+                          >
+                            {status}
+                          </button>
+                        ))}
+                        {statusMap[student.id] === 'present' && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                        {statusMap[student.id] === 'absent' && <XCircle className="h-4 w-4 text-rose-600" />}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -285,15 +321,17 @@ export default function AttendancePage() {
         </div>
       )}
 
-      <div className="mt-5 flex justify-end">
-        <button
-          onClick={() => void saveAttendance()}
-          disabled={saving || loading || !payload || payload.roster.length === 0}
-          className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
-        >
-          {saving ? 'Saving...' : 'Save Attendance'}
-        </button>
-      </div>
+      {payload && !payload.readonly && (
+        <div className="mt-5 flex justify-end">
+          <button
+            onClick={() => void saveAttendance()}
+            disabled={saving || loading || !payload || payload.roster.length === 0}
+            className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+          >
+            {saving ? 'Saving...' : 'Save Attendance'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

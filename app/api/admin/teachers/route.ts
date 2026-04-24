@@ -59,7 +59,19 @@ export async function GET(req: Request) {
   const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
-  const teachers = await listTeachers(adminSession.role === 'admin' ? adminSession.schoolId : undefined);
+  const url = new URL(req.url);
+  const schoolId = adminSession.role === 'admin'
+    ? adminSession.schoolId
+    : (url.searchParams.get('schoolId')?.trim() || undefined);
+  if (adminSession.role === 'admin' && !schoolId) {
+    return errorJson({
+      requestId,
+      errorCode: 'missing-school-scope',
+      message: 'School scope missing for admin session.',
+      status: 403,
+    });
+  }
+  const teachers = await listTeachers(schoolId);
   return dataJson({ requestId, data: { teachers } });
 }
 

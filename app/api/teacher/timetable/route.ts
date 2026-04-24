@@ -1,7 +1,8 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
-import { listClassSectionsForTeacher } from '@/lib/school-management-db';
+import { listClassSectionsForSchool, listClassSectionsForTeacher } from '@/lib/school-management-db';
 import { listTimetableSlotsForTeacher, listTimetableSlots } from '@/lib/school-ops-db';
+import { teacherHasScopeForTarget } from '@/lib/teacher/scope-guards';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,9 +27,26 @@ export async function GET(req: Request) {
       listClassSectionsForTeacher(teacher.id),
     ]);
 
-    const managedSections = sectionsResult.managedSections.filter(
-      (s) => s.classTeacherId === teacher.id && s.status === 'active'
+    const managedSectionMap = new Map(
+      sectionsResult.managedSections
+        .filter((section) => section.status === 'active')
+        .map((section) => [section.id, section])
     );
+
+    if (managedSectionMap.size === 0) {
+      const schoolSections = await listClassSectionsForSchool(teacher.schoolId);
+      for (const section of schoolSections) {
+        if (section.status !== 'active') continue;
+        const inScope = teacherHasScopeForTarget(teacherSession, {
+          classLevel: section.classLevel,
+          section: section.section,
+        });
+        if (!inScope) continue;
+        managedSectionMap.set(section.id, section);
+      }
+    }
+
+    const managedSections = [...managedSectionMap.values()];
 
     const managedTimetables = await Promise.all(
       managedSections.slice(0, 5).map((s) =>

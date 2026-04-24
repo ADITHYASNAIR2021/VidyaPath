@@ -366,6 +366,21 @@ export function attachSupabaseSessionCookies(
   }
 }
 
+export async function signOutSupabaseUser(accessToken: string): Promise<void> {
+  const config = readSupabaseAuthConfig();
+  if (!config || !accessToken) return;
+  await fetch(`${config.url}/auth/v1/logout`, {
+    method: 'POST',
+    headers: {
+      apikey: config.anonKey,
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ scope: 'global' }),
+    cache: 'no-store',
+  }).catch(() => undefined);
+}
+
 export function clearSupabaseSessionCookies(response: NextResponse): void {
   const expired = new Date(0);
   const baseOptions = {

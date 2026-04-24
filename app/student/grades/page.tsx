@@ -48,15 +48,27 @@ export default function StudentGradesPage() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
   const [filter, setFilter]     = useState('All Subjects');
+  const [newGradesCount, setNewGradesCount] = useState(0);
 
   const fetchGrades = useCallback(async () => {
     setLoading(true);
     setError('');
+    setNewGradesCount(0);
     try {
-      const sessionRes = await fetch('/api/student/session/me', { cache: 'no-store' });
+      const [sessionRes, summaryRes] = await Promise.all([
+        fetch('/api/student/session/me', { cache: 'no-store' }),
+        fetch('/api/student/notifications/summary', { cache: 'no-store' }),
+      ]);
       if (!sessionRes.ok) {
         setError('Session expired. Please sign in again.');
         return;
+      }
+      if (summaryRes.ok) {
+        const summaryBody = await summaryRes.json().catch(() => null);
+        const summary = unwrap<{ newGradesCount?: number } | null>(summaryBody);
+        setNewGradesCount(Math.max(0, Number(summary?.newGradesCount) || 0));
+      } else {
+        setNewGradesCount(0);
       }
 
       const res  = await fetch('/api/student/grades', { cache: 'no-store' });
@@ -128,6 +140,12 @@ export default function StudentGradesPage() {
         {error && (
           <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}
+          </div>
+        )}
+
+        {!loading && !error && newGradesCount > 0 && (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            New results available: {newGradesCount} grade{newGradesCount === 1 ? '' : 's'} released in the last 7 days.
           </div>
         )}
 

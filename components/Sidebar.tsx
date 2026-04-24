@@ -49,6 +49,9 @@ const STUDENT_NAV: NavItem[] = [
   { href: '/equations',         label: 'Equations',     icon: HelpCircle },
   { href: '/papers',            label: 'Papers',        icon: ClipboardList },
   { href: '/bookmarks',         label: 'Bookmarks',     icon: Bookmark },
+  { href: '/student/announcements', label: 'Announcements', icon: Bell },
+  { href: '/student/assignments', label: 'Assignments', icon: Package },
+  { href: '/student/weekly-plans', label: 'Weekly Plans', icon: CalendarDays },
   { href: '/student/grades',    label: 'Grades',        icon: ScrollText },
   { href: '/student/attendance',label: 'Attendance',    icon: ClipboardCheck },
   { href: '/student/timetable', label: 'Timetable',     icon: CalendarDays },
@@ -165,10 +168,66 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [teacherNotificationSummary, setTeacherNotificationSummary] = useState<{
+    pendingQuestions: number;
+    ungradedSubmissions: number;
+  }>({ pendingQuestions: 0, ungradedSubmissions: 0 });
+  const [studentNotificationSummary, setStudentNotificationSummary] = useState<{
+    newGradesCount: number;
+  }>({ newGradesCount: 0 });
   const cfg = ROLE_CONFIG[role];
 
   // Close mobile drawer on navigation
   useEffect(() => { setMobileOpen(false); }, [pathname]);
+
+  useEffect(() => {
+    if (role !== 'teacher') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/teacher/notifications/summary', { cache: 'no-store' });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || cancelled) return;
+        const data = payload && typeof payload === 'object' && 'data' in payload
+          ? (payload as { data: { pendingQuestions?: number; ungradedSubmissions?: number } }).data
+          : (payload as { pendingQuestions?: number; ungradedSubmissions?: number } | null);
+        if (!data || cancelled) return;
+        setTeacherNotificationSummary({
+          pendingQuestions: Math.max(0, Number(data.pendingQuestions) || 0),
+          ungradedSubmissions: Math.max(0, Number(data.ungradedSubmissions) || 0),
+        });
+      } catch {
+        // keep sidebar usable without badges
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [role, pathname]);
+
+  useEffect(() => {
+    if (role !== 'student') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/student/notifications/summary', { cache: 'no-store' });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || cancelled) return;
+        const data = payload && typeof payload === 'object' && 'data' in payload
+          ? (payload as { data: { newGradesCount?: number } }).data
+          : (payload as { newGradesCount?: number } | null);
+        if (!data || cancelled) return;
+        setStudentNotificationSummary({
+          newGradesCount: Math.max(0, Number(data.newGradesCount) || 0),
+        });
+      } catch {
+        // keep sidebar usable without badges
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [role, pathname]);
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -184,6 +243,40 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
     }
     return pathname.startsWith(href);
   }
+
+  const navItems = role === 'teacher'
+    ? cfg.nav.map((item) => {
+      if (item.href === '/teacher/questions') {
+        return {
+          ...item,
+          badge: teacherNotificationSummary.pendingQuestions > 0
+            ? String(teacherNotificationSummary.pendingQuestions)
+            : undefined,
+        } satisfies NavItem;
+      }
+      if (item.href === '/teacher/grading') {
+        return {
+          ...item,
+          badge: teacherNotificationSummary.ungradedSubmissions > 0
+            ? String(teacherNotificationSummary.ungradedSubmissions)
+            : undefined,
+        } satisfies NavItem;
+      }
+      return item;
+    })
+    : role === 'student'
+      ? cfg.nav.map((item) => {
+        if (item.href === '/student/grades') {
+          return {
+            ...item,
+            badge: studentNotificationSummary.newGradesCount > 0
+              ? String(studentNotificationSummary.newGradesCount)
+              : undefined,
+          } satisfies NavItem;
+        }
+        return item;
+      })
+    : cfg.nav;
 
   const NavContent = () => (
     <div className="flex flex-col h-full">
@@ -222,7 +315,7 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
 
       {/* Nav items */}
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5" aria-label="Sidebar navigation">
-        {cfg.nav.map(({ href, label, icon: Icon, badge }) => {
+        {navItems.map(({ href, label, icon: Icon, badge }) => {
           const active = isActive(href);
           return (
             <Link

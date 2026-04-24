@@ -63,6 +63,26 @@ export default function ClassSectionsPage() {
 
       const sectionsBody = await sectionsRes.json().catch(() => null);
       const teachersBody = await teachersRes.json().catch(() => null);
+      if (!sectionsRes.ok) {
+        setError(
+          sectionsBody && typeof sectionsBody === 'object' && 'message' in (sectionsBody as Record<string, unknown>)
+            ? String((sectionsBody as Record<string, unknown>).message)
+            : 'Failed to load class sections.'
+        );
+        setSections([]);
+        setTeachers([]);
+        return;
+      }
+      if (!teachersRes.ok) {
+        setError(
+          teachersBody && typeof teachersBody === 'object' && 'message' in (teachersBody as Record<string, unknown>)
+            ? String((teachersBody as Record<string, unknown>).message)
+            : 'Failed to load teachers for class-section assignment.'
+        );
+        setSections([]);
+        setTeachers([]);
+        return;
+      }
 
       const sectionData = unwrap<{ sections?: ClassSection[] } | null>(sectionsBody);
       const teacherData = unwrap<{ teachers?: Array<{ id: string; name: string; status: 'active' | 'inactive' }> } | null>(teachersBody);

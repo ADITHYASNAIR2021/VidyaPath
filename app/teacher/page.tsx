@@ -46,14 +46,17 @@ export default function TeacherOverviewPage() {
   const [history, setHistory] = useState<TeacherActionHistoryEntry[]>([]);
   const [storageStatus, setStorageStatus] = useState<TeacherStorageStatus | null>(null);
   const [scopes, setScopes] = useState<TeacherScope[]>([]);
+  const [pendingQuestionCount, setPendingQuestionCount] = useState(0);
+  const [ungradedSubmissionCount, setUngradedSubmissionCount] = useState(0);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
-        const [sessionRes, configRes] = await Promise.all([
+        const [sessionRes, configRes, notificationSummaryRes] = await Promise.all([
           fetch('/api/teacher/session/me', { cache: 'no-store' }),
           fetch('/api/teacher', { cache: 'no-store' }),
+          fetch('/api/teacher/notifications/summary', { cache: 'no-store' }),
         ]);
         if (!sessionRes.ok) { return; }
         const sessionData = unwrap<Record<string, unknown> | null>(await sessionRes.json().catch(() => null));
@@ -74,6 +77,16 @@ export default function TeacherOverviewPage() {
           setHistory(cfg.actionHistory ?? []);
           setStorageStatus(cfg.storageStatus ?? null);
         }
+
+        if (notificationSummaryRes.ok) {
+          const notificationBody = await notificationSummaryRes.json().catch(() => null);
+          const notificationSummary = unwrap<{
+            pendingQuestions?: number;
+            ungradedSubmissions?: number;
+          } | null>(notificationBody);
+          setPendingQuestionCount(Math.max(0, Number(notificationSummary?.pendingQuestions) || 0));
+          setUngradedSubmissionCount(Math.max(0, Number(notificationSummary?.ungradedSubmissions) || 0));
+        }
       } finally {
         setLoading(false);
       }
@@ -90,6 +103,12 @@ export default function TeacherOverviewPage() {
   const recentPacks = packs.slice(0, 3);
   const pendingGrades = packs.filter((p) => p.status === 'published' || p.status === 'review').length;
   const draftCount = packs.filter((p) => p.status === 'draft').length;
+
+  function quickLinkBadge(href: string): string | null {
+    if (href === '/teacher/questions' && pendingQuestionCount > 0) return String(pendingQuestionCount);
+    if (href === '/teacher/grading' && ungradedSubmissionCount > 0) return String(ungradedSubmissionCount);
+    return null;
+  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -120,11 +139,13 @@ export default function TeacherOverviewPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         {[
           { label: 'Total Packs', value: packs.length, icon: Package, color: 'text-amber-600 bg-amber-50' },
           { label: 'Drafts', value: draftCount, icon: Clock, color: 'text-amber-600 bg-amber-50' },
           { label: 'Active/Approved', value: pendingGrades, icon: TrendingUp, color: 'text-blue-600 bg-blue-50' },
+          { label: 'Pending Q&A', value: pendingQuestionCount, icon: MessageSquare, color: 'text-violet-600 bg-violet-50' },
+          { label: 'Ungraded Subs', value: ungradedSubmissionCount, icon: ScrollText, color: 'text-emerald-600 bg-emerald-50' },
           { label: 'Subjects', value: activeSubjects.length, icon: Users, color: 'text-emerald-600 bg-emerald-50' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
@@ -142,7 +163,9 @@ export default function TeacherOverviewPage() {
         <div className="lg:col-span-2">
           <h2 className="font-semibold text-gray-700 mb-3 text-sm">Quick Navigation</h2>
           <div className="grid sm:grid-cols-2 gap-3">
-            {QUICK_LINKS.map(({ href, label, icon: Icon, desc, color }) => (
+            {QUICK_LINKS.map(({ href, label, icon: Icon, desc, color }) => {
+              const badge = quickLinkBadge(href);
+              return (
               <Link
                 key={href}
                 href={href}
@@ -152,12 +175,20 @@ export default function TeacherOverviewPage() {
                   <Icon className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 group-hover:text-amber-700 transition-colors">{label}</p>
+                  <p className="flex items-center gap-2 text-sm font-semibold text-gray-900 group-hover:text-amber-700 transition-colors">
+                    <span>{label}</span>
+                    {badge && (
+                      <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                        {badge}
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-gray-400 truncate">{desc}</p>
                 </div>
                 <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-amber-400 transition-colors" />
               </Link>
-            ))}
+              );
+            })}
           </div>
         </div>
 

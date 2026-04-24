@@ -57,6 +57,15 @@ export default function AdminTeachersPage() {
         return;
       }
       const body = await teachersRes.json().catch(() => null);
+      if (!teachersRes.ok) {
+        setError(
+          body && typeof body === 'object' && 'message' in (body as Record<string, unknown>)
+            ? String((body as Record<string, unknown>).message)
+            : 'Failed to load teachers.'
+        );
+        setTeachers([]);
+        return;
+      }
       const data = unwrap<{ teachers?: TeacherProfile[] } | null>(body);
       setTeachers(data?.teachers ?? (Array.isArray(unwrap(body)) ? unwrap<TeacherProfile[]>(body) : []));
     } catch {

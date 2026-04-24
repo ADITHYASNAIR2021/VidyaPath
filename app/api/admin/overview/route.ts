@@ -9,8 +9,20 @@ export async function GET(req: Request) {
   const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
+  if (adminSession.role === 'admin' && !adminSession.schoolId) {
+    return errorJson({
+      requestId,
+      errorCode: 'missing-school-scope',
+      message: 'School scope missing for admin session.',
+      status: 403,
+    });
+  }
   try {
-    const overview = await getAdminOverview(adminSession.role === 'admin' ? adminSession.schoolId : undefined);
+    const url = new URL(req.url);
+    const scopedSchoolId = adminSession.role === 'admin'
+      ? adminSession.schoolId
+      : (url.searchParams.get('schoolId')?.trim() || undefined);
+    const overview = await getAdminOverview(scopedSchoolId);
     logServerEvent({
       event: 'admin-overview-read',
       requestId,

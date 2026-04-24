@@ -39,24 +39,38 @@ const QUICK_LINKS = [
 
 export default function AdminOverviewPage() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [overview, setOverview] = useState<AdminOverviewResponse | null>(null);
   const [schoolName, setSchoolName] = useState('');
 
   useEffect(() => {
     async function load() {
       setLoading(true);
+      setError('');
       try {
         const [sessionRes, overviewRes] = await Promise.all([
           fetch('/api/admin/session/me', { cache: 'no-store' }),
           fetch('/api/admin/overview', { cache: 'no-store' }),
         ]);
-        if (!sessionRes.ok) { return; }
+        if (!sessionRes.ok) {
+          setError('Session expired. Please sign in again.');
+          return;
+        }
         const sessionBody = unwrap<{ schoolName?: string; displayName?: string } | null>(await sessionRes.json().catch(() => null));
         setSchoolName(sessionBody?.schoolName ?? sessionBody?.displayName ?? 'School Admin');
 
         const ovBody = await overviewRes.json().catch(() => null);
+        if (!overviewRes.ok) {
+          setError(
+            ovBody && typeof ovBody === 'object' && 'message' in (ovBody as Record<string, unknown>)
+              ? String((ovBody as Record<string, unknown>).message)
+              : 'Failed to load admin overview.'
+          );
+          setOverview(null);
+          return;
+        }
         const ov = unwrap<AdminOverviewResponse | null>(ovBody);
-        if (overviewRes.ok && ov) setOverview(ov);
+        if (ov) setOverview(ov);
       } finally {
         setLoading(false);
       }
@@ -76,6 +90,12 @@ export default function AdminOverviewPage() {
           <School className="w-8 h-8 text-white/40 flex-shrink-0" />
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
 
       {/* Storage */}
       {overview?.storageStatus && (

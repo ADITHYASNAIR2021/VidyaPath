@@ -29,6 +29,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
+  if (adminSession.role === 'admin' && !adminSession.schoolId) {
+    return errorJson({
+      requestId,
+      errorCode: 'missing-school-scope',
+      message: 'School scope missing for admin session.',
+      status: 403,
+    });
+  }
   const teacherId = params.id?.trim();
   if (!teacherId) {
     return errorJson({

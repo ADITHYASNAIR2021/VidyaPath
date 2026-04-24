@@ -20,6 +20,7 @@ interface StudentAnalytics {
 
 interface AnalyticsData {
   section: { id: string; classLevel: 10 | 12; section: string; batch?: string } | null;
+  readonly?: boolean;
   fromDate: string | null;
   toDate: string | null;
   totalDays: number;
@@ -106,7 +107,9 @@ export default function AttendanceAnalyticsPage() {
             Attendance Analytics
           </h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            30-day attendance summary for your class section.
+            {data?.readonly
+              ? 'Read-only attendance summary for your scoped section.'
+              : '30-day attendance summary for your class section.'}
             {data?.section && (
               <span className="ml-1 font-medium text-gray-700">
                 Class {data.section.classLevel} – {data.section.section}
@@ -128,6 +131,11 @@ export default function AttendanceAnalyticsPage() {
       </div>
 
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      {data?.readonly && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Only the class teacher can mark attendance. You have read-only access to this report.
+        </div>
+      )}
 
       {data && (
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -189,8 +197,10 @@ export default function AttendanceAnalyticsPage() {
       ) : !data?.section ? (
         <div className="rounded-2xl border border-dashed border-gray-300 p-12 text-center text-gray-500">
           <BarChart3 className="mx-auto mb-3 h-10 w-10 opacity-30" />
-          <p className="font-medium">No managed section found</p>
-          <p className="mt-1 text-sm text-gray-400">Only class teachers with an assigned section see analytics here.</p>
+          <p className="font-medium">No accessible section found</p>
+          <p className="mt-1 text-sm text-gray-400">
+            This report appears when you are a class teacher or have scope access to a section.
+          </p>
         </div>
       ) : visible.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-300 p-10 text-center text-gray-500">

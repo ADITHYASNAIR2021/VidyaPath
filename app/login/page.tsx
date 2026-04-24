@@ -87,6 +87,10 @@ export default function UnifiedLoginPage() {
   }
 
   useEffect(() => {
+    // If middleware already rejected the request (reason=auth-required), the legacy session
+    // cookie is absent. Supabase may still report a session, but middleware won't let the
+    // user into the protected route — redirecting would just loop. Show the login form.
+    if (reason === 'auth-required') return;
     let active = true;
     fetch('/api/auth/session', { cache: 'no-store', credentials: 'include' })
       .then(async (response) => {
@@ -103,7 +107,7 @@ export default function UnifiedLoginPage() {
     return () => {
       active = false;
     };
-  }, [nextPath, router]);
+  }, [nextPath, router, reason]);
 
   async function login() {
     setLoading(true);

@@ -28,6 +28,10 @@ interface GradebookStudent {
 interface GradebookResponse {
   packs: GradebookPack[];
   students: GradebookStudent[];
+  scope?: {
+    mode?: 'teacher' | 'homeroom';
+    homeroomSections?: Array<{ classLevel: 10 | 12; section: string }>;
+  };
   summary: {
     students: number;
     packs: number;
@@ -93,6 +97,14 @@ export default function GradebookPage() {
             Gradebook
           </h1>
           <p className="mt-0.5 text-sm text-gray-500">Aggregated scores across assignment packs.</p>
+          {data?.scope?.mode === 'homeroom' && (
+            <p className="mt-1 text-xs font-medium text-indigo-700">
+              Showing homeroom view across subject teachers for:{' '}
+              {(data.scope.homeroomSections ?? [])
+                .map((section) => `Class ${section.classLevel}-${section.section}`)
+                .join(', ')}
+            </p>
+          )}
         </div>
         <button
           onClick={() => void loadGradebook()}

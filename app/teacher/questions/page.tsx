@@ -5,6 +5,7 @@ import { MessageSquare, RefreshCw, CheckCircle2, Clock, ChevronDown, ChevronUp, 
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 import type { StudentQuestionItem } from '@/lib/school-ops-db';
+import type { TeacherScope } from '@/lib/teacher-types';
 
 function unwrap<T>(payload: unknown): T {
   if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) {
@@ -38,6 +39,23 @@ function StatusBadge({ status }: { status: StudentQuestionItem['status'] }) {
 interface QuestionCardProps {
   item: StudentQuestionItem;
   onAnswered: (id: string, answer: string) => void;
+}
+
+function normalizeSubject(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function extractScopedSubjects(effectiveScopes: unknown): string[] {
+  if (!Array.isArray(effectiveScopes)) return [];
+  const dedup = new Map<string, string>();
+  for (const scope of effectiveScopes as TeacherScope[]) {
+    if (!scope?.isActive) continue;
+    const subject = normalizeSubject(scope.subject || '');
+    if (!subject) continue;
+    const key = subject.toLowerCase();
+    if (!dedup.has(key)) dedup.set(key, subject);
+  }
+  return [...dedup.values()].sort((a, b) => a.localeCompare(b));
 }
 
 function QuestionCard({ item, onAnswered }: QuestionCardProps) {
@@ -131,18 +149,35 @@ export default function TeacherQuestionsPage() {
   const [error, setError] = useState('');
   const [items, setItems] = useState<StudentQuestionItem[]>([]);
   const [filter, setFilter] = useState<'all' | 'pending' | 'answered'>('all');
+  const [subjectFilter, setSubjectFilter] = useState('my-subjects');
+  const [scopeSubjects, setScopeSubjects] = useState<string[]>([]);
 
   async function load() {
     setLoading(true);
     setError('');
     try {
+      const questionsUrl = subjectFilter === 'my-subjects'
+        ? '/api/teacher/questions'
+        : `/api/teacher/questions?subject=${encodeURIComponent(subjectFilter)}`;
       const [sessionRes, qRes] = await Promise.all([
         fetch('/api/teacher/session/me', { cache: 'no-store' }),
-        fetch('/api/teacher/questions', { cache: 'no-store' }),
+        fetch(questionsUrl, { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
+      const sessionBody = await sessionRes.json().catch(() => null);
+      const sessionData = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(sessionBody);
+      setScopeSubjects(extractScopedSubjects(sessionData?.effectiveScopes));
+
       const body = await qRes.json().catch(() => null);
-      if (!qRes.ok) { setError(body?.message || 'Failed to load questions.'); return; }
+      if (!qRes.ok) {
+        if (qRes.status === 403 && subjectFilter !== 'my-subjects') {
+          setError('Selected subject is outside your assigned scope.');
+          setItems([]);
+          return;
+        }
+        setError(body?.message || 'Failed to load questions.');
+        return;
+      }
       setItems(unwrap<StudentQuestionItem[]>(body));
     } catch {
       setError('Failed to load questions.');
@@ -151,7 +186,7 @@ export default function TeacherQuestionsPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [subjectFilter]);
 
   function handleAnswered(id: string, answer: string) {
     setItems((prev) => prev.map((q) => q.id === id ? { ...q, answer, status: 'answered', answeredAt: new Date().toISOString() } : q));
@@ -185,6 +220,25 @@ export default function TeacherQuestionsPage() {
       </div>
 
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+
+      <div className="mb-4 flex items-center gap-2">
+        <label htmlFor="subject-filter" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Subject
+        </label>
+        <select
+          id="subject-filter"
+          value={subjectFilter}
+          onChange={(e) => setSubjectFilter(e.target.value)}
+          className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700"
+        >
+          <option value="my-subjects">My Subjects</option>
+          {scopeSubjects.map((subject) => (
+            <option key={subject.toLowerCase()} value={subject}>
+              {subject}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* Stats */}
       {!loading && items.length > 0 && (

@@ -1,10 +1,12 @@
 import { clearAllRoleSessionCookies } from '@/lib/auth/session';
-import { clearSupabaseSessionCookies } from '@/lib/auth/supabase-auth';
+import { clearSupabaseSessionCookies, getSupabaseAccessTokenFromRequest, signOutSupabaseUser } from '@/lib/auth/supabase-auth';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
+    const accessToken = getSupabaseAccessTokenFromRequest(req);
+    if (accessToken) await signOutSupabaseUser(accessToken);
     const response = dataJson({
       requestId,
       data: { loggedOut: true },

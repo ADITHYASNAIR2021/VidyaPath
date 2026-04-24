@@ -780,6 +780,7 @@ export async function createSchoolAnnouncement(input: {
 export async function listTeacherGradebook(input: {
   teacherId: string;
   schoolId: string;
+  classSections?: Array<{ classLevel: 10 | 12; section: string }>;
 }): Promise<{
   packs: TeacherGradebookPack[];
   students: TeacherGradebookStudent[];
@@ -797,16 +798,58 @@ export async function listTeacherGradebook(input: {
   if (!teacherId || !schoolId) {
     return { packs: [], students: [], summary: { students: 0, packs: 0, overallAverage: 0 } };
   }
-  const packs = await supabaseSelect<AssignmentPackRow>(TABLES.assignmentPacks, {
-    select: 'id,teacher_id,school_id,chapter_id,class_level,subject,section,status,payload',
-    filters: [
-      { column: 'teacher_id', value: teacherId },
-      { column: 'school_id', value: schoolId },
-    ],
-    orderBy: 'class_level',
-    ascending: true,
-    limit: 5000,
-  }).catch(() => []);
+  const scopedSections = Array.isArray(input.classSections)
+    ? input.classSections
+      .map((item) => {
+        const classLevel = toClassLevel(item.classLevel);
+        const section = toSection(item.section);
+        if (!classLevel || !section) return null;
+        return { classLevel, section };
+      })
+      .filter((item): item is { classLevel: 10 | 12; section: string } => !!item)
+    : [];
+  const hasClassSectionScope = scopedSections.length > 0;
+  const sectionKeySet = new Set(scopedSections.map((item) => `${item.classLevel}:${item.section}`));
+  const scopedClassLevels = [...new Set(scopedSections.map((item) => item.classLevel))];
+
+  const [teacherPacks, classSectionPacks] = await Promise.all([
+    supabaseSelect<AssignmentPackRow>(TABLES.assignmentPacks, {
+      select: 'id,teacher_id,school_id,chapter_id,class_level,subject,section,status,payload',
+      filters: [
+        { column: 'teacher_id', value: teacherId },
+        { column: 'school_id', value: schoolId },
+      ],
+      orderBy: 'class_level',
+      ascending: true,
+      limit: 5000,
+    }).catch(() => []),
+    hasClassSectionScope
+      ? supabaseSelect<AssignmentPackRow>(TABLES.assignmentPacks, {
+        select: 'id,teacher_id,school_id,chapter_id,class_level,subject,section,status,payload',
+        filters: [
+          { column: 'school_id', value: schoolId },
+          { column: 'class_level', op: 'in', value: scopedClassLevels },
+        ],
+        orderBy: 'class_level',
+        ascending: true,
+        limit: 10000,
+      }).catch(() => [])
+      : Promise.resolve<AssignmentPackRow[]>([]),
+  ]);
+
+  const filteredClassSectionPacks = classSectionPacks.filter((row) => {
+    const classLevel = toClassLevel(row.class_level);
+    if (!classLevel) return false;
+    const section = toSection(row.section);
+    if (!section) return scopedSections.some((item) => item.classLevel === classLevel);
+    return sectionKeySet.has(`${classLevel}:${section}`);
+  });
+
+  const packMap = new Map<string, AssignmentPackRow>();
+  for (const row of [...teacherPacks, ...filteredClassSectionPacks]) {
+    packMap.set(row.id, row);
+  }
+  const packs = [...packMap.values()];
   const packIds = packs.map((item) => item.id);
   const packSet = new Set(packIds);
   if (packSet.size === 0) {
@@ -1156,6 +1199,23 @@ export async function listTeacherQuestions(input: {
     limit: input.limit ?? 100,
   }).catch(() => []);
   return rows.map(mapQuestionRow);
+}
+
+export async function getTeacherQuestionById(input: {
+  questionId: string;
+  schoolId: string;
+}): Promise<StudentQuestionItem | null> {
+  if (!isSupabaseServiceConfigured()) return null;
+  const questionId = sanitizeId(input.questionId);
+  const schoolId = sanitizeId(input.schoolId);
+  if (!questionId || !schoolId) return null;
+  const rows = await supabaseSelect<StudentQuestionRow>(TABLES.questions, {
+    select: '*',
+    filters: [{ column: 'id', value: questionId }, { column: 'school_id', value: schoolId }],
+    limit: 1,
+  }).catch(() => []);
+  const row = rows[0];
+  return row ? mapQuestionRow(row) : null;
 }
 
 export async function answerStudentQuestion(input: {

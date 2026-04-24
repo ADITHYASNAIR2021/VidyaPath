@@ -5,6 +5,8 @@ import { markAttendanceSchema } from '@/lib/schemas/teacher-attendance';
 import { listClassSectionsForTeacher } from '@/lib/school-management-db';
 import { listAttendanceBySection, listStudentsBySection, markAttendanceBulk } from '@/lib/school-ops-db';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { teacherHasScopeForTarget } from '@/lib/teacher/scope-guards';
+import type { TeacherSession } from '@/lib/teacher-types';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +46,97 @@ async function resolveManagedSection(input: {
   return owned[0] ?? null;
 }
 
+interface AttendanceAccessSection {
+  id: string;
+  schoolId: string;
+  classLevel: 10 | 12;
+  section: string;
+  batch?: string;
+}
+
+async function resolveAttendanceReadAccess(input: {
+  teacherSession: TeacherSession;
+  classLevel?: 10 | 12 | null;
+  section?: string;
+}): Promise<{ section: AttendanceAccessSection; readonly: boolean } | null> {
+  const managed = await listClassSectionsForTeacher(input.teacherSession.teacher.id);
+  const activeSections = managed.managedSections.filter((item) => item.status === 'active');
+  const owned = activeSections.filter((item) => item.classTeacherId === input.teacherSession.teacher.id);
+
+  if (owned.length > 0) {
+    if (input.classLevel && input.section) {
+      const matched = owned.find((item) => item.classLevel === input.classLevel && item.section === input.section);
+      return matched
+        ? {
+          section: {
+            id: matched.id,
+            schoolId: matched.schoolId,
+            classLevel: matched.classLevel,
+            section: matched.section,
+            batch: matched.batch,
+          },
+          readonly: false,
+        }
+        : null;
+    }
+    return owned[0]
+      ? {
+        section: {
+          id: owned[0].id,
+          schoolId: owned[0].schoolId,
+          classLevel: owned[0].classLevel,
+          section: owned[0].section,
+          batch: owned[0].batch,
+        },
+        readonly: false,
+      }
+      : null;
+  }
+
+  const scopedCandidates = activeSections
+    .filter((item) => !input.classLevel || item.classLevel === input.classLevel)
+    .filter((item) => !input.section || item.section === input.section)
+    .filter((item) =>
+      teacherHasScopeForTarget(input.teacherSession, {
+        classLevel: item.classLevel,
+        section: item.section,
+      })
+    );
+
+  if (scopedCandidates[0]) {
+    return {
+      section: {
+        id: scopedCandidates[0].id,
+        schoolId: scopedCandidates[0].schoolId,
+        classLevel: scopedCandidates[0].classLevel,
+        section: scopedCandidates[0].section,
+        batch: scopedCandidates[0].batch,
+      },
+      readonly: true,
+    };
+  }
+
+  if (input.classLevel && input.section && input.teacherSession.teacher.schoolId) {
+    const hasScope = teacherHasScopeForTarget(input.teacherSession, {
+      classLevel: input.classLevel,
+      section: input.section,
+    });
+    if (hasScope) {
+      return {
+        section: {
+          id: `readonly-${input.classLevel}-${input.section}`,
+          schoolId: input.teacherSession.teacher.schoolId,
+          classLevel: input.classLevel,
+          section: input.section,
+        },
+        readonly: true,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
   const teacherSession = await getTeacherSessionFromRequestCookies();
@@ -55,30 +148,30 @@ export async function GET(req: Request) {
   const date = toIsoDate(url.searchParams.get('date') ?? undefined);
 
   try {
-    const managedSection = await resolveManagedSection({
-      teacherId: teacherSession.teacher.id,
+    const access = await resolveAttendanceReadAccess({
+      teacherSession,
       classLevel,
       section,
     });
-    if (!managedSection) {
+    if (!access) {
       return errorJson({
         requestId,
-        errorCode: 'class-section-not-managed',
-        message: 'No managed class section found for attendance.',
+        errorCode: 'class-section-not-accessible',
+        message: 'No accessible class section found for attendance.',
         status: 403,
       });
     }
     const [roster, attendance] = await Promise.all([
       listStudentsBySection({
-        schoolId: managedSection.schoolId,
-        classLevel: managedSection.classLevel,
-        section: managedSection.section,
-        batch: managedSection.batch,
+        schoolId: access.section.schoolId,
+        classLevel: access.section.classLevel,
+        section: access.section.section,
+        batch: access.section.batch,
       }),
       listAttendanceBySection({
-        schoolId: managedSection.schoolId,
-        classLevel: managedSection.classLevel,
-        section: managedSection.section,
+        schoolId: access.section.schoolId,
+        classLevel: access.section.classLevel,
+        section: access.section.section,
         date,
       }),
     ]);
@@ -86,7 +179,8 @@ export async function GET(req: Request) {
     return dataJson({
       requestId,
       data: {
-        classSection: managedSection,
+        classSection: access.section,
+        readonly: access.readonly,
         date,
         roster: roster.map((student) => ({
           ...student,
@@ -198,4 +292,3 @@ export async function POST(req: Request) {
     });
   }
 }
-

@@ -28,6 +28,14 @@ export async function GET(req: Request) {
     adminSession.role === 'developer'
       ? (url.searchParams.get('schoolId')?.trim() || undefined)
       : adminSession.schoolId;
+  if (adminSession.role === 'admin' && !schoolId) {
+    return errorJson({
+      requestId,
+      errorCode: 'missing-school-scope',
+      message: 'School scope missing for admin session.',
+      status: 403,
+    });
+  }
   const students = await listStudents({
     schoolId,
     classLevel,
