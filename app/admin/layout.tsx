@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import Sidebar from '@/components/Sidebar';
+import RolePortalLayout from '@/components/RolePortalLayout';
 import {
   ADMIN_SESSION_COOKIE,
   DEVELOPER_SESSION_COOKIE,
@@ -9,7 +9,7 @@ import {
 import { getAdminSessionFromRequestCookies } from '@/lib/auth/guards';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const adminToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
   const devToken = cookieStore.get(DEVELOPER_SESSION_COOKIE)?.value;
 
@@ -27,12 +27,5 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     displayName = devSession ? devSession.username : undefined;
   }
 
-  return (
-    <div className="flex min-h-screen bg-[#FDFAF6]">
-      <Sidebar role="admin" displayName={displayName} />
-      <main className="flex-1 md:ml-60 transition-all duration-200 min-h-screen">
-        {children}
-      </main>
-    </div>
-  );
+  return <RolePortalLayout role="admin" displayName={displayName}>{children}</RolePortalLayout>;
 }

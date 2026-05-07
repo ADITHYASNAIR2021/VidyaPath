@@ -6,6 +6,7 @@ import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-r
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { teacherSubmissionCreateSchema } from '@/lib/schemas/teacher';
 import { logServerEvent } from '@/lib/observability';
+import { logger } from '@/lib/logger';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { studentCanAccessChapter } from '@/lib/school-management-db';
 import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
@@ -171,7 +172,7 @@ export async function POST(req: Request) {
       meta: { committedAt },
     });
   } catch (error) {
-    console.error('[teacher-submission:post] error', error);
+    logger.error({ err: error }, '[teacher-submission:post] error');
     const message = error instanceof Error ? error.message : 'Failed to submit assignment.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
     await recordAuditEvent({

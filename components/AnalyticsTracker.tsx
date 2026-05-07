@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { trackAnalyticsEvent } from '@/lib/client-analytics';
 
 interface AnalyticsTrackerProps {
   eventName: 'chapter_view' | 'search_no_result' | 'ai_question';
@@ -10,18 +11,8 @@ interface AnalyticsTrackerProps {
 
 export default function AnalyticsTracker({ eventName, chapterId, query }: AnalyticsTrackerProps) {
   useEffect(() => {
-    const controller = new AbortController();
-    fetch('/api/analytics/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ eventName, chapterId, query }),
-      signal: controller.signal,
-      keepalive: true,
-    }).catch(() => {
-      // Silent fail for privacy-friendly best-effort analytics.
-    });
-
-    return () => controller.abort();
+    trackAnalyticsEvent({ eventName, chapterId, query });
+    return undefined;
   }, [eventName, chapterId, query]);
 
   return null;

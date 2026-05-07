@@ -1,6 +1,6 @@
 'use client';
 
-import ErrorFallback from '@/components/ErrorFallback';
+import RoleStatusPanel from '@/components/RoleStatusPanel';
 
 export default function DeveloperError({
   error,
@@ -10,11 +10,13 @@ export default function DeveloperError({
   reset: () => void;
 }) {
   return (
-    <ErrorFallback
+    <RoleStatusPanel
+      role="developer"
+      variant="error"
       title="Developer Console Error"
       message={error?.message || 'Developer console failed to load.'}
       actionLabel="Retry Developer Console"
-      onRetry={reset}
+      onAction={reset}
     />
   );
 }

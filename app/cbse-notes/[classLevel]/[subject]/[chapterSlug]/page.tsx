@@ -22,8 +22,9 @@ export function generateStaticParams(): NotesParams[] {
     }));
 }
 
-export async function generateMetadata({ params }: { params: NotesParams }): Promise<Metadata> {
-  const chapter = parseChapterFromNotesSlug(params.classLevel, params.subject, params.chapterSlug);
+export async function generateMetadata({ params }: { params: Promise<NotesParams> }): Promise<Metadata> {
+  const resolvedParams = await params;
+  const chapter = parseChapterFromNotesSlug(resolvedParams.classLevel, resolvedParams.subject, resolvedParams.chapterSlug);
   if (!chapter) return { title: 'CBSE Notes | VidyaPath' };
   const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
   const baseTitle = `CBSE Class ${chapter.classLevel} ${chapter.subject} ${chapter.title} Notes`;
@@ -41,8 +42,9 @@ export async function generateMetadata({ params }: { params: NotesParams }): Pro
   };
 }
 
-export default async function CbseNotesChapterPage({ params }: { params: NotesParams }) {
-  const chapter = parseChapterFromNotesSlug(params.classLevel, params.subject, params.chapterSlug);
+export default async function CbseNotesChapterPage({ params }: { params: Promise<NotesParams> }) {
+  const resolvedParams = await params;
+  const chapter = parseChapterFromNotesSlug(resolvedParams.classLevel, resolvedParams.subject, resolvedParams.chapterSlug);
   if (!chapter) notFound();
   const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
   const formulaNames = (chapter.formulas ?? []).map((formula) => formula.name).slice(0, 6);

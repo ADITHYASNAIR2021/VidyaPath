@@ -12,6 +12,13 @@ interface AuthSnapshot {
   displayName?: string;
 }
 
+const ROLE_HEADER: Record<Exclude<AuthSnapshot['role'], 'anonymous'>, { title: string; subtitle: string }> = {
+  student: { title: 'Student Hub', subtitle: 'Study and practice workspace' },
+  teacher: { title: 'Teacher Workspace', subtitle: 'Teaching and class controls' },
+  admin: { title: 'Admin Console', subtitle: 'School operations and settings' },
+  developer: { title: 'Developer Console', subtitle: 'Platform operations and diagnostics' },
+};
+
 function shouldShowRoleSidebar(pathname: string, auth: AuthSnapshot): boolean {
   if (isPortalPath(pathname)) return false;
   if (!auth.authenticated || auth.role === 'anonymous') return false;
@@ -49,12 +56,30 @@ export default function AppMainShell({ children }: { children: React.ReactNode }
   const showRoleSidebar = shouldShowRoleSidebar(pathname, auth);
 
   if (showRoleSidebar && auth.role !== 'anonymous') {
+    const roleHeader = ROLE_HEADER[auth.role];
     return (
-      <div className="flex min-h-screen bg-[#FDFAF6] dark:bg-gray-900">
+      <div className="app-shell-bg flex min-h-screen bg-[var(--color-background)]">
         <Sidebar role={auth.role} displayName={auth.displayName} />
-        <main id="main-content" tabIndex={-1} className="flex-1 min-h-screen md:ml-60 transition-all duration-200">
-          {children}
-        </main>
+        <div className="flex min-h-screen flex-1 flex-col page-enter md:ml-60 transition-all duration-200">
+          <header className="sticky top-0 z-20 border-b border-[var(--color-border)] bg-[var(--color-surface)]/82 px-4 py-3 backdrop-blur-xl md:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-text-secondary)]">
+                  {roleHeader.title}
+                </p>
+                <p className="text-xs text-[var(--color-text-muted)]">{roleHeader.subtitle}</p>
+              </div>
+              {auth.displayName ? (
+                <div className="ui-chip rounded-full px-3 py-1 text-xs font-semibold">
+                  {auth.displayName}
+                </div>
+              ) : null}
+            </div>
+          </header>
+          <main id="main-content" tabIndex={-1} className="flex-1 min-h-[calc(100vh-65px)]">
+            {children}
+          </main>
+        </div>
       </div>
     );
   }

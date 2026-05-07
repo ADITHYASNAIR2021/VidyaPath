@@ -29,7 +29,7 @@ export async function POST(req: Request) {
         errorCode: bodyResult.reason,
         message: bodyResult.message,
         status: bodyReasonToStatus(bodyResult.reason),
-      issues: bodyResult.issues,
+        issues: bodyResult.issues,
       });
     }
     const { packId, feedback } = bodyResult.value;

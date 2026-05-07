@@ -107,7 +107,7 @@ export default function ChapterNotes({ chapterId }: { chapterId: string }) {
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder="Jot down important points, formulas, or reminders for this chapter here. Your notes are saved automatically to your device..."
+        placeholder="Note down important points, formulas, or reminders for this chapter here. Your notes are saved automatically to your device..."
         rows={expanded ? 10 : 3}
         className="w-full p-4 bg-transparent resize-none focus:outline-none text-[#4A4A6A] leading-relaxed"
       />

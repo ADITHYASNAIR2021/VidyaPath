@@ -39,12 +39,8 @@ import TextToSpeechButton from '@/components/TextToSpeechButton';
 import FloatingPomodoro from '@/components/FloatingPomodoro';
 import ChapterNotes from '@/components/ChapterNotes';
 import InlinePDFViewer from '@/components/InlinePDFViewer';
-import QuizEngine from '@/components/QuizEngine';
 import FlashcardDeck from '@/components/FlashcardDeck';
-import LearningProfileInsights from '@/components/LearningProfileInsights';
-import ChapterIntelligenceHub from '@/components/ChapterIntelligenceHub';
 import TeacherChapterPanel from '@/components/TeacherChapterPanel';
-import ImageQuestionSolver from '@/components/ImageQuestionSolver';
 import AnalyticsTracker from '@/components/AnalyticsTracker';
 import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
 import StudentSubjectGate from '@/components/StudentSubjectGate';
@@ -56,8 +52,9 @@ export function generateStaticParams() {
   return ALL_CHAPTERS.map((ch) => ({ id: ch.id }));
 }
 
-export function generateMetadata({ params }: { params: { id: string } }): Metadata {
-  const chapter = getChapterById(params.id);
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const resolvedParams = await params;
+  const chapter = getChapterById(resolvedParams.id);
   if (!chapter) {
     return {
       title: 'Chapter Not Found | VidyaPath',
@@ -159,16 +156,18 @@ export default async function ChapterDetailPage({
   params,
   searchParams,
 }: {
-  params: { id: string };
-  searchParams?: { section?: string };
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ section?: string }>;
 }) {
-  const chapter = getChapterById(params.id);
+  const resolvedParams = await params;
+  const resolvedSearchParams = await searchParams;
+  const chapter = getChapterById(resolvedParams.id);
   if (!chapter) notFound();
 
-  const { prev, next } = getAdjacentChapters(params.id);
+  const { prev, next } = getAdjacentChapters(resolvedParams.id);
   const style = SUBJECT_STYLES[chapter.subject] ?? SUBJECT_STYLES.Physics;
   const SubjectIcon = style.icon ?? Atom;
-  const section = typeof searchParams?.section === 'string' ? searchParams.section.trim() : '';
+  const section = typeof resolvedSearchParams?.section === 'string' ? resolvedSearchParams.section.trim() : '';
   const chapterPyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
   const groundedFrequency = await getGroundedFrequencyLabel(chapter.id);
   const paperYearUniverse = await getGroundedPaperYearUniverse();
@@ -446,14 +445,13 @@ export default async function ChapterDetailPage({
             {chapter.formulas && <FormulaCard formulas={chapter.formulas} />}
             {chapter.mermaidDiagram && <MermaidRenderer chart={chapter.mermaidDiagram} title="Process Workflow" />}
 
-            {/* Native Quizzes & Flashcards — always rendered; components show generate-from-AI state when empty */}
+            {/* Flashcards stay directly on chapter page for quick revision */}
             <FlashcardDeck
               chapterId={chapter.id}
               flashcards={chapter.flashcards ?? []}
               subject={chapter.subject}
               chapterTitle={chapter.title}
             />
-            <QuizEngine chapterId={chapter.id} quizzes={chapter.quizzes ?? []} subject={chapter.subject} chapterTitle={chapter.title} />
 
             {/* Inline PDF Viewer */}
             <InlinePDFViewer pdfUrl={chapter.ncertPdfUrl} />
@@ -528,12 +526,6 @@ export default async function ChapterDetailPage({
               defaultQuizUrl={chapter.googleFormUrl}
             />
 
-            <ImageQuestionSolver
-              chapterTitle={chapter.title}
-              classLevel={chapter.classLevel}
-              subject={chapter.subject}
-            />
-
             {/* Prev / Next Navigation */}
             <div className="grid grid-cols-2 gap-3">
               {prev ? (
@@ -588,22 +580,23 @@ export default async function ChapterDetailPage({
                 } : null}
               />
 
-              <LearningProfileInsights
-                chapterId={chapter.id}
-                chapterTitle={chapter.title}
-                pyqAvgMarks={chapterPyq?.avgMarks ?? 0}
-                flashcardCount={chapter.flashcards?.length ?? 0}
-              />
+              <div className="rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-600">AI Study Hub</p>
+                <h3 className="mt-1 font-fraunces text-base font-bold text-navy-700 dark:text-slate-100">
+                  More AI tools for this chapter
+                </h3>
+                <p className="mt-1.5 text-xs leading-relaxed text-[#6A6A84] dark:text-slate-300">
+                  AI Study Hub locks all tools to your selected chapter context. Revision planning is available in Revision Hub.
+                </p>
+                <Link
+                  href={`/student/ai-tools?chapter=${encodeURIComponent(chapter.id)}`}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700"
+                >
+                  Open AI Study Hub
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
 
-              <ChapterIntelligenceHub
-                chapterId={chapter.id}
-                chapterTitle={chapter.title}
-                subject={chapter.subject}
-                classLevel={chapter.classLevel}
-                chapterTopics={chapter.topics}
-                flashcardCount={chapter.flashcards?.length ?? 0}
-              />
-              
               <div>
                 <AIChatBox
                   chapterId={chapter.id}
@@ -634,3 +627,4 @@ export default async function ChapterDetailPage({
     </StudentSubjectGate>
   );
 }
+

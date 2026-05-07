@@ -11,6 +11,12 @@ const chapterId = z.string().trim().min(1).max(120);
 const classLevelField = z.union([z.literal(10), z.literal(12)]);
 const sectionField = z.string().trim().min(0).max(40).optional();
 const isoDateField = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD date');
+const dateTimeLocalField = z.string().trim().regex(
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/,
+  'Expected YYYY-MM-DDTHH:mm or YYYY-MM-DDTHH:mm:ss'
+);
+const isoDateTimeField = z.string().trim().datetime({ offset: true });
+const dateLikeField = z.union([isoDateField, dateTimeLocalField, isoDateTimeField]);
 
 // ── Create assignment pack (POST /api/teacher/assignment-pack) ─────────────
 
@@ -19,14 +25,18 @@ export const createAssignmentPackSchema = z.object({
   classLevel: z.coerce.number().refine((v) => v === 10 || v === 12).transform((v) => v as 10 | 12),
   subject: z.string().trim().min(1).max(80),
   questionCount: z.coerce.number().int().min(1).max(60).default(10),
+  paperMode: z.enum(['mcq-only', 'mixed', 'theory-heavy']).optional(),
+  shortAnswerCount: z.coerce.number().int().min(0).max(20).optional(),
+  longAnswerCount: z.coerce.number().int().min(0).max(12).optional(),
+  formulaDrillCount: z.coerce.number().int().min(0).max(20).optional(),
   difficultyMix: z.string().trim().max(100).optional(),
   includeShortAnswers: z.boolean().optional(),
   includeLongAnswers: z.boolean().optional(),
   includeFormulaDrill: z.boolean().optional(),
-  dueDate: isoDateField.optional(),
+  dueDate: dateLikeField.optional(),
   packId: z.string().trim().max(120).optional(),
   section: sectionField,
-});
+}).strict();
 export type CreateAssignmentPackInput = z.infer<typeof createAssignmentPackSchema>;
 
 // ── Pack ID only (approve, archive, regenerate, lifecycle) ────────────────
@@ -34,7 +44,7 @@ export type CreateAssignmentPackInput = z.infer<typeof createAssignmentPackSchem
 export const packIdOnlySchema = z.object({
   packId,
   feedback: z.string().trim().max(1000).optional(),
-});
+}).strict();
 export type PackIdOnlyInput = z.infer<typeof packIdOnlySchema>;
 
 // ── Publish pack ──────────────────────────────────────────────────────────
@@ -42,17 +52,26 @@ export type PackIdOnlyInput = z.infer<typeof packIdOnlySchema>;
 export const publishPackSchema = z.object({
   packId,
   visibilityStatus: z.enum(['open', 'closed']).optional(),
-  validFrom: isoDateField.optional(),
-  validUntil: isoDateField.optional(),
-});
+  validFrom: dateLikeField.optional(),
+  validUntil: dateLikeField.optional(),
+}).strict();
 export type PublishPackInput = z.infer<typeof publishPackSchema>;
 
 // ── Lifecycle (open/close/reopen/extend) ──────────────────────────────────
 
 export const packLifecycleSchema = z.object({
-  packId,
+  packId: packId.optional(),
   action: z.enum(['close', 'reopen', 'extend']),
-  validUntil: isoDateField.optional(),
+  extendDays: z.coerce.number().int().min(1).max(120).optional(),
+  validUntil: dateLikeField.optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.action === 'extend' && !value.validUntil && !Number.isFinite(value.extendDays)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Provide extendDays or validUntil for extend action.',
+      path: ['extendDays'],
+    });
+  }
 });
 export type PackLifecycleInput = z.infer<typeof packLifecycleSchema>;
 
@@ -150,5 +169,19 @@ export const regeneratePackSchema = z.object({
   feedback: z.string().trim().max(1000).optional(),
   reason: z.string().trim().max(300).optional(),
   questionCount: z.coerce.number().int().min(1).max(60).optional(),
-});
+  onlyWeak: z.boolean().optional(),
+  weakQuestionNos: z.array(z.string().trim().min(2).max(20)).max(60).optional(),
+  preserveLocked: z.boolean().optional(),
+}).strict();
 export type RegeneratePackInput = z.infer<typeof regeneratePackSchema>;
+
+// ── Question review controls (lock good / mark weak) ───────────────────────
+
+export const reviewControlsSchema = z.object({
+  packId: packId.optional(),
+  lockQuestionNos: z.array(z.string().trim().min(2).max(20)).max(60).optional(),
+  unlockQuestionNos: z.array(z.string().trim().min(2).max(20)).max(60).optional(),
+  weakQuestionNos: z.array(z.string().trim().min(2).max(20)).max(60).optional(),
+  clearWeakQuestionNos: z.array(z.string().trim().min(2).max(20)).max(60).optional(),
+}).strict();
+export type ReviewControlsInput = z.infer<typeof reviewControlsSchema>;

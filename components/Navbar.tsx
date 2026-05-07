@@ -39,7 +39,7 @@ function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-      className="p-2 rounded-xl text-[#4A4A6A] dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+      className="rounded-xl p-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-soft)]"
     >
       {theme === 'dark' ? (
         <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -192,13 +192,13 @@ export default function Navbar() {
   /* Exam mode — minimal nav */
   if (isExamRoute) {
     return (
-      <nav className="sticky top-0 z-50 border-b border-[#E8E4DC] bg-white/95 backdrop-blur-md">
+      <nav className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-surface)]/88 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="h-14 flex items-center justify-between">
-            <Link href="/" className="font-fraunces text-lg font-bold text-navy-700">
+            <Link href="/" className="font-fraunces text-lg font-bold text-[var(--color-text)]">
               Vidya<span className="text-saffron-500">Path</span>
             </Link>
-            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+            <span className="ui-chip text-xs font-semibold px-2.5 py-1 rounded-full">
               Proctored Exam Mode
             </span>
           </div>
@@ -215,10 +215,10 @@ export default function Navbar() {
         href={href}
         onClick={onClick}
         className={clsx(
-          'flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all',
+          'flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200',
           isActive
-            ? 'bg-saffron-50 text-saffron-700 dark:bg-saffron-900/30 dark:text-saffron-400'
-            : 'text-[#4A4A6A] dark:text-gray-400 hover:bg-[#F7F5F0] dark:hover:bg-gray-700 hover:text-[#1C1C2E] dark:hover:text-gray-100'
+            ? 'bg-saffron-50 text-saffron-700 shadow-sm dark:bg-saffron-900/30 dark:text-saffron-300'
+            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-soft)] hover:text-[var(--color-text)]'
         )}
       >
         <Icon className="w-4 h-4 shrink-0" />
@@ -228,25 +228,25 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-[#E8E4DC] dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md">
+    <nav className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-surface)]/82 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="h-16 flex items-center justify-between gap-4">
 
           {/* Brand */}
           <Link href="/" className="flex items-center gap-2 group shrink-0" onClick={() => setMobileOpen(false)}>
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-saffron-500 to-amber-500 text-white flex items-center justify-center shadow-sm">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-saffron-500 via-amber-500 to-blue-600 text-white shadow-[0_8px_20px_rgba(232,81,26,0.32)]">
               <GraduationCap className="w-5 h-5" />
             </div>
             <div className="leading-tight">
-              <div className="font-fraunces text-xl font-bold text-navy-700 dark:text-gray-100">
-                Vidya<span className="text-saffron-500">Path</span>
+              <div className="font-fraunces text-xl font-bold text-[var(--color-text)]">
+                Vidya<span className="ui-gradient-text">Path</span>
               </div>
-              <div className="text-[10px] uppercase tracking-wide text-[#8A8AAA] dark:text-gray-400">Board prep toolkit</div>
+              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Board prep toolkit</div>
             </div>
           </Link>
 
           {/* Desktop nav links */}
-          <div className="hidden lg:flex items-center gap-1 rounded-2xl border border-[#E8E4DC] dark:border-gray-700 bg-white dark:bg-gray-800 p-1 overflow-x-auto max-w-[60vw]">
+          <div className="glass-nav hidden max-w-[60vw] items-center gap-1 overflow-x-auto rounded-2xl p-1 lg:flex">
             {navLinks.map(({ href, label, icon }) => (
               <NavLink key={href} href={href} label={label} icon={icon} />
             ))}
@@ -300,7 +300,7 @@ export default function Navbar() {
             <CommandPalette />
             <button
               onClick={() => setMobileOpen((o) => !o)}
-              className="p-2 rounded-xl text-[#4A4A6A] dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              className="rounded-xl p-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-soft)]"
               aria-label="Toggle navigation menu"
             >
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -311,7 +311,7 @@ export default function Navbar() {
 
       {/* Mobile drawer */}
       {mobileOpen && (
-        <div className="lg:hidden border-t border-[#E8E4DC] dark:border-gray-700 bg-white dark:bg-gray-900">
+        <div className="glass-nav lg:hidden border-t border-[var(--color-border)]">
           <div className="px-4 py-3 space-y-1">
 
             {/* Role badge (mobile) */}

@@ -1,4 +1,5 @@
 import { getTokenUsageRollup } from '@/lib/platform-rbac-db';
+import { getAnalyticsSummary } from '@/lib/analytics-store';
 import { isSupabaseServiceConfigured, supabaseSelect } from '@/lib/supabase-rest';
 
 interface AuditEventRow {
@@ -44,6 +45,13 @@ export interface ObservabilitySummary {
     blockedThrottleBuckets: number;
     tokenEvents: number;
     totalTokens: number;
+    sampledApiRequests: number;
+    sampledApiErrors: number;
+    sampledApiErrorRatePct: number;
+    routeDropoffs: number;
+    pageLoads: number;
+    avgPageLoadMs: number;
+    slowPageLoads: number;
   };
   alerts: ObservabilityAlert[];
 }
@@ -111,6 +119,13 @@ export async function getObservabilitySummary(windowHours = 24): Promise<Observa
         blockedThrottleBuckets: 0,
         tokenEvents: 0,
         totalTokens: 0,
+        sampledApiRequests: 0,
+        sampledApiErrors: 0,
+        sampledApiErrorRatePct: 0,
+        routeDropoffs: 0,
+        pageLoads: 0,
+        avgPageLoadMs: 0,
+        slowPageLoads: 0,
       },
       alerts: [
         {
@@ -125,7 +140,7 @@ export async function getObservabilitySummary(windowHours = 24): Promise<Observa
     };
   }
 
-  const [auditRows, throttleRows, usage] = await Promise.all([
+  const [auditRows, throttleRows, usage, uxSummary] = await Promise.all([
     supabaseSelect<AuditEventRow>('audit_events', {
       select: 'created_at,endpoint,action,status_code,actor_role,metadata',
       filters: [{ column: 'created_at', op: 'gte', value: cutoffIso }],
@@ -141,6 +156,20 @@ export async function getObservabilitySummary(windowHours = 24): Promise<Observa
       limit: 5000,
     }).catch(() => []),
     getTokenUsageRollup({ limit: 1500 }).catch(() => ({ events: 0, totalTokens: 0, records: [] })),
+    getAnalyticsSummary(250).catch(() => ({
+      updatedAt: new Date().toISOString(),
+      topChapterViews: [],
+      topAiChapters: [],
+      topSearchNoResults: [],
+      topUxPageLoads: [],
+      topUxPageLoadBuckets: [],
+      topUxApiRequests: [],
+      topUxApiErrors: [],
+      topUxRouteDropoffs: [],
+      pageLoadSamples: 0,
+      avgUxPageLoadMs: 0,
+      slowUxPageLoads: 0,
+    })),
   ]);
 
   const authEvents = auditRows.filter((row) =>
@@ -156,6 +185,17 @@ export async function getObservabilitySummary(windowHours = 24): Promise<Observa
   const authFailurePct = authEvents.length > 0
     ? Math.round((authFailures.length / authEvents.length) * 10000) / 100
     : 0;
+  const sampledApiRequests = uxSummary.topUxApiRequests.reduce((sum, item) => sum + item.count, 0);
+  const sampledApiErrors = uxSummary.topUxApiErrors.reduce((sum, item) => sum + item.count, 0);
+  const sampledApiErrorRatePct = sampledApiRequests > 0
+    ? Math.round((sampledApiErrors / sampledApiRequests) * 10000) / 100
+    : 0;
+  const routeDropoffs = uxSummary.topUxRouteDropoffs.reduce((sum, item) => {
+    return item.route.includes(':: dropped') ? sum + item.count : sum;
+  }, 0);
+  const pageLoads = uxSummary.topUxPageLoads.reduce((sum, item) => sum + item.count, 0);
+  const avgPageLoadMs = uxSummary.avgUxPageLoadMs;
+  const slowPageLoads = uxSummary.slowUxPageLoads;
 
   const alerts: ObservabilityAlert[] = [
     toAlert({
@@ -194,6 +234,33 @@ export async function getObservabilitySummary(windowHours = 24): Promise<Observa
       warnSeverity: 'medium',
       criticalSeverity: 'high',
     }),
+    toAlert({
+      code: 'ux-api-error-rate',
+      message: 'Client-observed API error rate is elevated.',
+      metric: sampledApiErrorRatePct,
+      warnAt: 5,
+      criticalAt: 12,
+      warnSeverity: 'high',
+      criticalSeverity: 'critical',
+    }),
+    toAlert({
+      code: 'ux-route-dropoff',
+      message: 'Route drop-off signals indicate early exits from pages.',
+      metric: routeDropoffs,
+      warnAt: 40,
+      criticalAt: 90,
+      warnSeverity: 'medium',
+      criticalSeverity: 'high',
+    }),
+    toAlert({
+      code: 'ux-page-load-latency',
+      message: 'Average client page load latency is trending high.',
+      metric: avgPageLoadMs,
+      warnAt: 1200,
+      criticalAt: 2200,
+      warnSeverity: 'medium',
+      criticalSeverity: 'high',
+    }),
   ];
 
   return {
@@ -208,6 +275,13 @@ export async function getObservabilitySummary(windowHours = 24): Promise<Observa
       blockedThrottleBuckets,
       tokenEvents: usage.events,
       totalTokens: usage.totalTokens,
+      sampledApiRequests,
+      sampledApiErrors,
+      sampledApiErrorRatePct,
+      routeDropoffs,
+      pageLoads,
+      avgPageLoadMs,
+      slowPageLoads,
     },
     alerts,
   };

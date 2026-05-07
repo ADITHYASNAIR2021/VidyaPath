@@ -8,7 +8,8 @@ import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const endpoint = '/api/developer/schools/[id]/admins';
   const session = await getDeveloperSessionFromRequestCookies();
@@ -48,7 +49,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const endpoint = '/api/developer/schools/[id]/admins';
   const session = await getDeveloperSessionFromRequestCookies();

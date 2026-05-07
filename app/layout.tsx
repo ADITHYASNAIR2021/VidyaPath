@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
 import { Fraunces, DM_Sans, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import Navbar from '@/components/Navbar';
@@ -6,6 +7,7 @@ import MobileBottomNav from '@/components/MobileBottomNav';
 import FloatingAIButton from '@/components/FloatingAIButton';
 import FloatingPomodoro from '@/components/FloatingPomodoro';
 import PrivacyAnalytics from '@/components/PrivacyAnalytics';
+import UxTelemetry from '@/components/UxTelemetry';
 import SiteFooter from '@/components/SiteFooter';
 import AppMainShell from '@/components/AppMainShell';
 import { ThemeProvider } from '@/components/ThemeProvider';
@@ -29,12 +31,12 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-const BASE_URL = 'https://sreyas-vidyapath.vercel.com';
+const BASE_URL = process.env.NEXT_PUBLIC_APP_URL?.trim() || 'https://sreyas-vidyapath.vercel.app';
 
 export const viewport: Viewport = {
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#FDFAF6' },
-    { media: '(prefers-color-scheme: dark)', color: '#0A1220' },
+    { media: '(prefers-color-scheme: dark)', color: '#050B16' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -94,7 +96,8 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const nonce = (await headers()).get('x-nonce') || undefined;
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'EducationalOrganization',
@@ -116,12 +119,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <head>
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html:
               "(function(){try{var saved=localStorage.getItem('vp-theme');var dark=saved?saved==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',dark);document.documentElement.style.colorScheme=dark?'dark':'light';}catch(e){}})();",
           }}
         />
         <script
+          nonce={nonce}
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
@@ -133,7 +138,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Android Chrome PWA */}
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body className="min-h-screen bg-[#FDFAF6] dark:bg-gray-900 pb-16 md:pb-0 transition-colors duration-200">
+      <body className="min-h-screen bg-[var(--color-background)] pb-16 transition-colors duration-200 md:pb-0">
         <ThemeProvider>
           <a
             href="#main-content"
@@ -142,6 +147,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Skip to main content
           </a>
           <PrivacyAnalytics />
+          <UxTelemetry />
           <Navbar />
           <AppMainShell>{children}</AppMainShell>
           <SiteFooter />

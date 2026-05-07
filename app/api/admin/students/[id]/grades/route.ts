@@ -5,7 +5,8 @@ import { getStudentById } from '@/lib/teacher-admin-db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
@@ -49,6 +50,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       studentId: student.id,
       rollCode: student.rollCode,
       schoolId: student.schoolId,
+      includeAll: true,
     });
     return dataJson({
       requestId,

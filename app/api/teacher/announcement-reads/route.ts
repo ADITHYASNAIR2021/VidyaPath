@@ -6,19 +6,37 @@
 import { NextRequest } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { supabaseSelect } from '@/lib/supabase-rest';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 const READS_TABLE = 'announcement_reads';
 
 export async function GET(req: NextRequest) {
   const requestId = getRequestId(req);
+  const ip = getClientIp(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     if (context?.role !== 'teacher' && context?.role !== 'admin' && context?.role !== 'developer') {
       return errorJson({ requestId, errorCode: 'teacher-required', message: 'Teacher access required.', status: 403 });
+    }
+    const rateLimit = await checkRateLimit({
+      key: buildRateLimitKey('teacher:announcement-reads', [context?.authUserId || ip, context?.schoolId]),
+      windowSeconds: 60,
+      maxRequests: 90,
+      blockSeconds: 120,
+      metadata: { endpoint: '/api/teacher/announcement-reads' },
+    });
+    if (!rateLimit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many read-receipt queries. Please retry shortly.',
+        status: 429,
+        hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
+      });
     }
 
     const { searchParams } = new URL(req.url);

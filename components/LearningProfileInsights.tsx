@@ -64,9 +64,9 @@ export default function LearningProfileInsights({
   );
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-4">
+    <div className="rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-center justify-between gap-3 mb-3">
-        <h3 className="font-fraunces text-base font-bold text-navy-700 flex items-center gap-2">
+        <h3 className="flex items-center gap-2 font-fraunces text-base font-bold text-navy-700 dark:text-slate-100">
           <Target className="w-4 h-4 text-saffron-500" />
           Adaptive Focus
         </h3>
@@ -81,28 +81,28 @@ export default function LearningProfileInsights({
         )}
       </div>
 
-      <p className="text-xs text-[#6A6A84] mb-3">
+      <p className="mb-3 text-xs text-[#6A6A84] dark:text-slate-300">
         {chapterTitle} | Quiz {profile.quizScore ?? 'NA'}% | Flashcards due {profile.flashcardsDue}
       </p>
 
       {profile.weakTags.length > 0 ? (
         <div className="space-y-2 mb-3">
           {profile.weakTags.map((tag) => (
-            <div key={tag} className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5">
+            <div key={tag} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/20 dark:text-amber-100">
               <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
               {tag}
             </div>
           ))}
         </div>
       ) : (
-        <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-2 mb-3">
+        <div className="mb-3 rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-700 dark:border-emerald-400/40 dark:bg-emerald-500/20 dark:text-emerald-100">
           Strong chapter health. Keep revision cadence steady.
         </div>
       )}
 
       <div className="space-y-1.5">
         {profile.recommendedActions.slice(0, 2).map((action) => (
-          <div key={action} className="text-xs text-[#4A4A6A] flex items-start gap-1.5">
+          <div key={action} className="flex items-start gap-1.5 text-xs text-[#4A4A6A] dark:text-slate-300">
             <TrendingUp className="w-3.5 h-3.5 text-indigo-500 mt-0.5 flex-shrink-0" />
             <span>{action}</span>
           </div>

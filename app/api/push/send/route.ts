@@ -12,12 +12,23 @@
 import webpush from 'web-push';
 import { NextRequest } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { pushSendSchema } from '@/lib/schemas/engagement';
 import { resolveRequestSupabaseClient } from '@/lib/supabase/request-client';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { recordAuditEvent } from '@/lib/security/audit';
 
 const PUSH_TABLE = 'push_subscriptions';
+const DEFAULT_PAGE_SIZE = 500;
+const MAX_PAGE_SIZE = 2000;
+const DEFAULT_SEND_CONCURRENCY = 25;
+
+function toPositiveInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(parsed)));
+}
 
 function getVapidConfig(): { publicKey: string; privateKey: string; email: string } | null {
   const publicKey = process.env.VAPID_PUBLIC_KEY?.trim() || '';
@@ -29,12 +40,30 @@ function getVapidConfig(): { publicKey: string; privateKey: string; email: strin
 
 export async function POST(req: NextRequest) {
   const requestId = getRequestId(req);
+  const ip = getClientIp(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     if (context?.role !== 'developer' && context?.role !== 'admin') {
       return errorJson({ requestId, errorCode: 'forbidden', message: 'Developer or admin access required.', status: 403 });
+    }
+    const baseScope = context.schoolId || 'global';
+    const rateLimit = await checkRateLimit({
+      key: buildRateLimitKey('push:send', [context.authUserId || ip, baseScope]),
+      windowSeconds: 60,
+      maxRequests: 6,
+      blockSeconds: 120,
+      metadata: { endpoint: '/api/push/send' },
+    });
+    if (!rateLimit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many push broadcast attempts. Please retry shortly.',
+        status: 429,
+        hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
+      });
     }
 
     const vapid = getVapidConfig();
@@ -47,7 +76,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    webpush.setVapidDetails(`mailto:${vapid.email}`, vapid.publicKey, vapid.privateKey);
+    const vapidContact = vapid.email.startsWith('mailto:') ? vapid.email : `mailto:${vapid.email}`;
+    webpush.setVapidDetails(vapidContact, vapid.publicKey, vapid.privateKey);
 
     const bodyResult = await parseAndValidateJsonBody(req, 8 * 1024, pushSendSchema);
     if (!bodyResult.ok) {
@@ -65,6 +95,10 @@ export async function POST(req: NextRequest) {
     const message = body.message.trim();
     const url = typeof body.url === 'string' ? body.url.trim() : '/dashboard';
     const schoolId = context.role === 'admin' ? (context.schoolId || '') : (typeof body.schoolId === 'string' ? body.schoolId : '');
+    const raw = body as Record<string, unknown>;
+    const offset = toPositiveInt(raw.offset, 0, 0, 500_000);
+    const limit = toPositiveInt(raw.limit, DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE);
+    const concurrency = toPositiveInt(raw.concurrency, DEFAULT_SEND_CONCURRENCY, 1, 80);
 
     const resolvedClient = resolveRequestSupabaseClient(req, 'service-first');
     if (!resolvedClient) {
@@ -78,7 +112,7 @@ export async function POST(req: NextRequest) {
     let query = resolvedClient.client
       .from(PUSH_TABLE)
       .select('endpoint,p256dh,auth')
-      .limit(500);
+      .range(offset, offset + limit - 1);
     if (schoolId) query = query.eq('school_id', schoolId);
     const { data: subscriptions, error: subscriptionsError } = await query;
     if (subscriptionsError) {
@@ -93,22 +127,57 @@ export async function POST(req: NextRequest) {
     const payload = JSON.stringify({ title, body: message, url, icon: '/icon.png' });
     let sent = 0;
     let failed = 0;
+    const targets = subscriptions || [];
 
-    await Promise.allSettled(
-      (subscriptions || []).map(async (sub) => {
-        try {
-          await webpush.sendNotification(
-            { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-            payload
-          );
-          sent++;
-        } catch {
-          failed++;
-        }
-      })
-    );
+    for (let index = 0; index < targets.length; index += concurrency) {
+      const slice = targets.slice(index, index + concurrency);
+      await Promise.allSettled(
+        slice.map(async (sub) => {
+          try {
+            await webpush.sendNotification(
+              { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+              payload
+            );
+            sent++;
+          } catch {
+            failed++;
+          }
+        })
+      );
+    }
 
-    return dataJson({ requestId, data: { sent, failed, total: subscriptions?.length || 0 } });
+    const hasMore = targets.length === limit;
+    const nextOffset = hasMore ? offset + targets.length : null;
+    await recordAuditEvent({
+      requestId,
+      endpoint: '/api/push/send',
+      action: 'push-broadcast-sent',
+      statusCode: 200,
+      actorRole: context.role === 'developer' ? 'developer' : 'admin',
+      actorAuthUserId: context.authUserId,
+      schoolId: schoolId || context.schoolId,
+      metadata: {
+        sent,
+        failed,
+        requestedLimit: limit,
+        offset,
+        hasMore,
+        nextOffset,
+      },
+    });
+
+    return dataJson({
+      requestId,
+      data: {
+        sent,
+        failed,
+        total: targets.length,
+        offset,
+        limit,
+        hasMore,
+        nextOffset,
+      },
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Failed to send push notifications.';
     return errorJson({ requestId, errorCode: 'push-send-failed', message: msg, status: 500 });

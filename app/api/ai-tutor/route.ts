@@ -129,7 +129,7 @@ function fallbackError(error: unknown, requestId?: string): NextResponse {
 export async function POST(req: NextRequest) {
   const requestId = getRequestId(req);
   try {
-    const { context, response } = await requireInteractiveAuth();
+    const { context, response } = await requireInteractiveAuth(req);
     if (response) return response;
 
     const limit = await checkRateLimit({
@@ -267,7 +267,6 @@ export async function POST(req: NextRequest) {
       data: { message, isOffTopic, sources },
     });
   } catch (error) {
-    console.error('AI tutor route error:', error);
     logServerEvent({
       level: 'error',
       event: 'ai-tutor-error',

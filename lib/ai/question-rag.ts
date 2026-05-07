@@ -66,8 +66,10 @@ function getPyqTopicHit(questionTokens: Set<string>, pyqTopics: string[]): boole
   return countOverlap(questionTokens, pyqTokens) >= 1;
 }
 
-function getSourceType(snippet: ContextSnippet): 'paper' | 'textbook' {
-  return snippet.sourceType === 'textbook' ? 'textbook' : 'paper';
+function getSourceType(snippet: ContextSnippet): 'paper' | 'textbook' | 'image-ocr' {
+  if (snippet.sourceType === 'textbook') return 'textbook';
+  if (snippet.sourceType === 'image-ocr') return 'image-ocr';
+  return 'paper';
 }
 
 function buildPyqTag(input: {
@@ -149,7 +151,7 @@ export function annotateQuestionsWithRagMeta(
       const snippetTokens = new Set(tokenize(snippet.text || ''));
       return countOverlap(questionTokens, snippetTokens) >= 2;
     });
-    const paperEvidence = matchedSnippets.filter((snippet) => getSourceType(snippet) === 'paper');
+    const paperEvidence = matchedSnippets.filter((snippet) => getSourceType(snippet) === 'paper' || getSourceType(snippet) === 'image-ocr');
     const textbookEvidence = matchedSnippets.filter((snippet) => getSourceType(snippet) === 'textbook');
     const years = unique(
       paperEvidence
@@ -170,9 +172,11 @@ export function annotateQuestionsWithRagMeta(
       matchedSnippetCount: matchedSnippets.length,
       paperEvidenceCount: paperEvidence.length,
     });
+    const hasImageOcr = matchedSnippets.some((s) => s.sourceType === 'image-ocr');
     const sourceMix = unique([
       ...(paperEvidence.length > 0 ? ['paper' as const] : []),
       ...(textbookEvidence.length > 0 ? ['textbook' as const] : []),
+      ...(hasImageOcr ? ['image-ocr' as const] : []),
     ]);
 
     return {

@@ -7,7 +7,17 @@ import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+function normalizeDateInput(value?: string): string | undefined {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString();
+}
+
+export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Unauthorized teacher access.', requestId);
@@ -30,14 +40,26 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       issues: bodyResult.issues,
     });
   }
-  const { action, validUntil } = bodyResult.value;
-  const extendDays = validUntil ? undefined : undefined; // validUntil drives extension
+  const { action, validUntil, extendDays, packId: bodyPackId } = bodyResult.value;
+  if (bodyPackId && bodyPackId !== packId) {
+    return errorJson({
+      requestId,
+      errorCode: 'pack-id-mismatch',
+      message: 'Path pack id and body packId must match.',
+      status: 409,
+    });
+  }
+  const normalizedValidUntil = normalizeDateInput(validUntil);
+  const normalizedExtendDays = Number.isFinite(extendDays)
+    ? Math.max(1, Math.min(120, Math.round(Number(extendDays))))
+    : undefined;
   try {
     const pack = await updateAssignmentPackLifecycle({
       teacherId: session.teacher.id,
       packId,
       action,
-      extendDays: Number.isFinite(extendDays) ? extendDays : undefined,
+      extendDays: action === 'extend' ? normalizedExtendDays : undefined,
+      validUntil: action === 'extend' ? normalizedValidUntil : undefined,
     });
     if (!pack) {
       return errorJson({
@@ -58,7 +80,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         teacherId: session.teacher.id,
         packId,
         action,
-        extendDays: Number.isFinite(extendDays) ? extendDays : undefined,
+        extendDays: action === 'extend' ? normalizedExtendDays : undefined,
+        validUntil: action === 'extend' ? normalizedValidUntil : undefined,
         committedAt,
       },
     });
@@ -69,7 +92,11 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update assignment lifecycle.';
-    const status = /required|valid|action/i.test(message) ? 400 : 500;
+    const status = /already|only for published|cannot/i.test(message)
+      ? 409
+      : /required|valid|action|extend/i.test(message)
+        ? 400
+        : 500;
     return errorJson({
       requestId,
       errorCode: 'teacher-assignment-lifecycle-failed',

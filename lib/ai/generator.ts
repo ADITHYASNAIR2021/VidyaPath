@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ContextSnippet, ContextTask } from '@/lib/ai/context-retriever';
 import { getTaskChatModelCandidates, type LlmProvider, type LlmModelConfig } from '@/lib/ai/model-routing';
 import { callNvidiaChatCompletion, isUsableNvidiaApiKey, type LlmUsageCounts } from '@/lib/ai/nvidia-client';
+import { recordAiQualityRecord } from '@/lib/ai/quality-store';
 
 export type { LlmUsageCounts };
 
@@ -23,6 +24,7 @@ export interface GenerationResult {
   model: string;
   cacheHit: boolean;
   usage: LlmUsageCounts | null;
+  latencyMs: number;
 }
 
 interface BaseGenerateOptions {
@@ -142,6 +144,18 @@ function buildCacheKey(options: GenerateTextOptions): string {
   return digest.digest('hex');
 }
 
+const AI_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS) || 30_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function callGemini(
   apiKey: string,
   model: string,
@@ -160,7 +174,7 @@ async function callGemini(
         }))
       : [{ role: 'user', parts: [{ text: userPrompt }] }];
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
@@ -209,7 +223,9 @@ async function callGemini(
   return { text, usage };
 }
 
-async function callGroq(
+async function callOpenAICompatibleEndpoint(
+  apiUrl: string,
+  providerTag: string,
   apiKey: string,
   model: string,
   fullSystemPrompt: string,
@@ -219,7 +235,7 @@ async function callGroq(
   maxOutputTokens: number,
   topP: number
 ): Promise<{ text: string; usage: LlmUsageCounts | null }> {
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const response = await fetchWithTimeout(apiUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -243,19 +259,15 @@ async function callGroq(
 
   if (!response.ok) {
     const err = await response.text().catch(() => '');
-    throw new Error(`Groq ${model} failed: ${response.status} ${err.slice(0, 140)}`);
+    throw new Error(`${providerTag}/${model} failed: ${response.status} ${err.slice(0, 140)}`);
   }
 
   const payload = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
-    usage?: {
-      prompt_tokens?: number;
-      completion_tokens?: number;
-      total_tokens?: number;
-    };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
   const text = payload.choices?.[0]?.message?.content?.trim() ?? '';
-  if (!text) throw new Error(`Groq ${model} returned empty output`);
+  if (!text) throw new Error(`${providerTag}/${model} returned empty output`);
 
   let usage: LlmUsageCounts | null = null;
   const u = payload.usage;
@@ -267,6 +279,50 @@ async function callGroq(
     };
   }
   return { text, usage };
+}
+
+async function callGroq(
+  apiKey: string, model: string, fullSystemPrompt: string, userPrompt: string,
+  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number
+): Promise<{ text: string; usage: LlmUsageCounts | null }> {
+  return callOpenAICompatibleEndpoint(
+    'https://api.groq.com/openai/v1/chat/completions', 'Groq',
+    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP
+  );
+}
+
+async function callCerebras(
+  apiKey: string, model: string, fullSystemPrompt: string, userPrompt: string,
+  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number
+): Promise<{ text: string; usage: LlmUsageCounts | null }> {
+  return callOpenAICompatibleEndpoint(
+    'https://api.cerebras.ai/v1/chat/completions', 'Cerebras',
+    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP
+  );
+}
+
+async function callMistral(
+  apiKey: string, model: string, fullSystemPrompt: string, userPrompt: string,
+  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number
+): Promise<{ text: string; usage: LlmUsageCounts | null }> {
+  return callOpenAICompatibleEndpoint(
+    'https://api.mistral.ai/v1/chat/completions', 'Mistral',
+    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP
+  );
+}
+
+function isUsableCerebrasApiKey(key: string | undefined): key is string {
+  if (!key) return false;
+  const normalized = key.trim();
+  if (!normalized.startsWith('csk-')) return false;
+  return !['placeholder', 'replace_me', 'changeme', 'your_cerebras'].some((t) => normalized.toLowerCase().includes(t));
+}
+
+function isUsableMistralApiKey(key: string | undefined): key is string {
+  if (!key) return false;
+  const normalized = key.trim();
+  if (normalized.length < 16) return false;
+  return !['placeholder', 'replace_me', 'changeme', 'your_mistral'].some((t) => normalized.toLowerCase().includes(t));
 }
 
 function stripCodeFence(text: string): string {
@@ -360,6 +416,78 @@ function tryParseJsonCandidates(rawText: string): { parsed: unknown | null; erro
   return { parsed: null, error: lastError };
 }
 
+function collectStringLeaves(value: unknown, output: string[], budget: { chars: number }): void {
+  if (budget.chars <= 0) return;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed) {
+      output.push(trimmed.slice(0, 800));
+      budget.chars -= trimmed.length;
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringLeaves(item, output, budget);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      collectStringLeaves(item, output, budget);
+    }
+  }
+}
+
+function tokenizeForGrounding(text: string): string[] {
+  return (text.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((token) => {
+    return !['with', 'from', 'that', 'this', 'your', 'their', 'which', 'about', 'chapter'].includes(token);
+  });
+}
+
+function evaluateJsonGrounding(
+  jsonValue: unknown,
+  snippets: ContextSnippet[],
+  includeCitations: boolean | undefined
+): {
+  groundednessScore: number;
+  citationCoverageScore: number;
+  retrievalMiss: boolean;
+} {
+  if (!Array.isArray(snippets) || snippets.length === 0) {
+    return {
+      groundednessScore: 0,
+      citationCoverageScore: includeCitations ? 0 : 100,
+      retrievalMiss: true,
+    };
+  }
+  const leaves: string[] = [];
+  collectStringLeaves(jsonValue, leaves, { chars: 12000 });
+  const outputTokens = tokenizeForGrounding(leaves.join(' '));
+  const snippetTokens = new Set(tokenizeForGrounding(snippets.map((snippet) => snippet.text || '').join(' ')));
+  let overlap = 0;
+  for (const token of outputTokens) {
+    if (snippetTokens.has(token)) overlap += 1;
+  }
+  const overlapRatio = outputTokens.length > 0 ? overlap / outputTokens.length : 0;
+  const groundednessScore = Math.max(0, Math.min(100, Math.round((35 + overlapRatio * 75) * 100) / 100));
+
+  if (!includeCitations) {
+    return {
+      groundednessScore,
+      citationCoverageScore: groundednessScore,
+      retrievalMiss: false,
+    };
+  }
+
+  const rendered = JSON.stringify(jsonValue);
+  const refs = new Set((rendered.match(/\[S(\d+)\]/g) ?? []).map((value) => Number(value.replace(/\D/g, ''))));
+  const citationCoverageRatio = snippets.length > 0 ? Math.min(1, refs.size / snippets.length) : 0;
+  return {
+    groundednessScore,
+    citationCoverageScore: Math.round(citationCoverageRatio * 10000) / 100,
+    retrievalMiss: false,
+  };
+}
+
 async function runGeneration(options: GenerateTextOptions): Promise<GenerationResult> {
   const cacheKey = buildCacheKey(options);
   const cacheEnabled = isResponseCacheEnabled();
@@ -372,6 +500,7 @@ async function runGeneration(options: GenerateTextOptions): Promise<GenerationRe
         model: fromCache.model,
         cacheHit: true,
         usage: null,
+        latencyMs: 0,
       };
     }
   }
@@ -393,6 +522,8 @@ ${citationBlock}`;
   const geminiKey = process.env.GEMINI_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
   const nvidiaKey = process.env.NVIDIA_API_KEY;
+  const cerebrasKey = process.env.CEREBRAS_API_KEY;
+  const mistralKey = process.env.MISTRAL_API_KEY;
   const errors: string[] = [];
   const missingProviderNotice = new Set<LlmProvider>();
   const candidates = getTaskChatModelCandidates(options.task);
@@ -402,6 +533,7 @@ ${citationBlock}`;
   }
 
   for (const candidate of candidates) {
+    const candidateStart = now();
     const temperature = resolveTemperature(candidate, options.temperature);
     const maxOutputTokens = resolveMaxTokens(candidate, options.maxOutputTokens);
     const topP = resolveTopP(candidate);
@@ -438,7 +570,26 @@ ${citationBlock}`;
             expiresAt: now() + CACHE_TTL_MS,
           });
         }
-        return { text: nvidiaResult.text, provider: 'nvidia', model: candidate.model, cacheHit: false, usage: nvidiaResult.usage };
+        const latencyMs = now() - candidateStart;
+        void recordAiQualityRecord({
+          task: options.task,
+          provider: 'nvidia',
+          model: candidate.model,
+          latencyMs,
+          promptTokens: nvidiaResult.usage?.promptTokens,
+          completionTokens: nvidiaResult.usage?.completionTokens,
+          totalTokens: nvidiaResult.usage?.totalTokens,
+          contextSnippetCount: options.contextSnippets.length,
+          success: true,
+        });
+        return {
+          text: nvidiaResult.text,
+          provider: 'nvidia',
+          model: candidate.model,
+          cacheHit: false,
+          usage: nvidiaResult.usage,
+          latencyMs,
+        };
       }
 
       if (candidate.provider === 'gemini') {
@@ -467,7 +618,26 @@ ${citationBlock}`;
             expiresAt: now() + CACHE_TTL_MS,
           });
         }
-        return { text: geminiResult.text, provider: 'gemini', model: candidate.model, cacheHit: false, usage: geminiResult.usage };
+        const latencyMs = now() - candidateStart;
+        void recordAiQualityRecord({
+          task: options.task,
+          provider: 'gemini',
+          model: candidate.model,
+          latencyMs,
+          promptTokens: geminiResult.usage?.promptTokens,
+          completionTokens: geminiResult.usage?.completionTokens,
+          totalTokens: geminiResult.usage?.totalTokens,
+          contextSnippetCount: options.contextSnippets.length,
+          success: true,
+        });
+        return {
+          text: geminiResult.text,
+          provider: 'gemini',
+          model: candidate.model,
+          cacheHit: false,
+          usage: geminiResult.usage,
+          latencyMs,
+        };
       }
 
       if (candidate.provider === 'groq') {
@@ -479,34 +649,73 @@ ${citationBlock}`;
           continue;
         }
         const groqResult = await callGroq(
-          groqKey,
-          candidate.model,
-          fullSystemPrompt,
-          options.userPrompt,
-          options.messages,
-          temperature,
-          maxOutputTokens,
-          topP
+          groqKey, candidate.model, fullSystemPrompt, options.userPrompt,
+          options.messages, temperature, maxOutputTokens, topP
         );
         if (cacheEnabled) {
-          RESPONSE_CACHE.set(cacheKey, {
-            text: groqResult.text,
-            provider: 'groq',
-            model: candidate.model,
-            expiresAt: now() + CACHE_TTL_MS,
-          });
+          RESPONSE_CACHE.set(cacheKey, { text: groqResult.text, provider: 'groq', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
         }
-        return { text: groqResult.text, provider: 'groq', model: candidate.model, cacheHit: false, usage: groqResult.usage };
+        const latencyMs = now() - candidateStart;
+        void recordAiQualityRecord({ task: options.task, provider: 'groq', model: candidate.model, latencyMs, promptTokens: groqResult.usage?.promptTokens, completionTokens: groqResult.usage?.completionTokens, totalTokens: groqResult.usage?.totalTokens, contextSnippetCount: options.contextSnippets.length, success: true });
+        return { text: groqResult.text, provider: 'groq', model: candidate.model, cacheHit: false, usage: groqResult.usage, latencyMs };
+      }
+
+      if (candidate.provider === 'cerebras') {
+        if (!isUsableCerebrasApiKey(cerebrasKey)) {
+          if (!missingProviderNotice.has('cerebras')) {
+            missingProviderNotice.add('cerebras');
+            errors.push('CEREBRAS_API_KEY missing or invalid (format: csk-...).');
+          }
+          continue;
+        }
+        const result = await callCerebras(
+          cerebrasKey, candidate.model, fullSystemPrompt, options.userPrompt,
+          options.messages, temperature, maxOutputTokens, topP
+        );
+        if (cacheEnabled) {
+          RESPONSE_CACHE.set(cacheKey, { text: result.text, provider: 'cerebras', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
+        }
+        const latencyMs = now() - candidateStart;
+        void recordAiQualityRecord({ task: options.task, provider: 'cerebras', model: candidate.model, latencyMs, promptTokens: result.usage?.promptTokens, completionTokens: result.usage?.completionTokens, totalTokens: result.usage?.totalTokens, contextSnippetCount: options.contextSnippets.length, success: true });
+        return { text: result.text, provider: 'cerebras', model: candidate.model, cacheHit: false, usage: result.usage, latencyMs };
+      }
+
+      if (candidate.provider === 'mistral') {
+        if (!isUsableMistralApiKey(mistralKey)) {
+          if (!missingProviderNotice.has('mistral')) {
+            missingProviderNotice.add('mistral');
+            errors.push('MISTRAL_API_KEY missing or invalid.');
+          }
+          continue;
+        }
+        const result = await callMistral(
+          mistralKey, candidate.model, fullSystemPrompt, options.userPrompt,
+          options.messages, temperature, maxOutputTokens, topP
+        );
+        if (cacheEnabled) {
+          RESPONSE_CACHE.set(cacheKey, { text: result.text, provider: 'mistral', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
+        }
+        const latencyMs = now() - candidateStart;
+        void recordAiQualityRecord({ task: options.task, provider: 'mistral', model: candidate.model, latencyMs, promptTokens: result.usage?.promptTokens, completionTokens: result.usage?.completionTokens, totalTokens: result.usage?.totalTokens, contextSnippetCount: options.contextSnippets.length, success: true });
+        return { text: result.text, provider: 'mistral', model: candidate.model, cacheHit: false, usage: result.usage, latencyMs };
       }
     } catch (error) {
       errors.push(String(error));
+      void recordAiQualityRecord({
+        task: options.task,
+        provider: candidate.provider,
+        model: candidate.model,
+        latencyMs: now() - candidateStart,
+        contextSnippetCount: options.contextSnippets.length,
+        success: false,
+        errorCode: 'provider-generation-failed',
+        errorMessage: String(error),
+      });
     }
   }
 
   throw new Error(
-    `No model could generate a response. Configure NVIDIA_API_KEY (recommended), GEMINI_API_KEY, or GROQ_API_KEY. Details: ${errors
-      .slice(0, 5)
-      .join(' | ')}`
+    `No model could generate a response. Configure at least one of: NVIDIA_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY. Details: ${errors.slice(0, 6).join(' | ')}`
   );
 }
 
@@ -517,11 +726,40 @@ export async function generateTaskText(options: GenerateTextOptions): Promise<Ge
 export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Promise<{
   data: T;
   result: GenerationResult;
+  quality: {
+    groundednessScore: number;
+    citationCoverageScore: number;
+    retrievalMiss: boolean;
+    repaired: boolean;
+  };
 }> {
+  const evaluateAndAccept = (value: unknown) => {
+    if (!options.validate(value)) return null;
+    const quality = evaluateJsonGrounding(value, options.contextSnippets, options.includeCitations);
+    return { data: value as T, quality };
+  };
+
   const firstResult = await runGeneration(options);
   const firstParsed = tryParseJsonCandidates(firstResult.text);
-  if (firstParsed.parsed && options.validate(firstParsed.parsed)) {
-    return { data: firstParsed.parsed, result: firstResult };
+  const acceptedFirst = firstParsed.parsed ? evaluateAndAccept(firstParsed.parsed) : null;
+  if (acceptedFirst && (acceptedFirst.quality.retrievalMiss || acceptedFirst.quality.groundednessScore >= 52)) {
+    void recordAiQualityRecord({
+      task: options.task,
+      provider: firstResult.provider,
+      model: firstResult.model,
+      latencyMs: firstResult.latencyMs,
+      promptTokens: firstResult.usage?.promptTokens,
+      completionTokens: firstResult.usage?.completionTokens,
+      totalTokens: firstResult.usage?.totalTokens,
+      contextSnippetCount: options.contextSnippets.length,
+      groundednessScore: acceptedFirst.quality.groundednessScore,
+      citationCoverageScore: acceptedFirst.quality.citationCoverageScore,
+      retrievalMiss: acceptedFirst.quality.retrievalMiss,
+      repaired: false,
+      rejected: false,
+      success: true,
+    });
+    return { data: acceptedFirst.data, result: firstResult, quality: { ...acceptedFirst.quality, repaired: false } };
   }
 
   const retryOptions: GenerateTextOptions = {
@@ -534,20 +772,57 @@ CRITICAL:
 - Return only valid JSON.
 - No markdown fences.
 - Ensure all strings are closed and escaped properly.
-- Do not add any explanatory text before or after JSON.`,
+- Do not add any explanatory text before or after JSON.
+- Facts must stay grounded in the retrieved context snippets.`,
   };
 
   const retryResult = await runGeneration(retryOptions);
   const retryParsed = tryParseJsonCandidates(retryResult.text);
-  if (retryParsed.parsed && options.validate(retryParsed.parsed)) {
-    return { data: retryParsed.parsed, result: retryResult };
+  const acceptedRetry = retryParsed.parsed ? evaluateAndAccept(retryParsed.parsed) : null;
+  if (acceptedRetry && (acceptedRetry.quality.retrievalMiss || acceptedRetry.quality.groundednessScore >= 45)) {
+    void recordAiQualityRecord({
+      task: options.task,
+      provider: retryResult.provider,
+      model: retryResult.model,
+      latencyMs: retryResult.latencyMs,
+      promptTokens: retryResult.usage?.promptTokens,
+      completionTokens: retryResult.usage?.completionTokens,
+      totalTokens: retryResult.usage?.totalTokens,
+      contextSnippetCount: options.contextSnippets.length,
+      groundednessScore: acceptedRetry.quality.groundednessScore,
+      citationCoverageScore: acceptedRetry.quality.citationCoverageScore,
+      retrievalMiss: acceptedRetry.quality.retrievalMiss,
+      repaired: true,
+      rejected: false,
+      success: true,
+    });
+    return { data: acceptedRetry.data, result: retryResult, quality: { ...acceptedRetry.quality, repaired: true } };
   }
+
+  void recordAiQualityRecord({
+    task: options.task,
+    provider: retryResult.provider,
+    model: retryResult.model,
+    latencyMs: retryResult.latencyMs,
+    promptTokens: retryResult.usage?.promptTokens,
+    completionTokens: retryResult.usage?.completionTokens,
+    totalTokens: retryResult.usage?.totalTokens,
+    contextSnippetCount: options.contextSnippets.length,
+    groundednessScore: acceptedRetry?.quality.groundednessScore,
+    citationCoverageScore: acceptedRetry?.quality.citationCoverageScore,
+    retrievalMiss: acceptedRetry?.quality.retrievalMiss,
+    repaired: true,
+    rejected: true,
+    success: false,
+    errorCode: 'json-grounding-rejected',
+    errorMessage: `first=${firstParsed.error ?? 'schema-or-grounding'}; retry=${retryParsed.error ?? 'schema-or-grounding'}`,
+  });
 
   if (firstParsed.parsed && !options.validate(firstParsed.parsed)) {
     throw new Error(`Model returned schema-invalid JSON for task ${options.task}.`);
   }
 
   throw new Error(
-    `Model returned invalid JSON for task ${options.task}: first=${firstParsed.error ?? 'unknown'}; retry=${retryParsed.error ?? 'unknown'}`
+    `Model returned invalid/weakly-grounded JSON for task ${options.task}: first=${firstParsed.error ?? 'unknown'}; retry=${retryParsed.error ?? 'unknown'}`
   );
 }

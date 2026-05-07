@@ -59,6 +59,11 @@ export interface TeacherQuestionMeta {
   maxMarks: number;
   rubric?: string;
   imageUrl?: string;
+  locked?: boolean;
+  weakSignal?: boolean;
+  quality?: 'strong' | 'weak' | 'needs-review';
+  regeneratedCount?: number;
+  lastRegeneratedAt?: string;
 }
 
 export interface TeacherRegenerationFeedback {
@@ -66,6 +71,27 @@ export interface TeacherRegenerationFeedback {
   feedback: string;
   createdAt: string;
   createdByTeacherId: string;
+}
+
+export type TeacherPaperMode = 'mcq-only' | 'mixed' | 'theory-heavy';
+
+export interface TeacherPaperBlueprintSection {
+  section: string;
+  kind: 'mcq' | 'short' | 'long' | 'formula';
+  count: number;
+  marksPerQuestion: number;
+  subtotalMarks: number;
+}
+
+export interface TeacherPaperBlueprint {
+  mode: TeacherPaperMode;
+  mcqCount: number;
+  shortAnswerCount: number;
+  longAnswerCount: number;
+  formulaDrillCount: number;
+  totalQuestions: number;
+  totalMarks: number;
+  sectionPlan: TeacherPaperBlueprintSection[];
 }
 
 export type TeacherPackStatus = 'draft' | 'review' | 'published' | 'archived';
@@ -82,7 +108,10 @@ export interface TeacherAssignmentPack {
   difficultyMix: string;
   dueDate?: string;
   includeShortAnswers: boolean;
+  includeLongAnswers?: boolean;
   includeFormulaDrill: boolean;
+  paperMode?: TeacherPaperMode;
+  paperBlueprint?: TeacherPaperBlueprint;
   mcqs: MCQItem[];
   shortAnswers: string[];
   longAnswers: string[];
@@ -304,6 +333,25 @@ export interface TeacherAssignmentAnalytics {
   topWeakTopics: Array<{ topic: string; count: number }>;
   weakTopicHeatmap: Array<{ topic: string; count: number }>;
   packPerformance: TeacherPackPerformance[];
+}
+
+export interface TeacherClassInsightRow {
+  key: string;
+  classLevel: 10 | 12;
+  section?: string;
+  assigned: number;
+  submitted: number;
+  unanswered: number;
+  completionPercent: number;
+}
+
+export interface TeacherAssignmentClassInsights {
+  generatedAt: string;
+  totalPublishedAssignments: number;
+  overallCompletionPercent: number;
+  unansweredAssignments: number;
+  weakTopics: Array<{ topic: string; count: number }>;
+  rows: TeacherClassInsightRow[];
 }
 
 export interface TeacherScopeFeedItemBase {

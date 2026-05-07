@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { ALL_CHAPTERS } from '@/lib/data';
-import type { Subject } from '@/lib/data';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { chapterNotesSlug, slugify } from '@/lib/seo-notes';
 
@@ -22,10 +21,7 @@ export const metadata = {
 
 export default async function CbseNotesIndexPage() {
   const studentSession = await getStudentSessionFromRequestCookies().catch(() => null);
-  const enrolledSubjectSet = studentSession?.studentId
-    ? new Set<Subject>((studentSession.enrolledSubjects ?? []).filter((item): item is Subject => typeof item === 'string'))
-    : null;
-  const chapters = allChapters.filter((chapter) => !enrolledSubjectSet || enrolledSubjectSet.has(chapter.subject));
+  const chapters = allChapters;
 
   return (
     <div className="min-h-screen bg-[#FDFAF6]">
@@ -41,7 +37,7 @@ export default async function CbseNotesIndexPage() {
       <div className="max-w-6xl mx-auto px-4 py-8">
         {studentSession?.studentId && (
           <p className="mb-4 text-xs font-semibold text-indigo-700">
-            Showing only your enrolled subjects: {(studentSession.enrolledSubjects ?? []).join(', ') || 'None assigned yet'}.
+            Showing full notes library. Use class and subject paths to navigate quickly.
           </p>
         )}
         <div className="grid md:grid-cols-2 gap-4">

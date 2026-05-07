@@ -25,8 +25,10 @@ function assertIncludes(content, pattern, label) {
 
 const sessionTs = read('lib/auth/session.ts');
 const parentSessionTs = read('lib/auth/parent-session.ts');
-const middlewareTs = read('middleware.ts');
+const edgeAuthFile = fs.existsSync(path.join(root, 'proxy.ts')) ? 'proxy.ts' : 'middleware.ts';
+const middlewareTs = read(edgeAuthFile);
 const guardsTs = read('lib/auth/guards.ts');
+const interactiveApiPolicyTs = read('lib/security/interactive-api-policy.ts');
 const packageJson = JSON.parse(read('package.json'));
 const ciWorkflow = read('.github/workflows/ci.yml');
 const publicSwJs = read('public/sw.js');
@@ -51,12 +53,15 @@ const aiRoutesRequiringBudget = [
 assertIncludes(sessionTs, 'SESSION_SIGNING_SECRET', 'lib/auth/session.ts');
 assertNotIncludes(sessionTs, 'vidyapath-dev-session-secret', 'lib/auth/session.ts');
 assertNotIncludes(parentSessionTs, 'vidyapath-dev-session-secret', 'lib/auth/parent-session.ts');
-assertNotIncludes(middlewareTs, 'vp_role_hint', 'middleware.ts');
-assertNotIncludes(middlewareTs, 'vidyapath-dev-session-secret', 'middleware.ts');
-assertNotIncludes(middlewareTs, 'AUTH_REQUIRED_AI_API_PREFIXES', 'middleware.ts');
-assertIncludes(middlewareTs, "if (pathname.startsWith('/api/'))", 'middleware.ts');
+assertNotIncludes(middlewareTs, 'vp_role_hint', edgeAuthFile);
+assertNotIncludes(middlewareTs, 'vidyapath-dev-session-secret', edgeAuthFile);
+assertNotIncludes(middlewareTs, 'AUTH_REQUIRED_AI_API_PREFIXES', edgeAuthFile);
+assertIncludes(middlewareTs, "if (pathname.startsWith('/api/'))", edgeAuthFile);
 assertIncludes(guardsTs, 'isLegacySessionAuthEnabled', 'lib/auth/guards.ts');
 assertIncludes(guardsTs, 'resolveSupabaseContext', 'lib/auth/guards.ts');
+assertIncludes(interactiveApiPolicyTs, "'/api/ai/'", 'lib/security/interactive-api-policy.ts');
+assertIncludes(interactiveApiPolicyTs, "'/api/generate-quiz'", 'lib/security/interactive-api-policy.ts');
+assertIncludes(middlewareTs, 'isInteractiveApiRoute(pathname)', edgeAuthFile);
 assertIncludes(ciWorkflow, 'name: CI', '.github/workflows/ci.yml');
 assertNotIncludes(ciWorkflow, '# name: CI', '.github/workflows/ci.yml');
 assertNotIncludes(publicSwJs, 'eval-source-map', 'public/sw.js');

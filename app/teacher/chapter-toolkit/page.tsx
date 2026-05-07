@@ -12,6 +12,14 @@ function unwrap<T>(payload: unknown): T {
   return payload as T;
 }
 
+function extractApiMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object' && 'message' in (payload as Record<string, unknown>)) {
+    const maybe = (payload as Record<string, unknown>).message;
+    if (typeof maybe === 'string' && maybe.trim()) return maybe.trim();
+  }
+  return fallback;
+}
+
 type Tab = 'quiz-links' | 'important-topics';
 
 export default function ChapterToolkitPage() {
@@ -52,9 +60,12 @@ export default function ChapterToolkitPage() {
         const sessionData = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await sessionRes.json().catch(() => null));
         setScopes(Array.isArray(sessionData?.effectiveScopes) ? sessionData.effectiveScopes : []);
 
-        const cfg = unwrap<{ importantTopics?: Record<string, string[]>; quizLinks?: Record<string, string> } | null>(
-          await configRes.json().catch(() => null)
-        );
+        const configBody = await configRes.json().catch(() => null);
+        if (!configRes.ok) {
+          setError(extractApiMessage(configBody, 'Failed to load configuration.'));
+          return;
+        }
+        const cfg = unwrap<{ importantTopics?: Record<string, string[]>; quizLinks?: Record<string, string> } | null>(configBody);
         setImportantTopics(cfg?.importantTopics ?? {});
         setQuizLinks(cfg?.quizLinks ?? {});
       } catch {

@@ -11,7 +11,8 @@ import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Unauthorized teacher access.', requestId);

@@ -985,6 +985,7 @@ export async function listStudentGrades(input: {
   studentId: string;
   rollCode?: string;
   schoolId: string;
+  includeAll?: boolean;
 }): Promise<Array<{
   submissionId: string;
   packId: string;
@@ -1021,9 +1022,11 @@ export async function listStudentGrades(input: {
   const all = [...byStudent, ...byRollCode];
   const dedup = new Map<string, SubmissionRow>();
   for (const row of all) dedup.set(row.id, row);
-  const scopedSubmissions = [...dedup.values()].filter(
-    (row) => row.status === 'released' && typeof row.released_at === 'string' && row.released_at.length > 0
-  );
+  const scopedSubmissions = input.includeAll
+    ? [...dedup.values()]
+    : [...dedup.values()].filter(
+        (row) => row.status === 'released' && typeof row.released_at === 'string' && row.released_at.length > 0
+      );
   if (scopedSubmissions.length === 0) return [];
   const packIds = [...new Set(scopedSubmissions.map((row) => row.pack_id))];
   const packs = await supabaseSelect<AssignmentPackRow>(TABLES.assignmentPacks, {
@@ -1040,7 +1043,7 @@ export async function listStudentGrades(input: {
       const pack = packMap.get(row.pack_id);
       if (!pack) return null;
       const score = parseGradePercent(row);
-      if (score === null) return null;
+      if (score === null && !input.includeAll) return null;
       return {
         submissionId: row.id,
         packId: row.pack_id,
@@ -1048,7 +1051,7 @@ export async function listStudentGrades(input: {
         subject: pack.subject,
         classLevel: toClassLevel(pack.class_level) ?? 12,
         section: pack.section ?? undefined,
-        score,
+        score: score ?? 0,
         status: row.status,
         releasedAt: row.released_at ?? undefined,
         createdAt: row.created_at,

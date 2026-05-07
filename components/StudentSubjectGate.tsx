@@ -10,8 +10,6 @@ interface StudentSubjectGateProps {
 
 interface StudentSessionPayload {
   studentId?: string;
-  classLevel?: number;
-  enrolledSubjects?: string[];
 }
 
 export default function StudentSubjectGate({ subject, children }: StudentSubjectGateProps) {
@@ -25,8 +23,8 @@ export default function StudentSubjectGate({ subject, children }: StudentSubject
         if (!response.ok) return null;
         const payload = await response.json().catch(() => null);
         const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
-          ? payload.data as Record<string, unknown>
-          : payload as Record<string, unknown> | null;
+          ? (payload.data as Record<string, unknown>)
+          : (payload as Record<string, unknown> | null);
         return data as StudentSessionPayload | null;
       })
       .then((session) => {
@@ -36,22 +34,8 @@ export default function StudentSubjectGate({ subject, children }: StudentSubject
           setLoading(false);
           return;
         }
-        // Class 10 has public subject scope — never restrict
-        if (session.classLevel === 10) {
-          setDenied(false);
-          setLoading(false);
-          return;
-        }
-        const enrolledSubjects = Array.isArray(session.enrolledSubjects)
-          ? session.enrolledSubjects.filter((item): item is string => typeof item === 'string')
-          : [];
-        // No enrolled subjects assigned yet — don't block access
-        if (enrolledSubjects.length === 0) {
-          setDenied(false);
-          setLoading(false);
-          return;
-        }
-        setDenied(!enrolledSubjects.includes(subject));
+        // Enrollment-based chapter blocking is disabled for student UX.
+        setDenied(false);
         setLoading(false);
       })
       .catch(() => {

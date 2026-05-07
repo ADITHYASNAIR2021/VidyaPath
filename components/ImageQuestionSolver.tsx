@@ -85,12 +85,12 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
 
   if (aiEnabled === false) {
     return (
-      <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
-        <h2 className="font-fraunces text-lg font-bold text-navy-700 flex items-center gap-2">
+      <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <h2 className="flex items-center gap-2 font-fraunces text-lg font-bold text-navy-700 dark:text-slate-100">
           <Camera className="w-5 h-5 text-saffron-500" />
           Image Question Solver
         </h2>
-        <p className="mt-2 text-sm text-[#4A4A6A]">
+        <p className="mt-2 text-sm text-[#4A4A6A] dark:text-slate-300">
           Login with any account to unlock image question solving.
         </p>
         <div className="mt-3">
@@ -159,17 +159,17 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
-      <h2 className="font-fraunces text-lg font-bold text-navy-700 flex items-center gap-2">
+    <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <h2 className="flex items-center gap-2 font-fraunces text-lg font-bold text-navy-700 dark:text-slate-100">
         <Camera className="w-5 h-5 text-saffron-500" />
         Image Question Solver
       </h2>
-      <p className="text-xs text-[#6A6A84] mt-1">
+      <p className="mt-1 text-xs text-[#6A6A84] dark:text-slate-300">
         Upload an NCERT/board question photo for {subject} Class {classLevel} - {chapterTitle}.
       </p>
 
       <div className="mt-4 space-y-3">
-        <label className="flex items-center justify-center gap-2 border border-dashed border-[#D9D3C7] bg-[#FDFAF6] rounded-xl px-4 py-4 text-sm text-[#5A5570] cursor-pointer hover:border-saffron-300 transition-colors">
+        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[#D9D3C7] bg-[#FDFAF6] px-4 py-4 text-sm text-[#5A5570] transition-colors hover:border-saffron-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
           <UploadCloud className="w-4 h-4 text-saffron-500" />
           Upload question image
           <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} aria-label="Upload question image" />
@@ -181,7 +181,7 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
             alt="Question preview"
             width={1024}
             height={576}
-            className="w-full rounded-xl border border-[#E8E4DC] max-h-72 object-contain bg-white"
+            className="max-h-72 w-full rounded-xl border border-[#E8E4DC] bg-white object-contain dark:border-slate-700 dark:bg-slate-900"
             unoptimized
           />
         )}
@@ -191,7 +191,7 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
           onChange={(event) => setPrompt(event.target.value)}
           rows={2}
           placeholder="Optional: e.g., solve for boards with full steps and final answer format."
-          className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-saffron-400"
+          className="w-full rounded-xl border border-[#E8E4DC] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-saffron-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-400"
         />
 
         <button
@@ -206,21 +206,21 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
       </div>
 
       {error && (
-        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/20 dark:text-rose-100" role="alert">
           {error}
         </div>
       )}
 
       {result && (
-        <div className="mt-4 rounded-2xl border border-[#E8E4DC] bg-[#FCFBF8] p-4 space-y-3">
+        <div className="mt-4 space-y-3 rounded-2xl border border-[#E8E4DC] bg-[#FCFBF8] p-4 dark:border-slate-700 dark:bg-slate-950">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-sm font-semibold text-navy-700">Detected topic: {result.detectedTopic}</p>
+            <p className="text-sm font-semibold text-navy-700 dark:text-slate-100">Detected topic: {result.detectedTopic}</p>
             <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${confidenceStyle}`}>
               Confidence: {result.confidence}
             </span>
           </div>
           <div className="space-y-2">{renderMathAwareText(result.solution)}</div>
-          <p className="text-xs text-[#6A6A84] border-t border-[#E8E4DC] pt-2">
+          <p className="border-t border-[#E8E4DC] pt-2 text-xs text-[#6A6A84] dark:border-slate-700 dark:text-slate-300">
             Next step: {result.followUp}
           </p>
         </div>

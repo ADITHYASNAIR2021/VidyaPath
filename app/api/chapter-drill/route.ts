@@ -15,17 +15,22 @@ import {
 } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
+import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
+import { getFewShotExamples } from '@/lib/ai/pyq-examples';
+import { verifySelfCheck } from '@/lib/ai/question-verifier';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { chapterDrillRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { logger } from '@/lib/logger';
 
 interface ChapterDrillRequest {
   chapterId: string;
   questionCount: number;
   difficulty: string;
+  questionType: 'mcq' | 'short' | 'long' | 'mixed';
 }
 
 function parseRequest(body: unknown): ChapterDrillRequest | null {
@@ -39,12 +44,82 @@ function parseRequest(body: unknown): ChapterDrillRequest | null {
   const difficulty = typeof (body as Record<string, unknown>).difficulty === 'string'
     ? String((body as Record<string, unknown>).difficulty).trim()
     : 'mixed';
-  return { chapterId, questionCount, difficulty: difficulty || 'mixed' };
+  const rawQuestionType = typeof (body as Record<string, unknown>).questionType === 'string'
+    ? String((body as Record<string, unknown>).questionType).trim().toLowerCase()
+    : 'mixed';
+  const questionType: 'mcq' | 'short' | 'long' | 'mixed' =
+    rawQuestionType === 'mcq' || rawQuestionType === 'short' || rawQuestionType === 'long' || rawQuestionType === 'mixed'
+      ? rawQuestionType
+      : 'mixed';
+  return { chapterId, questionCount, difficulty: difficulty || 'mixed', questionType };
 }
 
-function buildFallbackDrill(chapterId: string, questionCount: number, difficulty: string): ChapterDrillResponse | null {
+function allocateQuestionCounts(total: number, questionType: 'mcq' | 'short' | 'long' | 'mixed'): {
+  mcqCount: number;
+  shortCount: number;
+  longCount: number;
+} {
+  if (questionType === 'mcq') return { mcqCount: total, shortCount: 0, longCount: 0 };
+  if (questionType === 'short') return { mcqCount: 0, shortCount: total, longCount: 0 };
+  if (questionType === 'long') return { mcqCount: 0, shortCount: 0, longCount: total };
+  if (total <= 1) return { mcqCount: 1, shortCount: 0, longCount: 0 };
+  if (total === 2) return { mcqCount: 1, shortCount: 1, longCount: 0 };
+  if (total === 3) return { mcqCount: 1, shortCount: 1, longCount: 1 };
+
+  let mcqCount = Math.max(1, Math.round(total * 0.5));
+  let shortCount = Math.max(1, Math.round(total * 0.3));
+  let longCount = Math.max(1, total - mcqCount - shortCount);
+
+  let sum = mcqCount + shortCount + longCount;
+  while (sum > total) {
+    if (mcqCount >= shortCount && mcqCount >= longCount && mcqCount > 1) {
+      mcqCount -= 1;
+    } else if (shortCount >= longCount && shortCount > 1) {
+      shortCount -= 1;
+    } else if (longCount > 1) {
+      longCount -= 1;
+    } else if (mcqCount > 0) {
+      mcqCount -= 1;
+    } else {
+      break;
+    }
+    sum = mcqCount + shortCount + longCount;
+  }
+  while (sum < total) {
+    mcqCount += 1;
+    sum += 1;
+  }
+
+  return { mcqCount, shortCount, longCount };
+}
+
+function buildShortAnswerPrompt(topic: string, chapterTitle: string, variant = 0): string {
+  const stems = [
+    `Write a concise 2-3 mark answer on "${topic}" from ${chapterTitle}. Include definition, key point, and one application/example.`,
+    `For ${chapterTitle}, explain "${topic}" in a board-style short answer (2-3 marks) with one textbook example.`,
+    `Give a short-answer response for "${topic}" from ${chapterTitle}: definition + core idea + one use-case.`,
+  ];
+  return stems[variant % stems.length];
+}
+
+function buildLongAnswerPrompt(topic: string, chapterTitle: string, variant = 0): string {
+  const stems = [
+    `Write a board-style 5-mark long answer on "${topic}" from ${chapterTitle}. Include structured steps, core concept/formula, and a concluding statement.`,
+    `Prepare a detailed long-answer response (5 marks) for "${topic}" in ${chapterTitle} with explanation, formula/process, and final inference.`,
+    `Draft a full-length board answer for "${topic}" from ${chapterTitle}, covering concept, derivation/process, and exam-ready conclusion.`,
+  ];
+  return stems[variant % stems.length];
+}
+
+function buildFallbackDrill(
+  chapterId: string,
+  questionCount: number,
+  difficulty: string,
+  questionType: 'mcq' | 'short' | 'long' | 'mixed'
+): ChapterDrillResponse | null {
   const chapter = getChapterById(chapterId);
   if (!chapter) return null;
+  const { mcqCount, shortCount, longCount } = allocateQuestionCounts(questionCount, questionType);
   const fromChapter: MCQItem[] = (chapter.quizzes ?? []).map((quiz) => ({
     question: quiz.question,
     options: quiz.options,
@@ -54,7 +129,7 @@ function buildFallbackDrill(chapterId: string, questionCount: number, difficulty
 
   const generated: MCQItem[] = fromChapter.length > 0
     ? fromChapter
-    : Array.from({ length: questionCount }, (_, index) => {
+    : Array.from({ length: Math.max(1, mcqCount) }, (_, index) => {
         const topic = chapter.topics[index % Math.max(1, chapter.topics.length)] ?? chapter.title;
         return {
           question: `Which statement is most accurate for "${topic}" in ${chapter.title}?`,
@@ -70,11 +145,12 @@ function buildFallbackDrill(chapterId: string, questionCount: number, difficulty
       });
 
   const normalized = normalizeMCQs(generated);
-  const expanded = normalized.length >= questionCount
+  const expanded = normalized.length >= mcqCount
     ? normalized
-    : [
+    : mcqCount > 0
+      ? [
         ...normalized,
-        ...Array.from({ length: questionCount - normalized.length }, (_, idx) => {
+        ...Array.from({ length: mcqCount - normalized.length }, (_, idx) => {
           const topic = chapter.topics[idx % Math.max(1, chapter.topics.length)] ?? chapter.title;
           return {
             question: `Board drill check: what is the most important exam angle of "${topic}" in ${chapter.title}?`,
@@ -88,12 +164,34 @@ function buildFallbackDrill(chapterId: string, questionCount: number, difficulty
             explanation: `For ${topic}, prioritize concept + formula + PYQ application.`,
           };
         }),
-      ];
-  const questions = normalizeMCQs(expanded).slice(0, questionCount);
+      ]
+      : [];
+  const questions = mcqCount > 0 ? normalizeMCQs(expanded).slice(0, mcqCount) : [];
+  const shortQuestions = shortCount > 0
+    ? cleanTextList(
+        Array.from({ length: shortCount }, (_, idx) => {
+          const topic = chapter.topics[idx % Math.max(1, chapter.topics.length)] ?? chapter.title;
+          return buildShortAnswerPrompt(topic, chapter.title);
+        }),
+        shortCount
+      )
+    : [];
+  const longQuestions = longCount > 0
+    ? cleanTextList(
+        Array.from({ length: longCount }, (_, idx) => {
+          const topic = chapter.topics[idx % Math.max(1, chapter.topics.length)] ?? chapter.title;
+          return buildLongAnswerPrompt(topic, chapter.title);
+        }),
+        longCount
+      )
+    : [];
   return {
     chapterId: chapter.id,
     difficulty,
+    questionType,
     questions,
+    shortQuestions,
+    longQuestions,
     answerKey: questions.map((item) => item.answer),
     topicCoverage: chapter.topics.slice(0, 10),
     sourceCitations: [],
@@ -113,9 +211,14 @@ function isQuestionAligned(question: string, chapterTitle: string, chapterTopics
   return questionTokens.some((token) => allow.has(token));
 }
 
-function buildGenericQuestion(topic: string, chapterTitle: string): MCQItem {
+function buildGenericQuestion(topic: string, chapterTitle: string, variant = 0): MCQItem {
+  const stems = [
+    `In ${chapterTitle}, which statement about "${topic}" is most exam-relevant?`,
+    `For ${chapterTitle}, what is the most accurate board-level understanding of "${topic}"?`,
+    `Which option best captures the NCERT idea of "${topic}" in ${chapterTitle}?`,
+  ];
   return {
-    question: `In ${chapterTitle}, which statement about "${topic}" is most exam-relevant?`,
+    question: `${stems[variant % stems.length]} (Set ${variant + 1})`,
     options: [
       'Apply concept + formula with correct units/sign convention.',
       'Memorize one definition only and skip applications.',
@@ -125,6 +228,56 @@ function buildGenericQuestion(topic: string, chapterTitle: string): MCQItem {
     answer: 0,
     explanation: `Board scoring improves when ${topic} is solved with concept, formula, and final-unit checks.`,
   };
+}
+
+function ensureExactPromptCount(
+  items: string[],
+  fallbackItems: string[],
+  questionCount: number,
+  chapterTitle: string,
+  chapterTopics: string[],
+  kind: 'short' | 'long'
+): string[] {
+  const cleaned = cleanTextList(items, questionCount);
+  const output = [...cleaned];
+  const used = new Set(output.map((item) => item.toLowerCase()));
+  for (const item of cleanTextList(fallbackItems, questionCount)) {
+    if (output.length >= questionCount) break;
+    const key = item.toLowerCase();
+    if (used.has(key)) continue;
+    output.push(item);
+    used.add(key);
+  }
+
+  let cursor = 0;
+  while (output.length < questionCount && cursor < questionCount * 10) {
+    const topic = chapterTopics[cursor % Math.max(1, chapterTopics.length)] ?? chapterTitle;
+    const generated = kind === 'long'
+      ? buildLongAnswerPrompt(topic, chapterTitle, cursor)
+      : buildShortAnswerPrompt(topic, chapterTitle, cursor);
+    const key = generated.toLowerCase();
+    if (!used.has(key)) {
+      output.push(generated);
+      used.add(key);
+    }
+    cursor += 1;
+  }
+
+  if (output.length < questionCount) {
+    for (let index = output.length; index < questionCount; index += 1) {
+      const topic = chapterTopics[index % Math.max(1, chapterTopics.length)] ?? chapterTitle;
+      const forced = kind === 'long'
+        ? `Long-answer checkpoint ${index + 1}: Explain "${topic}" from ${chapterTitle} with structure, concept, and conclusion.`
+        : `Short-answer checkpoint ${index + 1}: State "${topic}" from ${chapterTitle} with definition and one application.`;
+      const key = forced.toLowerCase();
+      if (!used.has(key)) {
+        output.push(forced);
+        used.add(key);
+      }
+    }
+  }
+
+  return cleanTextList(output, questionCount);
 }
 
 function ensureExactDrillCount(
@@ -147,9 +300,9 @@ function ensureExactDrillCount(
   }
 
   let cursor = 0;
-  while (output.length < questionCount) {
+  while (output.length < questionCount && cursor < questionCount * 10) {
     const topic = chapterTopics[cursor % Math.max(1, chapterTopics.length)] ?? chapterTitle;
-    const generated = buildGenericQuestion(topic, chapterTitle);
+    const generated = buildGenericQuestion(topic, chapterTitle, cursor);
     const key = generated.question.trim().toLowerCase();
     if (!used.has(key)) {
       output.push(generated);
@@ -158,13 +311,33 @@ function ensureExactDrillCount(
     cursor += 1;
   }
 
+  if (output.length < questionCount) {
+    for (let index = output.length; index < questionCount; index += 1) {
+      const topic = chapterTopics[index % Math.max(1, chapterTopics.length)] ?? chapterTitle;
+      const forced = buildGenericQuestion(topic, chapterTitle, 100 + index);
+      const key = forced.question.trim().toLowerCase();
+      if (!used.has(key)) {
+        output.push(forced);
+        used.add(key);
+      }
+    }
+  }
+
   return normalizeMCQs(output).slice(0, questionCount);
+}
+
+function isQuestionStronglyGrounded(item: MCQItem): boolean {
+  const meta = item.ragMeta;
+  if (!meta) return true;
+  if ((meta.qualityScore ?? 0) >= 55) return true;
+  if (Array.isArray(meta.sourceMix) && meta.sourceMix.length > 0) return true;
+  return false;
 }
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
@@ -241,7 +414,8 @@ export async function POST(req: Request) {
       topK: 6,
     });
 
-    const fallback = buildFallbackDrill(parsed.chapterId, parsed.questionCount, parsed.difficulty);
+    const { mcqCount, shortCount, longCount } = allocateQuestionCounts(parsed.questionCount, parsed.questionType);
+    const fallback = buildFallbackDrill(parsed.chapterId, parsed.questionCount, parsed.difficulty, parsed.questionType);
     if (!fallback) {
       return errorJson({
         requestId,
@@ -262,17 +436,31 @@ export async function POST(req: Request) {
       answerKey: fallbackQuestions.map((item) => item.answer),
     };
 
-    const prompt = `Create a chapter-wise CBSE drill set.
-Chapter: ${chapter.title} (${chapter.subject}, Class ${chapter.classLevel}, id ${chapter.id})
-Question count: ${parsed.questionCount}
+    const textbookCount = contextPack.snippets.filter((s) => s.sourceType === 'textbook').length;
+    const paperCount = contextPack.snippets.filter((s) => s.sourceType !== 'textbook').length;
+    const topicList = chapter.topics.slice(0, 12).join(', ');
+    const prompt = `Create a CBSE board-style drill for:
+Chapter: "${chapter.title}" (${chapter.subject}, Class ${chapter.classLevel})
+Topics to cover: ${topicList}
+Total questions: MCQ ${mcqCount}, Short ${shortCount}, Long ${longCount}
 Difficulty: ${parsed.difficulty}
-PYQ signal: ${pyq ? `avg marks ${pyq.avgMarks}, important topics ${pyq.importantTopics.join(', ')}` : 'No PYQ record'}
+PYQ signal: ${pyq ? `avg marks ${pyq.avgMarks} | top topics: ${pyq.importantTopics.slice(0, 6).join(', ')}` : 'No PYQ record'}
+Context available: ${textbookCount} NCERT textbook + ${paperCount} board-paper snippets
+
+GROUNDING REQUIREMENT:
+- MCQ distractors must use NCERT-language errors (not generic options).
+- Short/Long questions must reference specific chapter concepts, reactions, or diagrams from the context.
+- PYQ topics must appear in at least 50% of questions.
+- Cover every topic listed above across the question set.
 
 Return ONLY JSON:
 {
   "chapterId":"${chapter.id}",
   "difficulty":"${parsed.difficulty}",
+  "questionType":"${parsed.questionType}",
   "questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}],
+  "shortQuestions":["..."],
+  "longQuestions":["..."],
   "answerKey":[0,1,2],
   "topicCoverage":["..."],
   "sourceCitations":[{"sourcePath":"...","year":2024}]
@@ -283,8 +471,10 @@ Return ONLY JSON:
       chapterId: chapter.id,
       difficulty: parsed.difficulty,
     });
+    const subjectAddendum = buildSubjectSystemPromptAddendum(chapter.subject, chapter.classLevel);
+    const fewShotBlock = getFewShotExamples(chapter.subject, chapter.classLevel);
     const promptWithVariation = `${prompt}
-${buildVariationInstruction(variation)}`;
+${buildVariationInstruction(variation)}${fewShotBlock ? `\n\n${fewShotBlock}` : ''}`;
 
     try {
       const { data, result } = await generateTaskJson<ChapterDrillResponse>({
@@ -294,50 +484,110 @@ ${buildVariationInstruction(variation)}`;
         chapterId: chapter.id,
         difficulty: parsed.difficulty,
         diversityKey: variation.diversityKey,
-        systemPrompt: `You are VidyaAI Chapter Drill Engine.
-- Generate board-style chapter-targeted practice questions.
-- Ensure options are plausible and non-overlapping.
-- Keep explanations concise and exam-oriented.
-- Vary wording and distractor logic across runs.
-- Output JSON only.`,
+        systemPrompt: `You are VidyaAI Chapter Drill Engine — generating authentic CBSE board-exam questions.
+
+GROUNDING (MANDATORY): Use the "Retrieved Paper Context" snippets as your PRIMARY source. Every question must be directly derived from a concept, law, formula, chemical reaction, diagram label, biological process, or numerical example present in those snippets or the NCERT chapter.
+
+FOR MCQs — CBSE board question taxonomy (use this mix):
+• Type 1 – DIRECT RECALL (30%): "Define / Name / State the law / Write the formula" style stem; tests exact NCERT language
+• Type 2 – APPLICATION (35%): "Calculate / Find / Why does X happen / Predict the product of" — apply the concept to a new situation
+• Type 3 – ASSERTION-REASON (15%): "Assertion: [A]. Reason: [R]." with standard CBSE 4-option format
+  (a) Both A and R are true and R is the correct explanation of A
+  (b) Both A and R are true but R is not the correct explanation of A
+  (c) A is true but R is false  (d) A is false but R is true
+• Type 4 – CASE/DATA-BASED (20%): 1-2 sentence scenario, table, or observation → 1 MCQ with NCERT-grounded distractors
+
+DISTRACTOR QUALITY: Use plausible NCERT-language errors — wrong formula sign, reversed cause-effect, adjacent-chapter confusion, common student misconception. Never use nonsense or generic fillers.
+EXPLANATIONS: Cite the specific law, formula, or mechanism in 1–2 sentences. Be precise.
+
+FOR SHORT QUESTIONS (2-3 marks): "State/Explain/Differentiate/Write with equation" — exact CBSE 3-mark question patterns.
+FOR LONG QUESTIONS (5 marks): "Explain with labelled diagram / Derive the expression / Write the mechanism with equation / Compare with examples" — authentic 5-mark board format.
+
+Match the split EXACTLY: MCQ ${mcqCount}, Short ${shortCount}, Long ${longCount}.
+${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON. No markdown fences.`,
         userPrompt: promptWithVariation,
         temperature: 0.18,
         maxOutputTokens: projectedOutputTokens,
         validate: isChapterDrillResponse,
       });
 
-      const aiQuestions = normalizeMCQs(data.questions).filter((item) =>
+      const rawAiQuestions = normalizeMCQs(data.questions).filter((item) =>
         isQuestionAligned(item.question, chapter.title, chapter.topics)
       );
+      const aiQuestions = await verifySelfCheck(rawAiQuestions, contextPack.snippets);
       const usedQuestionText = new Set(aiQuestions.map((item) => item.question.trim().toLowerCase()));
       const toppedUp = [...aiQuestions];
       for (const fallbackQuestion of fallback.questions) {
-        if (toppedUp.length >= parsed.questionCount) break;
+        if (toppedUp.length >= mcqCount) break;
         const key = fallbackQuestion.question.trim().toLowerCase();
         if (usedQuestionText.has(key)) continue;
         toppedUp.push(fallbackQuestion);
         usedQuestionText.add(key);
       }
-      const questions = ensureExactDrillCount(
-        toppedUp,
-        annotatedFallback.questions,
-        chapter.title,
-        chapter.topics,
-        parsed.questionCount
-      );
-      if (questions.length === 0) return dataJson({ requestId, data: annotatedFallback });
-      const annotatedQuestions = annotateQuestionsWithRagMeta(questions, {
-        chapterTitle: chapter.title,
-        chapterTopics: chapter.topics,
-        pyqTopics: pyq?.importantTopics ?? [],
-        contextSnippets: contextPack.snippets,
-      });
+      const questions = mcqCount > 0
+        ? ensureExactDrillCount(
+            toppedUp,
+            annotatedFallback.questions,
+            chapter.title,
+            chapter.topics,
+            mcqCount
+          )
+        : [];
+      const annotatedQuestions = questions.length > 0
+        ? annotateQuestionsWithRagMeta(questions, {
+            chapterTitle: chapter.title,
+            chapterTopics: chapter.topics,
+            pyqTopics: pyq?.importantTopics ?? [],
+            contextSnippets: contextPack.snippets,
+          })
+        : [];
+      const groundedQuestionSeed = annotatedQuestions.filter(isQuestionStronglyGrounded);
+      const hardenedQuestions = mcqCount > 0
+        ? ensureExactDrillCount(
+            groundedQuestionSeed.length > 0 ? groundedQuestionSeed : annotatedQuestions,
+            annotatedFallback.questions,
+            chapter.title,
+            chapter.topics,
+            mcqCount
+          )
+        : [];
+      const finalAnnotatedQuestions = hardenedQuestions.length > 0
+        ? annotateQuestionsWithRagMeta(hardenedQuestions, {
+            chapterTitle: chapter.title,
+            chapterTopics: chapter.topics,
+            pyqTopics: pyq?.importantTopics ?? [],
+            contextSnippets: contextPack.snippets,
+          })
+        : [];
+      const shortQuestions = shortCount > 0
+        ? ensureExactPromptCount(
+            Array.isArray(data.shortQuestions) ? data.shortQuestions : [],
+            Array.isArray(fallback.shortQuestions) ? fallback.shortQuestions : [],
+            shortCount,
+            chapter.title,
+            chapter.topics,
+            'short'
+          )
+        : [];
+      const longQuestions = longCount > 0
+        ? ensureExactPromptCount(
+            Array.isArray(data.longQuestions) ? data.longQuestions : [],
+            Array.isArray(fallback.longQuestions) ? fallback.longQuestions : [],
+            longCount,
+            chapter.title,
+            chapter.topics,
+            'long'
+          )
+        : [];
 
       const response: ChapterDrillResponse = {
         chapterId: chapter.id,
         difficulty: stripSourceTags(data.difficulty || parsed.difficulty),
-        questions: annotatedQuestions,
-        answerKey: annotatedQuestions.map((item) => item.answer),
+        questionType: parsed.questionType,
+        questions: finalAnnotatedQuestions,
+        shortQuestions,
+        longQuestions,
+        answerKey: finalAnnotatedQuestions.map((item) => item.answer),
         topicCoverage: cleanTextList(
           Array.isArray(data.topicCoverage) ? data.topicCoverage : fallback.topicCoverage,
           12
@@ -346,6 +596,12 @@ ${buildVariationInstruction(variation)}`;
           ...contextPack.snippets.map((snippet) => ({ sourcePath: snippet.sourcePath, year: snippet.year })),
           ...(data.sourceCitations ?? []),
         ]),
+        grounding: {
+          usedPgvector: contextPack.usedPgvector,
+          usedOnDemandFallback: contextPack.usedOnDemandFallback,
+          retrieval: contextPack.retrievalMeta,
+          strongGroundedCount: finalAnnotatedQuestions.filter(isQuestionStronglyGrounded).length,
+        },
       };
 
       await logAiUsage({
@@ -361,11 +617,11 @@ ${buildVariationInstruction(variation)}`;
       return dataJson({ requestId, data: response });
     } catch (aiError) {
       const reason = aiError instanceof Error ? aiError.message : String(aiError);
-      console.warn(`[chapter-drill] AI fallback triggered: ${reason}`);
+      logger.warn({ reason }, '[chapter-drill] AI fallback triggered');
       return dataJson({ requestId, data: annotatedFallback });
     }
   } catch (error) {
-    console.error('[chapter-drill] error', error);
+    logger.error({ err: error }, '[chapter-drill] error');
     const message = error instanceof Error ? error.message : 'Failed to create chapter drill.';
     return errorJson({
       requestId,

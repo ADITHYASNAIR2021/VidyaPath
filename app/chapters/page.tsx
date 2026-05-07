@@ -21,7 +21,6 @@ import { ALL_CHAPTERS } from '@/lib/data';
 import type { Subject, ClassLevel } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { fetchClientStudentSession } from '@/lib/client-student-session';
-import { getSubjectsForAcademicTrack, type AcademicStream } from '@/lib/academic-taxonomy';
 import ChapterCard from '@/components/ChapterCard';
 import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
 import { useProgressStore } from '@/lib/store';
@@ -47,27 +46,27 @@ const CLASSES: { label: string; value: ClassLevel | 0 }[] = [
 ];
 
 const SUBJECT_PILL_STYLES: Record<string, string> = {
-  All: 'bg-navy-700 text-white border-navy-700',
-  Physics: 'bg-sky-600 text-white border-sky-600',
-  Chemistry: 'bg-emerald-600 text-white border-emerald-600',
-  Biology: 'bg-green-600 text-white border-green-600',
-  Math: 'bg-purple-600 text-white border-purple-600',
-  Accountancy: 'bg-amber-600 text-white border-amber-600',
-  'Business Studies': 'bg-indigo-600 text-white border-indigo-600',
-  Economics: 'bg-rose-600 text-white border-rose-600',
-  'English Core': 'bg-cyan-600 text-white border-cyan-600',
+  All: 'bg-gradient-to-br from-navy-600 to-navy-800 text-white border-navy-700 shadow-sm',
+  Physics: 'bg-gradient-to-br from-sky-500 to-sky-700 text-white border-sky-600 shadow-sm',
+  Chemistry: 'bg-gradient-to-br from-emerald-500 to-emerald-700 text-white border-emerald-600 shadow-sm',
+  Biology: 'bg-gradient-to-br from-green-500 to-green-700 text-white border-green-600 shadow-sm',
+  Math: 'bg-gradient-to-br from-purple-500 to-purple-700 text-white border-purple-600 shadow-sm',
+  Accountancy: 'bg-gradient-to-br from-amber-500 to-amber-700 text-white border-amber-600 shadow-sm',
+  'Business Studies': 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white border-indigo-600 shadow-sm',
+  Economics: 'bg-gradient-to-br from-rose-500 to-rose-700 text-white border-rose-600 shadow-sm',
+  'English Core': 'bg-gradient-to-br from-cyan-500 to-cyan-700 text-white border-cyan-600 shadow-sm',
 };
 
 const SUBJECT_PILL_INACTIVE: Record<string, string> = {
-  All: 'bg-white dark:bg-gray-950 text-[#4A4A6A] dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-navy-300 dark:hover:border-gray-500',
-  Physics: 'bg-white dark:bg-gray-950 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800 hover:border-sky-400',
-  Chemistry: 'bg-white dark:bg-gray-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:border-emerald-400',
-  Biology: 'bg-white dark:bg-gray-950 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800 hover:border-green-400',
-  Math: 'bg-white dark:bg-gray-950 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 hover:border-purple-400',
-  Accountancy: 'bg-white dark:bg-gray-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:border-amber-400',
-  'Business Studies': 'bg-white dark:bg-gray-950 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:border-indigo-400',
-  Economics: 'bg-white dark:bg-gray-950 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800 hover:border-rose-400',
-  'English Core': 'bg-white dark:bg-gray-950 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800 hover:border-cyan-400',
+  All: 'bg-white/85 dark:bg-slate-950/70 text-[#4A4A6A] dark:text-gray-200 border-gray-200 dark:border-slate-700 hover:border-navy-300 dark:hover:border-slate-500',
+  Physics: 'bg-white/85 dark:bg-slate-950/70 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800 hover:border-sky-400',
+  Chemistry: 'bg-white/85 dark:bg-slate-950/70 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:border-emerald-400',
+  Biology: 'bg-white/85 dark:bg-slate-950/70 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800 hover:border-green-400',
+  Math: 'bg-white/85 dark:bg-slate-950/70 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 hover:border-purple-400',
+  Accountancy: 'bg-white/85 dark:bg-slate-950/70 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:border-amber-400',
+  'Business Studies': 'bg-white/85 dark:bg-slate-950/70 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:border-indigo-400',
+  Economics: 'bg-white/85 dark:bg-slate-950/70 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800 hover:border-rose-400',
+  'English Core': 'bg-white/85 dark:bg-slate-950/70 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800 hover:border-cyan-400',
 };
 
 function ChaptersContent() {
@@ -83,11 +82,8 @@ function ChaptersContent() {
   const [studentSession, setStudentSession] = useState<{
     isStudent: boolean;
     classLevel?: ClassLevel;
-    stream?: AcademicStream;
-    enrolledSubjects: Subject[];
   }>({
     isStudent: false,
-    enrolledSubjects: [],
   });
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -109,13 +105,10 @@ function ChaptersContent() {
           setStudentSession({
             isStudent: true,
             classLevel: sessionClass,
-            stream: session.stream,
-            enrolledSubjects: session.enrolledSubjects,
           });
         } else {
           setStudentSession({
             isStudent: false,
-            enrolledSubjects: [],
           });
         }
       })
@@ -123,7 +116,6 @@ function ChaptersContent() {
         if (!active) return;
         setStudentSession({
           isStudent: false,
-          enrolledSubjects: [],
         });
       })
       .finally(() => {
@@ -133,23 +125,6 @@ function ChaptersContent() {
       active = false;
     };
   }, [initialClass]);
-
-  const enrolledSubjectSet = useMemo(() => {
-    if (!studentSession.isStudent) return null;
-    if (studentSession.classLevel === 10) {
-      // Class 10 uses fixed public subject scope; no enrollment gating.
-      return null;
-    }
-    if (studentSession.enrolledSubjects.length > 0) {
-      return new Set<Subject>(studentSession.enrolledSubjects);
-    }
-    if (studentSession.classLevel === 12) {
-      return new Set<Subject>(
-        getSubjectsForAcademicTrack(studentSession.classLevel, studentSession.stream) as Subject[]
-      );
-    }
-    return null;
-  }, [studentSession.classLevel, studentSession.enrolledSubjects, studentSession.isStudent, studentSession.stream]);
 
   const classTabs = useMemo(() => {
     if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
@@ -161,13 +136,6 @@ function ChaptersContent() {
   const availableSubjects = useMemo(() => {
     const classScoped = ALL_CHAPTERS.filter((chapter) => (selectedClass === 0 ? chapter.classLevel !== 11 : chapter.classLevel === selectedClass));
     const subjectSet = new Set<Subject>(classScoped.map((chapter) => chapter.subject));
-    if (enrolledSubjectSet) {
-      for (const subject of Array.from(subjectSet)) {
-        if (!enrolledSubjectSet.has(subject)) {
-          subjectSet.delete(subject);
-        }
-      }
-    }
     if (selectedClass === 10) {
       for (const subject of Array.from(subjectSet)) {
         if (!CLASS10_PUBLIC_SUBJECTS.has(subject)) {
@@ -176,7 +144,7 @@ function ChaptersContent() {
       }
     }
     return SUBJECTS.filter((item) => item.value === 'All' || subjectSet.has(item.value as Subject));
-  }, [enrolledSubjectSet, selectedClass]);
+  }, [selectedClass]);
 
   useEffect(() => {
     if (selectedSubject === 'All') return;
@@ -232,7 +200,6 @@ function ChaptersContent() {
       if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(ch.subject)) return false;
       if (selectedClass !== 0 && ch.classLevel !== selectedClass) return false;
       if (selectedSubject !== 'All' && ch.subject !== selectedSubject) return false;
-      if (enrolledSubjectSet && !enrolledSubjectSet.has(ch.subject)) return false;
       return true;
     });
 
@@ -241,13 +208,13 @@ function ChaptersContent() {
 
     const filteredBySearch = base.filter((chapter) => searchOrder.has(chapter.id));
     return filteredBySearch.sort((a, b) => (searchOrder.get(a.id) ?? 9999) - (searchOrder.get(b.id) ?? 9999));
-  }, [deferredSearchQuery, enrolledSubjectSet, searchOrder, selectedClass, selectedSubject, studentSession.classLevel, studentSession.isStudent]);
+  }, [deferredSearchQuery, searchOrder, selectedClass, selectedSubject, studentSession.classLevel, studentSession.isStudent]);
 
   const headerScope = useMemo(() => {
     if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
-      return `Class ${studentSession.classLevel} chapter workspace with PYQ insights, NCERT links, and guided practice.`;
+      return `Class ${studentSession.classLevel} chapter library with PYQ insights, NCERT links, and guided practice.`;
     }
-    return 'Class 10 and Class 12 chapter workspace with PYQ insights, NCERT links, and guided practice.';
+    return 'Class 10 and Class 12 chapter library with PYQ insights, NCERT links, and guided practice.';
   }, [studentSession.classLevel, studentSession.isStudent]);
 
   const headerTotalChapters = useMemo(() => {
@@ -255,12 +222,11 @@ function ChaptersContent() {
       return ALL_CHAPTERS.filter((chapter) => {
         if (chapter.classLevel !== studentSession.classLevel) return false;
         if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(chapter.subject)) return false;
-        if (enrolledSubjectSet && !enrolledSubjectSet.has(chapter.subject)) return false;
         return true;
       }).length;
     }
     return ALL_CHAPTERS.length;
-  }, [enrolledSubjectSet, studentSession.classLevel, studentSession.isStudent]);
+  }, [studentSession.classLevel, studentSession.isStudent]);
 
   const studiedInScopeCount = useMemo(() => {
     const allowedIds = new Set(
@@ -268,13 +234,12 @@ function ChaptersContent() {
         if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
           if (chapter.classLevel !== studentSession.classLevel) return false;
           if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(chapter.subject)) return false;
-          if (enrolledSubjectSet && !enrolledSubjectSet.has(chapter.subject)) return false;
         }
         return true;
       }).map((chapter) => chapter.id)
     );
     return studiedChapterIds.filter((id) => allowedIds.has(id)).length;
-  }, [enrolledSubjectSet, studiedChapterIds, studentSession.classLevel, studentSession.isStudent]);
+  }, [studiedChapterIds, studentSession.classLevel, studentSession.isStudent]);
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -308,18 +273,24 @@ function ChaptersContent() {
     };
   };
 
+  const hasActiveFilters = selectedClass !== 0 || selectedSubject !== 'All' || deferredSearchQuery.trim().length > 0;
+
   return (
-    <div className="min-h-screen bg-[#FDFAF6] dark:bg-navy-900 text-[#1C1C2E] dark:text-gray-100">
+    <div className="min-h-screen bg-[#FDFAF6] dark:bg-navy-900 app-shell-bg text-[#1C1C2E] dark:text-gray-100">
       <ScrollToTopOnMount />
       {/* Header */}
-      <div className="bg-gradient-to-br from-navy-700 to-navy-800 text-white px-4 py-10 sm:py-12">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="font-fraunces text-3xl sm:text-4xl font-bold mb-2">Chapter Library</h1>
-          <p className="text-navy-200 text-sm sm:text-base">
+      <div className="relative overflow-hidden bg-gradient-to-br from-navy-700 via-navy-800 to-navy-900 text-white px-4 py-10 sm:py-12">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -top-16 right-[-68px] h-72 w-72 rounded-full bg-sky-400/12 blur-3xl animate-drift" />
+          <div className="absolute -bottom-24 left-[-44px] h-72 w-72 rounded-full bg-saffron-400/12 blur-3xl animate-drift" />
+        </div>
+        <div className="max-w-5xl mx-auto relative z-10">
+          <h1 className="font-fraunces text-3xl sm:text-4xl font-bold mb-2 tracking-tight">Chapter Library</h1>
+          <p className="text-slate-200 text-sm sm:text-base max-w-3xl">
             {headerScope}
           </p>
-          <div className="mt-4 flex items-center gap-4 flex-wrap">
-            <div className="text-sm text-navy-300">
+          <div className="mt-5 flex items-center gap-4 flex-wrap">
+            <div className="text-sm text-slate-300">
               <span className="font-semibold text-white">{headerTotalChapters}</span> chapters total
             </div>
             {studiedChapterIds.length > 0 && (
@@ -336,12 +307,17 @@ function ChaptersContent() {
                 </div>
               </div>
             )}
+            {hasActiveFilters && (
+              <div className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90">
+                Filter mode active
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="sticky top-16 z-30 bg-[#FDFAF6]/95 dark:bg-navy-900/95 backdrop-blur border-b border-[#E8E4DC] dark:border-gray-700 px-3 sm:px-4 py-3">
+      <div className="sticky top-16 z-30 bg-[#FDFAF6]/80 dark:bg-navy-900/85 backdrop-blur border-b border-[#E8E4DC] dark:border-slate-700 px-3 sm:px-4 py-3">
         <div className="max-w-5xl mx-auto space-y-3">
           {/* Search */}
           <div className="relative">
@@ -351,7 +327,7 @@ function ChaptersContent() {
               placeholder="Search chapters, topics, or subjects..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 text-sm bg-white dark:bg-gray-950 border border-[#E8E4DC] dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-saffron-400 focus:border-transparent placeholder:text-[#8A8AAA] dark:placeholder:text-gray-500 text-[#1C1C2E] dark:text-gray-100"
+              className="w-full pl-9 pr-4 py-2.5 text-sm ui-surface-soft rounded-xl focus:outline-none focus:ring-2 focus:ring-saffron-400 focus:border-transparent placeholder:text-[#8A8AAA] dark:placeholder:text-gray-500 text-[#1C1C2E] dark:text-gray-100"
             />
           </div>
 
@@ -364,8 +340,8 @@ function ChaptersContent() {
                 className={clsx(
                   'snap-start flex-shrink-0 text-sm font-medium px-4 py-1.5 rounded-xl border transition-all duration-150',
                   selectedClass === value
-                    ? 'bg-navy-700 text-white border-navy-700 shadow-sm'
-                    : 'bg-white dark:bg-gray-950 text-[#4A4A6A] dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-navy-300 dark:hover:border-gray-500'
+                    ? 'bg-gradient-to-br from-navy-600 to-navy-800 text-white border-navy-700 shadow-sm'
+                    : 'ui-surface-soft text-[#4A4A6A] dark:text-gray-200 border-gray-200 dark:border-slate-700 hover:border-navy-300 dark:hover:border-slate-500'
                 )}
               >
                 {label}
@@ -400,25 +376,40 @@ function ChaptersContent() {
       {/* Results */}
       <div className="max-w-5xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
         {filtered.length === 0 ? (
-          <div className="text-center py-20">
+          <div className="text-center py-20 ui-surface rounded-2xl">
             <Search className="w-12 h-12 text-[#C7C5BD] dark:text-gray-600 mx-auto mb-4" />
             <h3 className="font-fraunces text-xl font-bold text-navy-700 dark:text-gray-100 mb-2">No chapters found</h3>
             <p className="text-[#4A4A6A] dark:text-gray-300">Try changing your filters or search query.</p>
           </div>
         ) : (
           <>
-            <p className="text-sm text-[#8A8AAA] dark:text-gray-400 mb-5">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 ui-surface-soft rounded-xl px-3 py-2.5">
+              <p className="text-sm text-[#8A8AAA] dark:text-gray-300">
               Showing <span className="font-semibold text-navy-700">{filtered.length}</span> chapter
               {filtered.length !== 1 ? 's' : ''}
               {selectedClass !== 0 ? ` - Class ${selectedClass}` : ''}
               {selectedSubject !== 'All' ? ` - ${selectedSubject}` : ''}
               {deferredSearchQuery ? ` for "${deferredSearchQuery}"` : ''}
-            </p>
+              </p>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedClass(studentSession.classLevel === 10 || studentSession.classLevel === 12 ? studentSession.classLevel : 0);
+                    setSelectedSubject('All');
+                    setSearchQuery('');
+                  }}
+                  className="text-xs font-semibold rounded-full border border-slate-300 dark:border-slate-600 bg-white/80 dark:bg-slate-900/70 px-3 py-1 text-slate-600 dark:text-slate-200 hover:border-saffron-400 hover:text-saffron-600 dark:hover:text-saffron-300 transition-colors"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
             {sessionLoaded && studentSession.isStudent && (
               <p className="mb-4 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
                 {studentSession.classLevel === 10
                   ? `Showing Class 10 core subjects: ${Array.from(CLASS10_PUBLIC_SUBJECTS).join(', ')}.`
-                  : `Showing only your enrolled subjects: ${Array.from(enrolledSubjectSet ?? []).join(', ') || 'None assigned yet'}.`}
+                  : 'Showing complete Class 12 chapter library. Use subject filters to narrow down.'}
               </p>
             )}
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">

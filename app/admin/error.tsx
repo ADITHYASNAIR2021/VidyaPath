@@ -1,6 +1,6 @@
 'use client';
 
-import ErrorFallback from '@/components/ErrorFallback';
+import RoleStatusPanel from '@/components/RoleStatusPanel';
 
 export default function AdminError({
   error,
@@ -10,11 +10,13 @@ export default function AdminError({
   reset: () => void;
 }) {
   return (
-    <ErrorFallback
+    <RoleStatusPanel
+      role="admin"
+      variant="error"
       title="Admin Panel Error"
       message={error?.message || 'Admin panel failed to load.'}
       actionLabel="Retry Admin Panel"
-      onRetry={reset}
+      onAction={reset}
     />
   );
 }

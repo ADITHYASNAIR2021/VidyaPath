@@ -1,6 +1,6 @@
 'use client';
 
-import ErrorFallback from '@/components/ErrorFallback';
+import RoleStatusPanel from '@/components/RoleStatusPanel';
 
 export default function StudentError({
   error,
@@ -10,11 +10,13 @@ export default function StudentError({
   reset: () => void;
 }) {
   return (
-    <ErrorFallback
+    <RoleStatusPanel
+      role="student"
+      variant="error"
       title="Student Portal Error"
       message={error?.message || 'Student portal failed to load.'}
       actionLabel="Retry Student Portal"
-      onRetry={reset}
+      onAction={reset}
     />
   );
 }

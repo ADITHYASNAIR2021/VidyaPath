@@ -103,6 +103,14 @@ function unwrap<T>(payload: unknown): T {
   return payload as T;
 }
 
+function extractApiMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object' && 'message' in (payload as Record<string, unknown>)) {
+    const maybe = (payload as Record<string, unknown>).message;
+    if (typeof maybe === 'string' && maybe.trim()) return maybe.trim();
+  }
+  return fallback;
+}
+
 function statusBadge(status: 'active' | 'inactive' | 'archived') {
   return clsx(
     'rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize',
@@ -165,6 +173,7 @@ export default function DeveloperSchoolDetailPage() {
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [adminsError, setAdminsError] = useState('');
 
   // Status toggle state
   const [statusSaving, setStatusSaving] = useState(false);
@@ -207,15 +216,20 @@ export default function DeveloperSchoolDetailPage() {
   async function loadAdmins() {
     if (!schoolId) return;
     setAdminsLoading(true);
+    setAdminsError('');
     try {
       const res = await fetch(`/api/developer/schools/${schoolId}/admins`, { cache: 'no-store' });
       const body = await res.json().catch(() => null);
-      if (res.ok) {
-        const data = unwrap<{ admins: AdminAccount[] }>(body);
-        setAdmins(Array.isArray(data.admins) ? data.admins : []);
+      if (!res.ok) {
+        setAdmins([]);
+        setAdminsError(extractApiMessage(body, 'Failed to load admin accounts.'));
+        return;
       }
+      const data = unwrap<{ admins: AdminAccount[] }>(body);
+      setAdmins(Array.isArray(data.admins) ? data.admins : []);
     } catch {
-      // non-critical — leave empty
+      setAdmins([]);
+      setAdminsError('Failed to load admin accounts.');
     } finally {
       setAdminsLoading(false);
     }
@@ -583,6 +597,9 @@ export default function DeveloperSchoolDetailPage() {
           <h2 className="text-sm font-semibold text-gray-800">Admin Accounts</h2>
           {adminsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-gray-400" />}
         </div>
+        {adminsError ? (
+          <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-800">{adminsError}</div>
+        ) : null}
         {admins.length === 0 ? (
           <p className="px-5 py-6 text-center text-sm text-gray-400">
             {adminsLoading ? 'Loading…' : 'No admin accounts found.'}

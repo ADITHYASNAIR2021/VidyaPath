@@ -14,78 +14,51 @@ import {
 } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
+import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
+import { getFewShotExamples } from '@/lib/ai/pyq-examples';
+import { verifySelfCheck } from '@/lib/ai/question-verifier';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
-import { adaptiveTestRequestSchema } from '@/lib/schemas/ai';
+import { adaptiveTestRequestSchema, type AdaptiveTestRequest } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { logger } from '@/lib/logger';
 
-interface AdaptiveTestRequest {
-  classLevel: 10 | 12;
-  subject: string;
-  chapterIds: string[];
-  difficultyMix?: string;
-  questionCount?: number;
-  mode?: string;
-}
-
-function parseRequest(body: unknown): AdaptiveTestRequest | null {
-  if (!body || typeof body !== 'object') return null;
-  const record = body as Record<string, unknown>;
-  const classLevel = Number(record.classLevel) as 10 | 12;
-  const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
-  const chapterIds = Array.isArray(record.chapterIds)
-    ? record.chapterIds.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean)
-    : [];
-  if ((classLevel !== 10 && classLevel !== 12) || !subject || chapterIds.length === 0) return null;
-
-  return {
-    classLevel,
-    subject,
-    chapterIds,
-    difficultyMix: typeof record.difficultyMix === 'string' ? record.difficultyMix.trim() : '40% easy, 40% medium, 20% hard',
-    questionCount: Number.isFinite(Number(record.questionCount))
-      ? Math.max(3, Math.min(30, Math.round(Number(record.questionCount))))
-      : 10,
-    mode: typeof record.mode === 'string' ? record.mode.trim() : 'board-practice',
-  };
-}
-
-function buildAdaptiveGenericQuestion(subject: string, index: number): MCQItem {
+function buildAdaptiveGenericQuestion(subject: string, chapterTitle: string, topic: string, index: number): MCQItem {
   const variants: MCQItem[] = [
     {
-      question: `In ${subject}, which revision strategy usually improves board scores fastest?`,
+      question: `In ${chapterTitle}, which statement best describes "${topic}"?`,
       options: [
-        'Topic-wise timed practice on weak areas',
-        'Only reading solved answers without writing',
-        'Ignoring PYQs until last week',
-        'Studying random topics without a plan',
+        `It should follow the chapter definition and standard ${subject} conditions.`,
+        'It is solved mainly by exam strategy tricks rather than concept.',
+        'It belongs outside the syllabus of this chapter.',
+        'It never appears in board-level conceptual questions.',
       ],
       answer: 0,
-      explanation: 'Timed weak-area practice gives the quickest improvement in exam performance.',
+      explanation: `For ${topic}, start from NCERT definition and chapter conditions before applying it in questions.`,
     },
     {
-      question: `What is the most reliable way to reduce avoidable mistakes in ${subject}?`,
+      question: `Which option is the most board-relevant understanding of "${topic}" in ${chapterTitle}?`,
       options: [
-        'Maintain an error log and re-attempt similar questions',
-        'Skip post-test review to save time',
-        'Memorize options without understanding',
-        'Attempt only easy questions',
+        `A precise concept statement with correct ${subject} terminology and constraints.`,
+        'A memorized one-line trick without conceptual basis.',
+        'A generic exam tactic unrelated to the chapter content.',
+        'A random assumption not supported by textbook content.',
       ],
       answer: 0,
-      explanation: 'Error logs and targeted re-attempts reduce repeated mistakes.',
+      explanation: `Board answers on ${topic} are strongest when concept and chapter language are both accurate.`,
     },
     {
-      question: `For mixed-difficulty ${subject} practice, the best approach is:`,
+      question: `For "${topic}" questions in ${chapterTitle}, the best first step is to:`,
       options: [
-        'Start medium, then hard, then recap easy traps',
-        'Only hard questions from day one',
-        'Only easy questions throughout',
-        'No revision after test attempts',
+        `Identify the governing ${subject} principle from the chapter and apply it to the given case.`,
+        'Start with time-management tips before reading the concept.',
+        'Ignore definitions and directly guess from options.',
+        'Use only elimination without understanding the topic.',
       ],
       answer: 0,
-      explanation: 'A balanced progression improves accuracy and confidence sustainably.',
+      explanation: `The reliable path is concept-first: map the question to the chapter principle and then solve.`,
     },
   ];
   return variants[index % variants.length];
@@ -94,9 +67,21 @@ function buildAdaptiveGenericQuestion(subject: string, index: number): MCQItem {
 function ensureAdaptiveQuestionCount(questions: MCQItem[], req: AdaptiveTestRequest): MCQItem[] {
   const target = Math.max(3, Math.min(30, req.questionCount ?? 10));
   const output = normalizeMCQs(questions).slice(0, target);
+  const selectedChapters = ALL_CHAPTERS.filter((chapter) => req.chapterIds.includes(chapter.id));
+  const topicPool = selectedChapters.flatMap((chapter) =>
+    (chapter.topics ?? []).map((topic) => ({ chapterTitle: chapter.title, topic }))
+  );
   let cursor = 0;
   while (output.length < target) {
-    output.push(buildAdaptiveGenericQuestion(req.subject, cursor));
+    const selected = topicPool[cursor % Math.max(1, topicPool.length)];
+    output.push(
+      buildAdaptiveGenericQuestion(
+        req.subject,
+        selected?.chapterTitle ?? `${req.subject} chapter`,
+        selected?.topic ?? `${req.subject} core concept`,
+        cursor
+      )
+    );
     cursor += 1;
   }
   return normalizeMCQs(output).slice(0, target);
@@ -119,15 +104,15 @@ function buildFallbackQuestions(req: AdaptiveTestRequest): AdaptiveTestResponse 
     ? normalizeMCQs(pool)
     : [
         {
-          question: `Which area should be prioritized first for ${req.subject} improvement?`,
+          question: `In ${req.subject}, which choice is most aligned with textbook-grounded problem solving?`,
           options: [
-            'Low-frequency trivia topics',
-            'High-frequency PYQ topics',
-            'Only long derivations',
-            'Random sample questions',
+            'Apply the chapter concept accurately before selecting a method.',
+            'Pick the longest option because it looks complete.',
+            'Rely on guessing patterns from option positions.',
+            'Ignore chapter definitions and memorize outcomes.',
           ],
-          answer: 1,
-          explanation: 'High-frequency PYQ topics provide the strongest score impact in board exams.',
+          answer: 0,
+          explanation: 'Textbook-grounded reasoning starts with concept accuracy, then application.',
         },
       ];
 
@@ -159,7 +144,7 @@ function isAlignedToChapter(question: string, allowText: string): boolean {
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
@@ -188,20 +173,11 @@ export async function POST(req: Request) {
         issues: bodyResult.issues,
       });
     }
-    const body = bodyResult.value as Record<string, unknown>;
-    const parsed = parseRequest(body);
-    if (!parsed) {
-      return errorJson({
-        requestId,
-        errorCode: 'invalid-adaptive-test-input',
-        message: 'Invalid request. Required: { classLevel, subject, chapterIds[] }',
-        status: 400,
-      });
-    }
+    const parsed = bodyResult.value;
     const tokenBudget = await checkAiTokenBudget({
       context,
       endpoint: '/api/adaptive-test',
-      projectedInputText: JSON.stringify(body),
+      projectedInputText: JSON.stringify(parsed),
       projectedOutputTokens: 2000,
     });
     if (!tokenBudget.allowed) {
@@ -227,21 +203,37 @@ export async function POST(req: Request) {
       .map((item) => `avg ${item.avgMarks} | topics: ${item.importantTopics.slice(0, 3).join(', ')}`)
       .join('\n');
 
+    const chapterTopicsText = chapter?.topics?.join(', ') ?? '';
     const contextPack = await getContextPack({
       task: 'adaptive-test',
       classLevel: parsed.classLevel,
       subject: parsed.subject,
       chapterId: chapter?.id,
       chapterTopics: chapter?.topics ?? [],
-      query: `adaptive test ${parsed.subject} ${parsed.chapterIds.join(' ')}`,
-      topK: 5,
+      query: `${parsed.subject} ${chapter?.title ?? ''} ${chapterTopicsText} ${pyqTopics.slice(0, 6).join(' ')}`.trim(),
+      topK: 10,
     });
 
-    const userPrompt = `Create a weak-area adaptive CBSE test with:
-${JSON.stringify(parsed, null, 2)}
+    const textbookSnippetCount = contextPack.snippets.filter((s) => s.sourceType === 'textbook').length;
+    const paperSnippetCount = contextPack.snippets.filter((s) => s.sourceType !== 'textbook').length;
+    const contextSummary = `Context: ${textbookSnippetCount} NCERT textbook + ${paperSnippetCount} board-paper snippets retrieved.`;
+
+    const userPrompt = `Generate ${parsed.questionCount ?? 10} adaptive CBSE MCQs for:
+Subject: ${parsed.subject} | Class: ${parsed.classLevel}
+Chapter(s): ${chapter?.title ?? parsed.chapterIds.join(', ')}
+Chapter topics: ${chapterTopicsText || 'See retrieved context'}
+Difficulty split: ${parsed.difficultyMix ?? '40% easy, 40% medium, 20% hard'}
+${contextSummary}
 
 PYQ signal:
 ${pyqSummary || 'No PYQ data available.'}
+Key PYQ topics: ${pyqTopics.slice(0, 8).join(', ') || 'none'}
+
+RULES:
+- Draw questions DIRECTLY from the retrieved context snippets (textbook definitions + past-paper question patterns).
+- Cover all listed chapter topics across the question set.
+- Apply the CBSE Bloom's taxonomy mix from the system prompt.
+- Use PYQ topics for 50%+ of questions — these appear in board exams.
 
 Return ONLY JSON:
 {
@@ -256,8 +248,10 @@ Return ONLY JSON:
       chapterId: chapter?.id,
       difficulty: parsed.difficultyMix,
     });
+    const subjectAddendum = buildSubjectSystemPromptAddendum(parsed.subject, parsed.classLevel);
+    const fewShotBlock = getFewShotExamples(parsed.subject, parsed.classLevel);
     const userPromptWithVariation = `${userPrompt}
-${buildVariationInstruction(variation)}`;
+${buildVariationInstruction(variation)}${fewShotBlock ? `\n\n${fewShotBlock}` : ''}`;
 
     try {
       const { data, result } = await generateTaskJson<AdaptiveTestResponse>({
@@ -267,23 +261,37 @@ ${buildVariationInstruction(variation)}`;
         chapterId: chapter?.id,
         difficulty: parsed.difficultyMix,
         diversityKey: variation.diversityKey,
-        systemPrompt: `You are VidyaAI Adaptive Test Engine.
-- Generate exam-style MCQs with balanced difficulty.
-- Align questions with weak topics and PYQ-heavy areas.
-- Ensure answerKey matches generated questions.
-- Avoid repetitive phrasing across runs.
-- Output JSON only.`,
+        systemPrompt: `You are VidyaAI Adaptive Test Engine — a CBSE board-exam question generator.
+
+GROUNDING (MANDATORY): Use the "Retrieved Paper Context" snippets as your PRIMARY source. Every question must be traceable to a concept, definition, formula, reaction, diagram, or worked example present in those snippets or in standard NCERT content for the requested chapters. Do NOT invent facts or use external knowledge not present in the context.
+
+QUESTION TYPE MIX — distribute across the full set:
+• RECALL (35%): definitions, laws, units, naming reactions/processes, identifying diagrams
+• APPLICATION (35%): solve numericals, apply concept to real-world scenario, explain natural phenomenon, predict outcome
+• ANALYSIS (20%): compare/contrast, identify correct/incorrect statements, assertion-reason pairs, data interpretation
+• CASE-BASED (10%): short 2-3 sentence scenario from daily life or experiment → 1 related MCQ
+
+DISTRACTOR RULES:
+- All 4 options must be plausible NCERT-language alternatives (common misconceptions, wrong formula sign, reversed cause-effect, correct concept from different chapter)
+- Never use generic fillers like "None of the above" or exam-strategy phrases as options
+- One option must be a very common student error for that topic
+
+EXPLANATION: 1–3 sentences citing the specific law/formula/definition from the chapter. Include the correct mechanism if applicable.
+
+Ensure answerKey index exactly matches the correct option index in each question.
+${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON.`,
         userPrompt: userPromptWithVariation,
         temperature: 0.2,
-        maxOutputTokens: 2000,
+        maxOutputTokens: 3500,
         validate: isAdaptiveTestResponse,
       });
 
       const selectedChapters = ALL_CHAPTERS.filter((item) => parsed.chapterIds.includes(item.id));
       const allowText = selectedChapters.map((item) => `${item.title} ${item.topics.join(' ')}`).join(' ');
-      const normalized = normalizeMCQs(data.questions)
+      const rawNormalized = normalizeMCQs(data.questions)
         .filter((item) => (allowText ? isAlignedToChapter(item.question, allowText) : true))
         .slice(0, Math.max(3, parsed.questionCount ?? 10));
+      const normalized = await verifySelfCheck(rawNormalized, contextPack.snippets);
       const merged = normalized.length > 0 ? normalized : fallback.questions;
       const finalQuestions = ensureAdaptiveQuestionCount(merged, parsed);
       const topicHints = selectedChapters.flatMap((item) => item.topics ?? []);
@@ -317,7 +325,7 @@ ${buildVariationInstruction(variation)}`;
       });
       return dataJson({ requestId, data: response });
     } catch (aiError) {
-      console.error('[adaptive-test] AI fallback triggered', aiError);
+      logger.warn({ err: aiError }, '[adaptive-test] AI fallback triggered');
       const selectedChapters = ALL_CHAPTERS.filter((item) => parsed.chapterIds.includes(item.id));
       const topicHints = selectedChapters.flatMap((item) => item.topics ?? []);
       const fallbackQuestions = annotateQuestionsWithRagMeta(fallback.questions, {
@@ -336,7 +344,7 @@ ${buildVariationInstruction(variation)}`;
       });
     }
   } catch (error) {
-    console.error('[adaptive-test] error', error);
+    logger.error({ err: error }, '[adaptive-test] error');
     const message = error instanceof Error ? error.message : 'Failed to generate adaptive test.';
     return errorJson({
       requestId,

@@ -5,6 +5,7 @@ import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-r
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { imageSolveRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { logger } from '@/lib/logger';
 
 interface ImageSolveRequest {
   imageBase64?: string;
@@ -25,7 +26,7 @@ function cleanBase64(value: string): string {
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
@@ -212,7 +213,7 @@ export async function POST(req: Request) {
 
     return dataJson({ requestId, data: resultPayload });
   } catch (error) {
-    console.error('[image-solve] error', error);
+    logger.error({ err: error }, '[image-solve] error');
     const message = error instanceof Error ? error.message : 'Failed to solve the image question.';
     return errorJson({
       requestId,

@@ -66,8 +66,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: npm audit
-        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit (json)
+        run: npm audit --omit=dev --json > .audit-report.json
+
+      - name: Enforce audit policy
+        run: npm run audit:policy
 
   build-check:
     name: Build Check

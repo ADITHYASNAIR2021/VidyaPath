@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   const requestId = getRequestId(req);
-  const token = cookies().get(PARENT_SESSION_COOKIE)?.value;
+  const token = (await cookies()).get(PARENT_SESSION_COOKIE)?.value;
   const parentSession = parseParentSession(token);
   if (!parentSession) return unauthorizedJson('Parent session required.', requestId);
 

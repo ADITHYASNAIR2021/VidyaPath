@@ -47,6 +47,7 @@ export const flashcardsRequestSchema = z.object({
   chapterId: optionalTrimmed,
   chapterTitle: optionalTrimmed,
   classLevel: z.union([classLevel, z.coerce.number()]).optional(),
+  cardCount: z.coerce.number().int().min(3).max(15).optional(),
   nccontext: optionalPromptContext,
 });
 export type FlashcardsRequest = z.infer<typeof flashcardsRequestSchema>;
@@ -107,6 +108,7 @@ export const chapterDrillRequestSchema = z.object({
   chapterId: nonEmpty,
   questionCount: z.coerce.number().int().min(1).max(40).optional(),
   difficulty: optionalTrimmed,
+  questionType: z.enum(['mcq', 'short', 'long', 'mixed']).optional(),
 });
 export type ChapterDrillRequest = z.infer<typeof chapterDrillRequestSchema>;
 

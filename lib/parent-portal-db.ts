@@ -8,7 +8,10 @@ import {
   listSchoolEvents,
   listStudentGrades,
 } from '@/lib/school-ops-db';
+import { listVisibleAssignmentsForStudent } from '@/lib/student/assignments.db';
 import { isSupabaseServiceConfigured, supabaseInsert, supabaseSelect, supabaseUpdate } from '@/lib/supabase-rest';
+import { getSchoolById } from '@/lib/platform-rbac-db';
+import { deriveStudentStream, getStudentEnrolledSubjects } from '@/lib/school-management-db';
 
 const TABLE = 'parent_links';
 
@@ -193,12 +196,25 @@ export async function getParentDashboard(input: {
     body: string;
     createdAt: string;
   }>;
+  upcomingAssignments: Array<{
+    packId: string;
+    title: string;
+    subject: string;
+    dueDate?: string;
+  }>;
+  contactActions: Array<{
+    type: 'school-phone' | 'school-email' | 'teacher-desk';
+    label: string;
+    value: string;
+  }>;
 }> {
   const student = await getStudentById(sanitizeId(input.studentId), input.schoolId ? sanitizeId(input.schoolId) : undefined);
   if (!student) throw new Error('Student not found for parent dashboard.');
   if (!student.schoolId) throw new Error('Student school mapping missing.');
+  const enrolledSubjects = await getStudentEnrolledSubjects(student.id, student.schoolId);
+  const stream = deriveStudentStream(enrolledSubjects, student.classLevel, student.stream);
 
-  const [attendance, grades, events, resources, announcementsAll] = await Promise.all([
+  const [attendance, grades, events, resources, announcementsAll, assignments, school] = await Promise.all([
     getStudentAttendanceSummary({ studentId: student.id, schoolId: student.schoolId, days: 180 }),
     listStudentGrades({ studentId: student.id, rollCode: student.rollCode, schoolId: student.schoolId }),
     listSchoolEvents({
@@ -215,6 +231,14 @@ export async function getParentDashboard(input: {
       limit: 15,
     }),
     listSchoolAnnouncements({ schoolId: student.schoolId, limit: 40 }),
+    listVisibleAssignmentsForStudent({
+      classLevel: student.classLevel,
+      schoolId: student.schoolId,
+      section: student.section,
+      stream,
+      enrolledSubjects,
+    }),
+    getSchoolById(student.schoolId),
   ]);
 
   const announcements = announcementsAll.filter((item) => {
@@ -223,6 +247,41 @@ export async function getParentDashboard(input: {
     if (item.audience === 'class12' && student.classLevel === 12) return true;
     return false;
   });
+  const upcomingAssignments = assignments
+    .filter((item) => item.status === 'published')
+    .sort((a, b) => {
+      const aDue = Date.parse(a.dueDate || '');
+      const bDue = Date.parse(b.dueDate || '');
+      return (Number.isFinite(aDue) ? aDue : Number.POSITIVE_INFINITY) - (Number.isFinite(bDue) ? bDue : Number.POSITIVE_INFINITY);
+    })
+    .slice(0, 10)
+    .map((item) => ({
+      packId: item.packId,
+      title: item.title,
+      subject: item.subject,
+      dueDate: item.dueDate,
+    }));
+  const contactActions = [
+    school?.contactPhone
+      ? {
+          type: 'school-phone' as const,
+          label: 'School office phone',
+          value: school.contactPhone,
+        }
+      : null,
+    school?.contactEmail
+      ? {
+          type: 'school-email' as const,
+          label: 'School office email',
+          value: school.contactEmail,
+        }
+      : null,
+    {
+      type: 'teacher-desk' as const,
+      label: 'Teacher support desk',
+      value: 'Use the parent dashboard + school office to request teacher callback.',
+    },
+  ].filter((item): item is { type: 'school-phone' | 'school-email' | 'teacher-desk'; label: string; value: string } => item !== null);
 
   return {
     student: {
@@ -267,6 +326,8 @@ export async function getParentDashboard(input: {
       body: item.body,
       createdAt: item.createdAt,
     })),
+    upcomingAssignments,
+    contactActions,
   };
 }
 

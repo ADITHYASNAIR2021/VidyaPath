@@ -30,7 +30,8 @@ function parseScope(value: unknown): ScopeRequest | null {
   };
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);

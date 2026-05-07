@@ -39,7 +39,8 @@ async function resolveTeacherAccess(teacherId: string, studentId: string) {
   return { ok: true as const, student, schoolId: student.schoolId, section: matchingSection };
 }
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Teacher session required.', requestId);
@@ -58,7 +59,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
 }
 
-export async function PUT(req: Request, { params }: { params: { id: string } }) {
+export async function PUT(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Teacher session required.', requestId);

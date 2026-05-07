@@ -5,6 +5,7 @@ import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { contextPackRequestSchema } from '@/lib/schemas/ai';
+import { logger } from '@/lib/logger';
 
 const ALLOWED_TASKS: ContextTask[] = [
   'chat',
@@ -22,7 +23,7 @@ const ALLOWED_TASKS: ContextTask[] = [
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, contextPackRequestSchema);
@@ -105,7 +106,7 @@ export async function POST(req: Request) {
     });
     return dataJson({ requestId, data: payload });
   } catch (error) {
-    console.error('[context-pack] error', error);
+    logger.error({ err: error }, '[context-pack] error');
     const message = error instanceof Error ? error.message : 'Failed to build context pack.';
     return errorJson({
       requestId,

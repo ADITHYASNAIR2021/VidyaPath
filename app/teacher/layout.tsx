@@ -1,10 +1,10 @@
 import { cookies } from 'next/headers';
-import Sidebar from '@/components/Sidebar';
+import RolePortalLayout from '@/components/RolePortalLayout';
 import { TEACHER_SESSION_COOKIE, parseTeacherSession } from '@/lib/auth/session';
 import { getTeacherById } from '@/lib/teacher/auth.db';
 
 export default async function TeacherLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get(TEACHER_SESSION_COOKIE)?.value;
   const session = parseTeacherSession(token);
 
@@ -19,12 +19,5 @@ export default async function TeacherLayout({ children }: { children: React.Reac
     // Sidebar shows role initial as fallback
   }
 
-  return (
-    <div className="flex min-h-screen bg-[#FDFAF6]">
-      <Sidebar role="teacher" displayName={displayName} />
-      <main className="flex-1 md:ml-60 transition-all duration-200 min-h-screen">
-        {children}
-      </main>
-    </div>
-  );
+  return <RolePortalLayout role="teacher" displayName={displayName}>{children}</RolePortalLayout>;
 }

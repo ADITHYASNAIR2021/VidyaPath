@@ -5,7 +5,8 @@ import { getDeveloperSchoolOverview } from '@/lib/platform-rbac-db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const session = await getDeveloperSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Developer session required.', requestId);
@@ -18,22 +19,31 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       status: 400,
     });
   }
-  const overview = await getDeveloperSchoolOverview(schoolId);
-  if (!overview) {
+  try {
+    const overview = await getDeveloperSchoolOverview(schoolId);
+    if (!overview) {
+      return errorJson({
+        requestId,
+        errorCode: 'school-not-found',
+        message: 'School not found.',
+        status: 404,
+      });
+    }
+    logServerEvent({
+      event: 'developer-school-overview-read',
+      requestId,
+      endpoint: '/api/developer/schools/[id]/overview',
+      role: 'developer',
+      schoolId,
+      statusCode: 200,
+    });
+    return dataJson({ requestId, data: overview });
+  } catch (error) {
     return errorJson({
       requestId,
-      errorCode: 'school-not-found',
-      message: 'School not found.',
-      status: 404,
+      errorCode: 'developer-school-overview-failed',
+      message: error instanceof Error ? error.message : 'Failed to load school overview.',
+      status: 500,
     });
   }
-  logServerEvent({
-    event: 'developer-school-overview-read',
-    requestId,
-    endpoint: '/api/developer/schools/[id]/overview',
-    role: 'developer',
-    schoolId,
-    statusCode: 200,
-  });
-  return dataJson({ requestId, data: overview });
 }

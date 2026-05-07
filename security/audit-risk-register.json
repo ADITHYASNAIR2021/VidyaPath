@@ -1,0 +1,14 @@
+{
+  "policyVersion": 1,
+  "lastReviewedAt": "2026-04-30",
+  "notes": "Temporary risk acceptance for moderate advisories blocked by upstream package constraints. Remove entries as fixes become available.",
+  "acceptedAdvisories": [
+    {
+      "id": "GHSA-qx2v-qp2m-jg93",
+      "severity": "moderate",
+      "package": "postcss",
+      "acceptedUntil": "2026-06-30",
+      "reason": "Upstream nested dependency chain through next/@serwist currently reports no direct fixAvailable in this lockfile."
+    }
+  ]
+}

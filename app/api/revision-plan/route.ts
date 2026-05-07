@@ -17,6 +17,7 @@ import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-r
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { revisionPlanRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { logger } from '@/lib/logger';
 
 interface RevisionRequest {
   classLevel: 10 | 12;
@@ -114,7 +115,7 @@ async function buildHeuristicPlan(req: RevisionRequest): Promise<RevisionPlanRes
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
@@ -270,11 +271,11 @@ Return ONLY JSON in this shape:
       });
       return dataJson({ requestId, data: payload });
     } catch (aiError) {
-      console.error('[revision-plan] AI fallback triggered', aiError);
+      logger.warn({ err: aiError }, '[revision-plan] AI fallback triggered');
       return dataJson({ requestId, data: fallback });
     }
   } catch (error) {
-    console.error('[revision-plan] error', error);
+    logger.error({ err: error }, '[revision-plan] error');
     const message = error instanceof Error ? error.message : 'Failed to generate revision plan.';
     return errorJson({
       requestId,

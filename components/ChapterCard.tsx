@@ -101,13 +101,15 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
 
   return (
     <motion.div
-      whileHover={{ y: -3, boxShadow: '0 8px 24px -4px rgba(0,0,0,0.12)' }}
+      whileHover={{ y: -4, scale: 1.01 }}
       className={clsx(
-        'bg-white dark:bg-gray-900 rounded-2xl border shadow-sm transition-all flex flex-col overflow-hidden relative',
+        'ui-surface rounded-2xl border transition-all duration-200 flex flex-col overflow-hidden relative group',
         style.bg,
         studied && 'ring-2 ring-emerald-400 ring-offset-1 dark:ring-offset-gray-900'
       )}
     >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-white/70 to-transparent dark:via-sky-300/20" />
+
       {/* Studied checkmark badge */}
       {studied && (
         <div className="absolute top-3 right-3 z-10">
@@ -118,10 +120,10 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
       )}
 
       {/* Card Header */}
-      <div className={clsx('px-4 sm:px-5 pt-4 sm:pt-5 pb-4', style.headerBg)}>
+      <div className={clsx('px-4 sm:px-5 pt-4 sm:pt-5 pb-4', style.headerBg, 'border-b border-white/60 dark:border-slate-800/80')}>
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <div className={clsx('p-1.5 rounded-lg', style.badge)}>
+            <div className={clsx('p-1.5 rounded-lg shadow-sm', style.badge)}>
               <SubjectIcon className="w-4 h-4" />
             </div>
             <span className={clsx('text-xs font-semibold px-2 py-0.5 rounded-full', style.badge)}>
@@ -132,13 +134,13 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
             </span>
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-200 border border-amber-200 dark:border-amber-700/70">
               {chapter.marks}M
             </span>
             <button
               onClick={(e) => { e.preventDefault(); toggleBookmark(chapter.id); }}
               className={clsx(
-                'p-1.5 rounded-md hover:bg-black/5 transition-colors',
+                'p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-slate-700/60 transition-colors',
                 bookmarked ? 'text-pink-500' : 'text-gray-400 dark:text-gray-500'
               )}
               aria-label="Toggle Bookmark"
@@ -148,11 +150,11 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
           </div>
         </div>
 
-        <div className="text-xs text-[#8A8AAA] dark:text-gray-400 font-medium mb-1">Ch {chapter.chapterNumber}</div>
+        <div className="text-xs text-muted-ui font-medium mb-1">Ch {chapter.chapterNumber}</div>
         <h3 className="font-fraunces font-bold text-navy-700 dark:text-gray-100 text-base leading-snug">
           {chapter.title}
         </h3>
-        <p className="text-xs text-[#4A4A6A] dark:text-gray-300 mt-1.5 leading-relaxed line-clamp-2">
+        <p className="text-xs text-muted-ui mt-1.5 leading-relaxed line-clamp-2">
           {chapter.description}
         </p>
       </div>
@@ -163,7 +165,7 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
           {visibleTopics.map((topic) => (
             <span
               key={topic}
-              className="text-xs bg-gray-100 dark:bg-gray-800 text-[#4A4A6A] dark:text-gray-300 px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-700"
+              className="text-xs bg-white/95 dark:bg-slate-800/80 text-muted-ui px-2 py-0.5 rounded-full border border-gray-200 dark:border-slate-700"
             >
               {topic}
             </span>
@@ -191,14 +193,14 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
       )}
 
       {/* Actions */}
-      <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-2 grid grid-cols-3 gap-2 border-t border-gray-100 dark:border-gray-800">
+      <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-2 grid grid-cols-3 gap-2 border-t border-gray-100 dark:border-slate-800/90 bg-gradient-to-b from-transparent to-white/65 dark:to-slate-900/65">
         <Link
           href={`/chapters/${chapter.id}`}
           scroll
           onClick={() => {
             if (typeof window !== 'undefined') window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
           }}
-          className="flex items-center justify-center gap-1.5 bg-saffron-500 hover:bg-saffron-600 active:scale-95 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-all col-span-1"
+          className="flex items-center justify-center gap-1.5 bg-saffron-500 hover:bg-saffron-600 active:scale-95 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-all col-span-1 shadow-sm"
         >
           <BookOpen className="w-3.5 h-3.5" />
           Study
@@ -207,7 +209,7 @@ export default function ChapterCard({ chapter }: { chapter: Chapter }) {
           href={chapter.ncertPdfUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 active:scale-95 text-[#4A4A6A] dark:text-gray-300 text-xs font-medium px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 transition-all"
+          className="flex items-center justify-center gap-1.5 bg-white dark:bg-slate-900 hover:bg-gray-50 dark:hover:bg-slate-800 active:scale-95 text-[#4A4A6A] dark:text-slate-200 text-xs font-medium px-3 py-2 rounded-xl border border-gray-200 dark:border-slate-700 transition-all"
         >
           <ExternalLink className="w-3.5 h-3.5" />
           NCERT

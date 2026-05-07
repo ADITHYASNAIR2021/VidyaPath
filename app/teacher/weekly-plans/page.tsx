@@ -12,6 +12,14 @@ function unwrap<T>(payload: unknown): T {
   return payload as T;
 }
 
+function extractApiMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object' && 'message' in (payload as Record<string, unknown>)) {
+    const maybe = (payload as Record<string, unknown>).message;
+    if (typeof maybe === 'string' && maybe.trim()) return maybe.trim();
+  }
+  return fallback;
+}
+
 const CLASS_LEVELS = [10, 12] as const;
 
 export default function WeeklyPlansPage() {
@@ -55,10 +63,13 @@ export default function WeeklyPlansPage() {
       const sessionData = unwrap<{ effectiveScopes?: TeacherScope[] } | null>(await sessionRes.json().catch(() => null));
       setScopes(Array.isArray(sessionData?.effectiveScopes) ? sessionData.effectiveScopes : []);
 
-      if (plansRes.ok) {
-        const plansData = unwrap<{ plans?: TeacherWeeklyPlan[] } | null>(await plansRes.json().catch(() => null));
-        setPlans(Array.isArray(plansData?.plans) ? plansData.plans : []);
+      const plansBody = await plansRes.json().catch(() => null);
+      if (!plansRes.ok) {
+        setError(extractApiMessage(plansBody, 'Failed to load weekly plans.'));
+        return;
       }
+      const plansData = unwrap<{ plans?: TeacherWeeklyPlan[] } | null>(plansBody);
+      setPlans(Array.isArray(plansData?.plans) ? plansData.plans : []);
     } catch {
       setError('Failed to load weekly plans.');
     } finally {
@@ -118,13 +129,19 @@ export default function WeeklyPlansPage() {
 
   async function archivePlan(planId: string) {
     setArchivingId(planId);
+    setError('');
     try {
       const res = await fetch(`/api/teacher/weekly-plans/${planId}`, { method: 'PATCH' });
-      if (res.ok) {
-        setPlans((prev) => prev.filter((p) => p.planId !== planId));
-        if (expandedPlanId === planId) setExpandedPlanId(null);
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(extractApiMessage(body, 'Failed to archive plan.'));
+        return;
       }
-    } catch { /* ignore */ } finally {
+      setPlans((prev) => prev.filter((p) => p.planId !== planId));
+      if (expandedPlanId === planId) setExpandedPlanId(null);
+    } catch {
+      setError('Failed to archive plan.');
+    } finally {
       setArchivingId(null);
     }
   }

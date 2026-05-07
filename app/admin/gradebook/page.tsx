@@ -98,13 +98,15 @@ export default function AdminGradebookPage() {
 
   const summary = useMemo(() => {
     if (grades.length === 0) {
-      return { average: 0, best: 0, released: 0 };
+      return { average: 0, best: 0, released: 0, pending: 0 };
     }
-    const total = grades.reduce((sum, row) => sum + row.score, 0);
+    const scoredGrades = grades.filter((row) => row.status !== 'pending_review' || row.score > 0);
+    const total = scoredGrades.reduce((sum, row) => sum + row.score, 0);
     return {
-      average: Math.round((total / grades.length) * 100) / 100,
-      best: Math.max(...grades.map((row) => row.score)),
+      average: scoredGrades.length > 0 ? Math.round((total / scoredGrades.length) * 100) / 100 : 0,
+      best: scoredGrades.length > 0 ? Math.max(...scoredGrades.map((row) => row.score)) : 0,
       released: grades.filter((row) => row.status === 'released').length,
+      pending: grades.filter((row) => row.status === 'pending_review').length,
     };
   }, [grades]);
 
@@ -116,7 +118,7 @@ export default function AdminGradebookPage() {
           <BookOpen className="h-6 w-6 text-indigo-600" />
           Gradebook
         </h1>
-        <p className="mt-0.5 text-sm text-gray-500">Select a student to inspect complete grade history and release status.</p>
+        <p className="mt-0.5 text-sm text-gray-500">Select a student to inspect all submissions across every stage — submitted, graded, and released.</p>
       </div>
 
       {error && (
@@ -172,7 +174,7 @@ export default function AdminGradebookPage() {
 
       {selectedStudent && (
         <>
-          <div className="mb-5 grid grid-cols-3 gap-3">
+          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
               <p className="text-xs text-gray-500">Average</p>
               <p className="text-2xl font-bold text-gray-800">{summary.average}%</p>
@@ -181,9 +183,13 @@ export default function AdminGradebookPage() {
               <p className="text-xs text-gray-500">Best Score</p>
               <p className="text-2xl font-bold text-gray-800">{summary.best}%</p>
             </div>
-            <div className="rounded-xl border border-amber-100 bg-amber-50 p-3">
-              <p className="text-xs text-gray-500">Released Results</p>
+            <div className="rounded-xl border border-violet-100 bg-violet-50 p-3">
+              <p className="text-xs text-gray-500">Released</p>
               <p className="text-2xl font-bold text-gray-800">{summary.released}</p>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-3">
+              <p className="text-xs text-gray-500">Pending Review</p>
+              <p className="text-2xl font-bold text-amber-700">{summary.pending}</p>
             </div>
           </div>
 
@@ -216,8 +222,18 @@ export default function AdminGradebookPage() {
                       <tr key={row.submissionId} className="border-b border-[#E8E4DC] last:border-0">
                         <td className="px-4 py-3 text-sm">{row.subject}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{row.chapterId}</td>
-                        <td className="px-4 py-3 text-right text-sm font-semibold">{row.score}%</td>
-                        <td className="px-4 py-3 text-xs capitalize text-gray-600">{row.status.replace('_', ' ')}</td>
+                        <td className="px-4 py-3 text-right text-sm font-semibold">
+                          {row.status === 'pending_review' && row.score === 0 ? '—' : `${row.score}%`}
+                        </td>
+                        <td className="px-4 py-3 text-xs capitalize">
+                          <span className={
+                            row.status === 'released' ? 'text-emerald-700' :
+                            row.status === 'graded' ? 'text-amber-700' :
+                            'text-gray-500'
+                          }>
+                            {row.status.replace('_', ' ')}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-xs text-gray-500">{new Date(row.createdAt).toLocaleString('en-IN')}</td>
                         <td className="px-4 py-3 text-xs text-gray-500">{row.releasedAt ? new Date(row.releasedAt).toLocaleString('en-IN') : '-'}</td>
                       </tr>

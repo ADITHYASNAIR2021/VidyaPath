@@ -14,11 +14,14 @@ Also supports single-file extraction mode for on-demand fallback:
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
+import os
 import re
 import sys
 import time
+import urllib.request
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,8 +30,15 @@ from typing import Dict, List, Optional, Set, Tuple
 
 try:
     from pypdf import PdfReader
-except ImportError:  # pragma: no cover - handled gracefully for users
+except ImportError:  # pragma: no cover
     PdfReader = None
+
+try:
+    import fitz  # PyMuPDF — optional: pip install pymupdf
+    FITZ_AVAILABLE = True
+except ImportError:
+    fitz = None  # type: ignore[assignment]
+    FITZ_AVAILABLE = False
 
 warnings.filterwarnings("ignore", message=r".*Multiple definitions in dictionary.*")
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -42,6 +52,27 @@ MIN_ENGLISH_WORDS_PER_CHUNK = 28
 MIN_ENGLISH_RATIO = 0.7
 
 CONTROL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]+")
+
+# Semantic chunking patterns for CBSE exam papers
+SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+(?=[A-Z(\[])')
+# Detects question starts: "Q1.", "Question 1", "1.", "1)", "(a)", "(i)"
+QUESTION_START_RE = re.compile(
+    r'(?:(?<=\n)|(?<=\s)|^)\s*'
+    r'(?:Q\.?\s*\d+|Question\s+\d+|\d+\s*[\.\)]\s+(?=[A-Z(])|'
+    r'\((?:a|b|c|d|e|i|ii|iii|iv|v)\)\s+(?=[A-Z]))',
+    re.MULTILINE,
+)
+SECTION_HEADER_RE = re.compile(
+    r'(?:SECTION|Section|PART|Part)\s+[A-F]\b.*?(?=\n)',
+    re.MULTILINE,
+)
+# Min meaningful words in a sentence before it counts as a split point
+MIN_SENTENCE_WORDS = 6
+
+# Image OCR via NVIDIA nemotron-ocr-v1
+NVIDIA_OCR_ENDPOINT = "https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v1"
+# Minimum image dimension to bother OCR-ing (skip tiny icons/decorations)
+MIN_IMAGE_DIMENSION = 80
 
 
 @dataclass
@@ -354,10 +385,10 @@ def extract_pdf_text(pdf_path: Path, max_pages: int) -> str:
 
 
 def chunk_words(text: str, size: int = DEFAULT_CHUNK_WORDS, overlap: int = DEFAULT_CHUNK_OVERLAP) -> List[str]:
+    """Legacy fixed-word chunker — kept for reference. Use chunk_semantic instead."""
     words = text.split()
     if not words:
         return []
-
     chunks: List[str] = []
     cursor = 0
     while cursor < len(words):
@@ -369,6 +400,205 @@ def chunk_words(text: str, size: int = DEFAULT_CHUNK_WORDS, overlap: int = DEFAU
             break
         cursor = max(0, end - overlap)
     return chunks
+
+
+def _split_sentences(text: str) -> List[str]:
+    """Split text into sentences using punctuation heuristics."""
+    raw = SENTENCE_END_RE.split(text)
+    out: List[str] = []
+    for part in raw:
+        part = part.strip()
+        if part and len(part.split()) >= MIN_SENTENCE_WORDS:
+            out.append(part)
+        elif part and out:
+            out[-1] = out[-1] + " " + part  # merge tiny tail into previous
+    return out if out else [text.strip()] if text.strip() else []
+
+
+def _split_question_blocks(text: str) -> List[str]:
+    """Split at CBSE question number boundaries, keeping prefix with block."""
+    positions = [m.start() for m in QUESTION_START_RE.finditer(text)]
+    if len(positions) < 2:
+        return [text.strip()] if text.strip() else []
+    blocks: List[str] = []
+    for idx, start in enumerate(positions):
+        end = positions[idx + 1] if idx + 1 < len(positions) else len(text)
+        block = text[start:end].strip()
+        if block:
+            blocks.append(block)
+    # include any leading text before first question
+    if positions[0] > 0:
+        preamble = text[: positions[0]].strip()
+        if preamble:
+            blocks.insert(0, preamble)
+    return blocks
+
+
+def chunk_semantic(
+    text: str,
+    target_words: int = DEFAULT_CHUNK_WORDS,
+    overlap_words: int = DEFAULT_CHUNK_OVERLAP,
+    min_words: int = MIN_CHUNK_WORDS,
+) -> List[str]:
+    """
+    Structure-aware semantic chunking for CBSE exam papers.
+
+    Strategy (in order of priority):
+    1. Split at Section headers (Section A / Part B).
+    2. Within each section, split at question number boundaries.
+    3. If a question block exceeds 1.5× target, split at sentence boundaries.
+    4. Merge dangling short blocks with the preceding chunk.
+    5. Carry `overlap_words` from the tail of the previous chunk into the next.
+    """
+    if not text.strip():
+        return []
+
+    # --- pass 1: split at section headers ---
+    section_parts: List[str] = []
+    last = 0
+    for match in SECTION_HEADER_RE.finditer(text):
+        pre = text[last : match.start()].strip()
+        if pre:
+            section_parts.append(pre)
+        last = match.start()
+    tail = text[last:].strip()
+    if tail:
+        section_parts.append(tail)
+    if not section_parts:
+        section_parts = [text.strip()]
+
+    all_chunks: List[str] = []
+    prev_tail_words: List[str] = []
+
+    for section in section_parts:
+        # --- pass 2: split at question boundaries ---
+        q_blocks = _split_question_blocks(section)
+        if not q_blocks:
+            q_blocks = [section]
+
+        current_words: List[str] = list(prev_tail_words)
+
+        for block in q_blocks:
+            block_words = block.split()
+
+            # block fits in remaining space → accumulate
+            if len(current_words) + len(block_words) <= target_words:
+                current_words.extend(block_words)
+                continue
+
+            # flush current before starting this block
+            if len(current_words) >= min_words:
+                all_chunks.append(" ".join(current_words))
+                prev_tail_words = current_words[-overlap_words:] if overlap_words > 0 else []
+
+            # block itself is too long → split at sentence boundaries
+            if len(block_words) > int(target_words * 1.4):
+                sentences = _split_sentences(block)
+                current_words = list(prev_tail_words)
+                for sentence in sentences:
+                    sw = sentence.split()
+                    if len(current_words) + len(sw) <= target_words:
+                        current_words.extend(sw)
+                    else:
+                        if len(current_words) >= min_words:
+                            all_chunks.append(" ".join(current_words))
+                            prev_tail_words = current_words[-overlap_words:] if overlap_words > 0 else []
+                        current_words = list(prev_tail_words) + sw
+                # don't flush here — carry into next block
+            else:
+                current_words = list(prev_tail_words) + block_words
+
+        # flush section remainder
+        if len(current_words) >= min_words:
+            all_chunks.append(" ".join(current_words))
+            prev_tail_words = current_words[-overlap_words:] if overlap_words > 0 else []
+        elif current_words and all_chunks:
+            # merge tiny tail into last chunk
+            all_chunks[-1] = all_chunks[-1] + " " + " ".join(current_words)
+
+    return [c for c in all_chunks if c.strip()]
+
+
+# ---------------------------------------------------------------------------
+# Image extraction via PyMuPDF (optional)
+# ---------------------------------------------------------------------------
+
+def detect_pages_with_images(pdf_path: Path) -> Set[int]:
+    """Return 0-based page indices that contain embedded raster images."""
+    if not FITZ_AVAILABLE:
+        return set()
+    try:
+        doc = fitz.open(str(pdf_path))
+        pages: Set[int] = set()
+        for page_num in range(len(doc)):
+            if doc[page_num].get_images():
+                pages.add(page_num)
+        doc.close()
+        return pages
+    except Exception:
+        return set()
+
+
+def render_page_as_base64(pdf_path: Path, page_num: int, dpi: int = 150) -> Optional[str]:
+    """Render one PDF page as a PNG and return its base64 string."""
+    if not FITZ_AVAILABLE:
+        return None
+    try:
+        doc = fitz.open(str(pdf_path))
+        page = doc[page_num]
+        mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB, alpha=False)
+        # skip if image is too small (likely icon/decoration)
+        if pix.width < MIN_IMAGE_DIMENSION or pix.height < MIN_IMAGE_DIMENSION:
+            doc.close()
+            return None
+        encoded = base64.b64encode(pix.tobytes("png")).decode("utf-8")
+        doc.close()
+        return encoded
+    except Exception:
+        return None
+
+
+def ocr_page_via_nvidia(base64_image: str, api_key: str) -> str:
+    """
+    Call NVIDIA nemotron-ocr-v1 to extract text + math from an exam page image.
+    Returns extracted text, or empty string on failure.
+    """
+    payload = json.dumps({
+        "model": "nvidia/nemotron-ocr-v1",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{base64_image}"},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Extract ALL text and mathematical content from this CBSE exam paper page. "
+                        "Preserve: question numbers, equations (use LaTeX notation), diagram labels, "
+                        "table data, and any printed text. Output plain text only."
+                    ),
+                },
+            ],
+        }],
+        "max_tokens": 1200,
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            NVIDIA_OCR_ENDPOINT,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            return result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+    except Exception:
+        return ""
 
 
 def chapter_candidates_for_subject(chapters: List[ChapterEntry], class_level: int, subject: str) -> List[ChapterEntry]:
@@ -474,6 +704,8 @@ def build_index(
     include_non_english: bool,
     data_ts: Path,
     pyq_ts: Path,
+    extract_images: bool = False,
+    nvidia_api_key: Optional[str] = None,
 ) -> Tuple[int, int, int, int, int, int]:
     chapters = parse_data_ts(data_ts)
     pyq_by_chapter = parse_pyq_years(pyq_ts)
@@ -517,10 +749,17 @@ def build_index(
             subject_sources.append(record.relative_path)
             seen_source_keys.add(source_key)
 
-        chunks = chunk_words(raw_text, size=chunk_words_size, overlap=chunk_overlap)
+        # Use semantic chunking (respects question boundaries and sentence structure)
+        chunks = chunk_semantic(raw_text, target_words=chunk_words_size, overlap_words=chunk_overlap)
         if not chunks:
             progress("Extracting chunks", idx, len(selected), extract_started)
             continue
+
+        # Detect which pages have embedded images (requires PyMuPDF)
+        image_pages: Set[int] = set()
+        if extract_images and FITZ_AVAILABLE:
+            image_pages = detect_pages_with_images(record.abs_path)
+        has_images = len(image_pages) > 0
 
         chapter_pool = chapter_candidates_for_subject(chapters, record.class_level, record.subject)
         for chunk_text in chunks:
@@ -540,7 +779,7 @@ def build_index(
                     continue
                 kept_unmapped_chunks += 1
 
-            entry = {
+            entry: dict = {
                 "id": f"ctx-{chunk_counter:07d}",
                 "sourceType": "paper",
                 "classLevel": record.class_level,
@@ -551,6 +790,8 @@ def build_index(
                 "sourcePath": record.relative_path,
                 "text": chunk_text,
             }
+            if has_images:
+                entry["hasImages"] = True
             chunk_entries.append(entry)
             chunk_counter += 1
 
@@ -558,6 +799,38 @@ def build_index(
                 current = chapters_map.setdefault(chapter_id, [])
                 if record.relative_path not in current and len(current) < 12:
                     current.append(record.relative_path)
+
+        # OCR image pages and add them as extra chunks (requires NVIDIA API key)
+        if extract_images and image_pages and nvidia_api_key:
+            for page_num in sorted(image_pages):
+                if page_num >= max_pages:
+                    continue
+                b64 = render_page_as_base64(record.abs_path, page_num)
+                if not b64:
+                    continue
+                ocr_text = ocr_page_via_nvidia(b64, nvidia_api_key)
+                if not ocr_text or len(ocr_text.split()) < MIN_CHUNK_WORDS:
+                    continue
+                ocr_text = clean_text(ocr_text)
+                chapter_id = map_chunk_to_chapter(ocr_text, chapter_pool)
+                if not chapter_id and not keep_unmapped:
+                    continue
+                ocr_entry: dict = {
+                    "id": f"ctx-{chunk_counter:07d}",
+                    "sourceType": "image-ocr",
+                    "classLevel": record.class_level,
+                    "subject": record.subject,
+                    "chapterId": chapter_id,
+                    "year": record.year,
+                    "paperType": record.paper_type,
+                    "sourcePath": record.relative_path,
+                    "page": page_num,
+                    "text": ocr_text,
+                    "hasImages": True,
+                }
+                chunk_entries.append(ocr_entry)
+                chunk_counter += 1
+
         progress("Extracting chunks", idx, len(selected), extract_started)
     progress("Extracting chunks", len(selected), len(selected), extract_started, force_line=True)
 
@@ -634,6 +907,16 @@ def main() -> None:
 
     parser.add_argument("--single-file", help="Single dataset-relative PDF path for on-demand extraction")
     parser.add_argument("--json-stdout", action="store_true", help="Print single-file JSON payload to stdout")
+    parser.add_argument(
+        "--extract-images",
+        action="store_true",
+        help="Detect image-bearing pages (requires pymupdf) and OCR them via NVIDIA API (requires NVIDIA_API_KEY)",
+    )
+    parser.add_argument(
+        "--nvidia-api-key",
+        default=None,
+        help="NVIDIA API key for OCR (falls back to NVIDIA_API_KEY env var)",
+    )
 
     args = parser.parse_args()
 
@@ -661,6 +944,12 @@ def main() -> None:
 
     keep_unmapped = not args.drop_unmapped
     include_non_english = not args.strict_english
+    nvidia_key = args.nvidia_api_key or os.environ.get("NVIDIA_API_KEY") or ""
+
+    if args.extract_images and not FITZ_AVAILABLE:
+        print("WARNING: --extract-images requires PyMuPDF. Install with: pip install pymupdf", file=sys.stderr)
+    if args.extract_images and not nvidia_key:
+        print("WARNING: --extract-images without NVIDIA_API_KEY — image detection only, no OCR.", file=sys.stderr)
 
     selected_count, chunk_count, dropped_unmapped_chunks, kept_unmapped_chunks, dropped_non_english_chunks, dropped_instruction_chunks = build_index(
         dataset_root=dataset_root,
@@ -673,6 +962,8 @@ def main() -> None:
         include_non_english=include_non_english,
         data_ts=data_ts,
         pyq_ts=pyq_ts,
+        extract_images=args.extract_images,
+        nvidia_api_key=nvidia_key if nvidia_key else None,
     )
     print(
         "Built context index: "

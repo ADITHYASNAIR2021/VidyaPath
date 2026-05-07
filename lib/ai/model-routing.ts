@@ -1,6 +1,6 @@
 import type { ContextTask } from '@/lib/ai/context-retriever';
 
-export type LlmProvider = 'nvidia' | 'gemini' | 'groq';
+export type LlmProvider = 'nvidia' | 'gemini' | 'groq' | 'cerebras' | 'mistral';
 export type LlmMode = 'chat' | 'embedding' | 'rerank' | 'ocr' | 'table' | 'image';
 
 export interface LlmModelConfig {
@@ -78,6 +78,30 @@ const REGISTERED_MODELS: LlmModelConfig[] = [
     defaultParams: { temperature: 0.35, top_p: 0.95, max_tokens: 32000 },
   },
   {
+    alias: 'GEMINI_25_PRO',
+    provider: 'gemini',
+    mode: 'chat',
+    model: 'gemini-2.5-pro',
+    description: 'Advanced reasoning model for complex chapter grounding and quality checks.',
+    defaultParams: { temperature: 0.15, topP: 0.9, maxOutputTokens: 3200 },
+  },
+  {
+    alias: 'GEMINI_25_FLASH',
+    provider: 'gemini',
+    mode: 'chat',
+    model: 'gemini-2.5-flash',
+    description: 'Best price-performance Gemini model for grounded generation.',
+    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 2200 },
+  },
+  {
+    alias: 'GEMINI_25_FLASH_LITE',
+    provider: 'gemini',
+    mode: 'chat',
+    model: 'gemini-2.5-flash-lite',
+    description: 'Low-latency Gemini model for high-throughput generation.',
+    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 1800 },
+  },
+  {
     alias: 'GEMINI_FLASH',
     provider: 'gemini',
     mode: 'chat',
@@ -94,6 +118,22 @@ const REGISTERED_MODELS: LlmModelConfig[] = [
     defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 1800 },
   },
   {
+    alias: 'GROQ_GPT_OSS_120B',
+    provider: 'groq',
+    mode: 'chat',
+    model: 'openai/gpt-oss-120b',
+    description: 'Groq flagship open-weight reasoning model.',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2200 },
+  },
+  {
+    alias: 'GROQ_QWEN3_32B',
+    provider: 'groq',
+    mode: 'chat',
+    model: 'qwen/qwen3-32b',
+    description: 'Groq strong multilingual reasoning model.',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2200 },
+  },
+  {
     alias: 'GROQ_LLAMA_70B',
     provider: 'groq',
     mode: 'chat',
@@ -108,6 +148,30 @@ const REGISTERED_MODELS: LlmModelConfig[] = [
     model: 'llama-3.1-8b-instant',
     description: 'Groq fast fallback.',
     defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 1600 },
+  },
+  {
+    alias: 'CEREBRAS_SCOUT',
+    provider: 'cerebras',
+    mode: 'chat',
+    model: 'llama-4-scout-17b-16e-instruct',
+    description: 'Cerebras ultra-fast Scout model — free tier, 1000+ tok/s, ideal for quick generation.',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2048 },
+  },
+  {
+    alias: 'CEREBRAS_70B',
+    provider: 'cerebras',
+    mode: 'chat',
+    model: 'llama-3.3-70b',
+    description: 'Cerebras 70B — free tier, high quality at high speed.',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2048 },
+  },
+  {
+    alias: 'MISTRAL_SMALL',
+    provider: 'mistral',
+    mode: 'chat',
+    model: 'mistral-small-latest',
+    description: 'Mistral Small — free tier, strong multilingual reasoning.',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2048 },
   },
   {
     alias: 'RERANK_V2',
@@ -151,16 +215,16 @@ const REGISTERED_MODELS: LlmModelConfig[] = [
 ];
 
 const DEFAULT_TASK_MODEL_ALIASES: Record<ContextTask, string[]> = {
-  chat: ['G4', 'M27', 'GLM5', 'GEMINI_FLASH', 'GEMINI_15_FLASH', 'GROQ_LLAMA_70B', 'GROQ_LLAMA_8B'],
-  flashcards: ['G4', 'GLM5', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
-  mcq: ['G4', 'GLM5', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
-  'adaptive-test': ['GLM5', 'G4', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
-  'revision-plan': ['G4', 'GLM5', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
-  'paper-evaluate': ['GLM5', 'M27', 'G4', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
-  'chapter-pack': ['G4', 'GLM5', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
-  'chapter-drill': ['G4', 'GLM5', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
-  'chapter-diagnose': ['G4', 'GLM5', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
-  'chapter-remediate': ['G4', 'GLM5', 'GEMINI_FLASH', 'GROQ_LLAMA_70B'],
+  chat: ['G4', 'M27', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'GROQ_GPT_OSS_120B', 'CEREBRAS_70B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B', 'GROQ_LLAMA_8B', 'GEMINI_FLASH', 'GEMINI_15_FLASH'],
+  flashcards: ['G4', 'GLM5', 'GEMINI_25_FLASH', 'CEREBRAS_SCOUT', 'GEMINI_25_FLASH_LITE', 'GROQ_GPT_OSS_120B', 'CEREBRAS_70B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'GROQ_LLAMA_70B'],
+  mcq: ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
+  'adaptive-test': ['GLM5', 'G4', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
+  'revision-plan': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
+  'paper-evaluate': ['GLM5', 'M27', 'G4', 'GEMINI_25_PRO', 'GEMINI_25_FLASH', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
+  'chapter-pack': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
+  'chapter-drill': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
+  'chapter-diagnose': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
+  'chapter-remediate': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
 };
 
 const MODEL_BY_ALIAS = new Map(REGISTERED_MODELS.map((model) => [model.alias.toUpperCase(), model]));

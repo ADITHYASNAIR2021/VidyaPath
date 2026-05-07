@@ -17,6 +17,7 @@ import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-r
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { paperEvaluateRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { logger } from '@/lib/logger';
 
 interface AnswerInput {
   questionNo: string;
@@ -91,7 +92,7 @@ function buildHeuristicEvaluation(payload: PaperEvaluateRequest): PaperEvaluateR
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
@@ -249,11 +250,11 @@ Return ONLY JSON:
       });
       return dataJson({ requestId, data: payload });
     } catch (aiError) {
-      console.error('[paper-evaluate] AI fallback triggered', aiError);
+      logger.warn({ err: aiError }, '[paper-evaluate] AI fallback triggered');
       return dataJson({ requestId, data: fallback });
     }
   } catch (error) {
-    console.error('[paper-evaluate] error', error);
+    logger.error({ err: error }, '[paper-evaluate] error');
     const message = error instanceof Error ? error.message : 'Failed to evaluate paper answers.';
     return errorJson({
       requestId,

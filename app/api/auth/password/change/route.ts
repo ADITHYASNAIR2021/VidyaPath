@@ -95,7 +95,7 @@ export async function POST(req: Request) {
     });
   }
 
-  const accessToken = cookies().get(SUPABASE_ACCESS_COOKIE)?.value;
+  const accessToken = (await cookies()).get(SUPABASE_ACCESS_COOKIE)?.value;
   if (!accessToken) {
     return errorJson({
       requestId,

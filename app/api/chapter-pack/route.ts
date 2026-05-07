@@ -17,6 +17,7 @@ import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-r
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { chapterPackRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { logger } from '@/lib/logger';
 
 interface ChapterPackRequest {
   chapterId: string;
@@ -94,7 +95,7 @@ function filterTopicsForChapter(candidates: string[], chapterTitle: string, chap
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
@@ -265,11 +266,11 @@ Return ONLY JSON:
 
       return dataJson({ requestId, data: payload });
     } catch (aiError) {
-      console.error('[chapter-pack] AI fallback triggered', aiError);
+      logger.warn({ err: aiError }, '[chapter-pack] AI fallback triggered');
       return dataJson({ requestId, data: fallback });
     }
   } catch (error) {
-    console.error('[chapter-pack] error', error);
+    logger.error({ err: error }, '[chapter-pack] error');
     const message = error instanceof Error ? error.message : 'Failed to create chapter pack.';
     return errorJson({
       requestId,

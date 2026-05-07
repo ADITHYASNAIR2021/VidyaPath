@@ -6,7 +6,8 @@ import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
-export async function DELETE(_req: Request, { params }: { params: { id: string; scopeId: string } }) {
+export async function DELETE(_req: Request, context: { params: Promise<{ id: string; scopeId: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(_req);
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);

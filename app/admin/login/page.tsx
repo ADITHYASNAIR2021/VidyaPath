@@ -5,17 +5,16 @@ function firstParam(value: string | string[] | undefined): string {
   return value || '';
 }
 
-export default function AdminLoginRedirectPage({
+export default async function AdminLoginRedirectPage({
   searchParams,
 }: {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = new URLSearchParams();
-  if (searchParams) {
-    for (const [key, raw] of Object.entries(searchParams)) {
-      const value = firstParam(raw).trim();
-      if (value) params.set(key, value);
-    }
+  const resolvedSearchParams = (await searchParams) ?? {};
+  for (const [key, raw] of Object.entries(resolvedSearchParams)) {
+    const value = firstParam(raw).trim();
+    if (value) params.set(key, value);
   }
   if (!params.get('next')) params.set('next', '/admin');
   params.set('portal', 'admin');

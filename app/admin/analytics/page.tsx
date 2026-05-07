@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart2, RefreshCw, TrendingUp, Users } from 'lucide-react';
+import { BarChart2, Download, FileText, RefreshCw, TrendingUp, Users } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
@@ -29,6 +29,26 @@ function unwrap<T>(payload: unknown): T {
     return (payload as { data: T }).data;
   }
   return payload as T;
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  const clean = values.filter((value) => Number.isFinite(value));
+  if (clean.length < 2) return null;
+  const min = Math.min(...clean);
+  const max = Math.max(...clean);
+  const range = Math.max(1, max - min);
+  const points = clean
+    .map((value, index) => {
+      const x = (index / Math.max(1, clean.length - 1)) * 100;
+      const y = 100 - (((value - min) / range) * 100);
+      return `${x},${y}`;
+    })
+    .join(' ');
+  return (
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-2 h-6 w-full opacity-80">
+      <polyline fill="none" stroke="#4f46e5" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" points={points} />
+    </svg>
+  );
 }
 
 export default function AdminAnalyticsPage() {
@@ -71,6 +91,19 @@ export default function AdminAnalyticsPage() {
     const values = data?.dailyActiveStudents7d.map((item) => item.activeStudents) || [];
     return Math.max(1, ...values);
   }, [data?.dailyActiveStudents7d]);
+  const dailySeries = useMemo(
+    () => (data?.dailyActiveStudents7d ?? []).map((item) => item.activeStudents),
+    [data?.dailyActiveStudents7d]
+  );
+  const funnelSeries = useMemo(
+    () => data ? [
+      data.assignmentCompletionFunnel.assigned,
+      data.assignmentCompletionFunnel.submitted,
+      data.assignmentCompletionFunnel.reviewed,
+      data.assignmentCompletionFunnel.released,
+    ] : [],
+    [data]
+  );
 
   return (
     <div className="mx-auto max-w-6xl p-6">
@@ -94,6 +127,29 @@ export default function AdminAnalyticsPage() {
           </span>
         </button>
       </div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <a
+          href="/api/admin/analytics/export?format=csv"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export CSV
+        </a>
+        <a
+          href="/api/admin/analytics/export?format=json"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export JSON
+        </a>
+        <a
+          href="/admin/analytics/report"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+        >
+          <FileText className="h-3.5 w-3.5" />
+          Print/PDF Report
+        </a>
+      </div>
 
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
@@ -101,14 +157,17 @@ export default function AdminAnalyticsPage() {
         <div className="rounded-xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-[#7A7490]">Total Teachers</p>
           <p className="mt-1 text-2xl font-semibold text-[#1C1C2E]">{data?.overview.totalTeachers ?? 0}</p>
+          <Sparkline values={dailySeries} />
         </div>
         <div className="rounded-xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-[#7A7490]">Active Teachers</p>
           <p className="mt-1 text-2xl font-semibold text-[#1C1C2E]">{data?.overview.activeTeachers ?? 0}</p>
+          <Sparkline values={dailySeries} />
         </div>
         <div className="rounded-xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-[#7A7490]">Completions (Week)</p>
           <p className="mt-1 text-2xl font-semibold text-[#1C1C2E]">{data?.overview.assignmentCompletionsThisWeek ?? 0}</p>
+          <Sparkline values={funnelSeries} />
         </div>
         <div className="rounded-xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-[#7A7490]">Snapshot Time</p>

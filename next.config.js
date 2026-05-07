@@ -16,23 +16,12 @@ function validateBuildEnv() {
 
 validateBuildEnv();
 
-const csp = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'self'",
-  "form-action 'self'",
-  "img-src 'self' data: blob: https:",
-  "font-src 'self' data:",
-  "style-src 'self' 'unsafe-inline'",
-  "script-src 'self' 'unsafe-inline'",
-  "connect-src 'self' https://*.supabase.co https://api.groq.com https://generativelanguage.googleapis.com https://huggingface.co",
-  'upgrade-insecure-requests',
-].join('; ');
-
 const nextConfig = {
   images: {
-    domains: ['ncert.nic.in', 'cbseacademic.nic.in'],
+    remotePatterns: [
+      { protocol: 'https', hostname: 'ncert.nic.in' },
+      { protocol: 'https', hostname: 'cbseacademic.nic.in' },
+    ],
   },
   async headers() {
     return [
@@ -43,7 +32,6 @@ const nextConfig = {
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-          { key: 'Content-Security-Policy', value: csp.replace(/\n/g, '') },
           { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
           { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
           { key: 'X-DNS-Prefetch-Control', value: 'off' },
@@ -58,10 +46,6 @@ const nextConfig = {
         ],
       },
     ];
-  },
-  experimental: {
-    // Enable instrumentation.ts for startup env validation + logging
-    instrumentationHook: true,
   },
 };
 

@@ -69,12 +69,12 @@ export default function RevisionPlanCard({ classLevel, weakChapterIds }: Revisio
 
   if (studentAiEnabled === false) {
     return (
-      <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
-        <h2 className="font-fraunces text-base font-bold text-navy-700 flex items-center gap-2">
+      <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <h2 className="flex items-center gap-2 font-fraunces text-base font-bold text-navy-700 dark:text-slate-100">
           <CalendarDays className="w-4 h-4 text-indigo-500" />
           Adaptive Revision Plan
         </h2>
-        <p className="mt-2 text-sm text-[#4A4A6A]">
+        <p className="mt-2 text-sm text-[#4A4A6A] dark:text-slate-300">
           Revision AI is available only for logged-in student accounts.
         </p>
         <Link
@@ -88,9 +88,9 @@ export default function RevisionPlanCard({ classLevel, weakChapterIds }: Revisio
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
+    <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-center justify-between gap-3 mb-3">
-        <h2 className="font-fraunces text-base font-bold text-navy-700 flex items-center gap-2">
+        <h2 className="flex items-center gap-2 font-fraunces text-base font-bold text-navy-700 dark:text-slate-100">
           <CalendarDays className="w-4 h-4 text-indigo-500" />
           Adaptive Revision Plan
         </h2>
@@ -99,7 +99,7 @@ export default function RevisionPlanCard({ classLevel, weakChapterIds }: Revisio
         </span>
       </div>
 
-      <p className="text-xs text-[#6A6A84] mb-3">
+      <p className="mb-3 text-xs text-[#6A6A84] dark:text-slate-300">
         Generate a week-wise plan focused on weak and high-yield chapters.
       </p>
 
@@ -113,7 +113,7 @@ export default function RevisionPlanCard({ classLevel, weakChapterIds }: Revisio
       </button>
 
       {error && (
-        <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2.5 py-2">
+        <div className="mt-3 rounded-lg border border-red-100 bg-red-50 px-2.5 py-2 text-xs text-red-700 dark:border-red-400/40 dark:bg-red-500/20 dark:text-red-100">
           {error}
         </div>
       )}
@@ -121,14 +121,14 @@ export default function RevisionPlanCard({ classLevel, weakChapterIds }: Revisio
       {planWeeks && planWeeks.length > 0 && (
         <div className="mt-3 space-y-2">
           {planWeeks.slice(0, 3).map((week) => (
-            <div key={week.week} className="rounded-xl border border-indigo-100 bg-indigo-50 p-2.5">
-              <div className="text-xs font-semibold text-indigo-800">
+            <div key={week.week} className="rounded-xl border border-indigo-100 bg-indigo-50 p-2.5 dark:border-indigo-400/40 dark:bg-indigo-500/20">
+              <div className="text-xs font-semibold text-indigo-800 dark:text-indigo-100">
                 Week {week.week} | Target {week.targetMarks} marks
               </div>
-              <div className="text-[11px] text-indigo-700 mt-0.5 truncate">
+              <div className="mt-0.5 truncate text-[11px] text-indigo-700 dark:text-indigo-200">
                 Focus: {week.focusChapters.join(', ')}
               </div>
-              <div className="text-[11px] text-indigo-700 mt-0.5 truncate">
+              <div className="mt-0.5 truncate text-[11px] text-indigo-700 dark:text-indigo-200">
                 {week.tasks.slice(0, 2).join(' | ')}
               </div>
             </div>

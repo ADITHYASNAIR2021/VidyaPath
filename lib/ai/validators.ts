@@ -10,7 +10,7 @@ export interface MCQRagMeta {
   askedInPastExam: boolean;
   pyqTag: MCQPyqTag;
   years?: number[];
-  sourceMix?: Array<'paper' | 'textbook'>;
+  sourceMix?: Array<'paper' | 'textbook' | 'image-ocr'>;
   qualityBand?: MCQQualityBand;
   qualityScore?: number;
 }
@@ -79,10 +79,24 @@ export interface ChapterPackResponse {
 export interface ChapterDrillResponse {
   chapterId: string;
   difficulty: string;
+  questionType?: 'mcq' | 'short' | 'long' | 'mixed';
   questions: MCQItem[];
+  shortQuestions?: string[];
+  longQuestions?: string[];
   answerKey: number[];
   topicCoverage: string[];
   sourceCitations: ChapterCitation[];
+  grounding?: {
+    usedPgvector: boolean;
+    usedOnDemandFallback: boolean;
+    retrieval?: {
+      snippetCount: number;
+      averageRelevance: number;
+      sourceMix: Array<'paper' | 'textbook' | 'image-ocr'>;
+      chapterMatchCount: number;
+    };
+    strongGroundedCount?: number;
+  };
 }
 
 export interface ChapterDiagnoseResponse {
@@ -247,10 +261,25 @@ export function isChapterPackResponse(value: unknown): value is ChapterPackRespo
 export function isChapterDrillResponse(value: unknown): value is ChapterDrillResponse {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
+  const shortQuestionsValid =
+    !Array.isArray(record.shortQuestions) ||
+    record.shortQuestions.every((entry) => typeof entry === 'string');
+  const longQuestionsValid =
+    !Array.isArray(record.longQuestions) ||
+    record.longQuestions.every((entry) => typeof entry === 'string');
+  const questionTypeValid =
+    record.questionType === undefined ||
+    record.questionType === 'mcq' ||
+    record.questionType === 'short' ||
+    record.questionType === 'long' ||
+    record.questionType === 'mixed';
   return (
     typeof record.chapterId === 'string' &&
     typeof record.difficulty === 'string' &&
+    questionTypeValid &&
     isMCQArray(record.questions) &&
+    shortQuestionsValid &&
+    longQuestionsValid &&
     Array.isArray(record.answerKey) &&
     Array.isArray(record.topicCoverage) &&
     isChapterCitationArray(record.sourceCitations)

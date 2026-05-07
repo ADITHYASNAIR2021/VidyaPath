@@ -1,3 +1,5 @@
+import { logger } from '@/lib/logger';
+
 interface SupabaseStateRecord<T> {
   state_key: string;
   state_json: T;
@@ -20,9 +22,7 @@ function getSupabaseConfig():
   const schema = process.env.SUPABASE_STATE_SCHEMA?.trim() || 'public';
   if (url && !key && !warnedMissingServiceRoleKey) {
     warnedMissingServiceRoleKey = true;
-    console.warn(
-      '[supabase-state] SUPABASE_URL is set but SUPABASE_SERVICE_ROLE_KEY is missing. Remote persistence disabled; using local fallback.'
-    );
+    logger.warn('[supabase-state] SUPABASE_URL is set but SUPABASE_SERVICE_ROLE_KEY is missing. Remote persistence disabled; using local fallback.');
   }
   if (!url || !key) return null;
   return { url: url.replace(/\/+$/, ''), key, table, schema };

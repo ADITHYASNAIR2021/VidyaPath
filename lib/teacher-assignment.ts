@@ -14,6 +14,8 @@ import {
 import type {
   TeacherAssignmentPack,
   TeacherFormulaDrillItem,
+  TeacherPaperBlueprint,
+  TeacherPaperMode,
   TeacherQuestionResult,
   TeacherQuestionVerdict,
   TeacherSubmissionAnswer,
@@ -26,6 +28,10 @@ export interface TeacherAssignmentPackRequest {
   classLevel: 10 | 12;
   subject: string;
   questionCount: number;
+  paperMode?: TeacherPaperMode;
+  shortAnswerCount?: number;
+  longAnswerCount?: number;
+  formulaDrillCount?: number;
   difficultyMix: string;
   includeShortAnswers: boolean;
   includeLongAnswers?: boolean;
@@ -64,6 +70,12 @@ function isAssignmentDraftResponse(value: unknown): value is AssignmentDraftMode
 function clampQuestionCount(value: number): number {
   if (!Number.isFinite(value)) return 8;
   return Math.max(4, Math.min(24, Math.round(value)));
+}
+
+function clampOptionalCount(value: number | undefined, min: number, max: number, fallback = 0): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(numeric)));
 }
 
 function normalizeDifficultyMix(value: string): string {
@@ -135,36 +147,37 @@ function buildFallbackMcqs(chapterId: string, questionCount: number): MCQItem[] 
   return normalizeMCQs(output).slice(0, questionCount);
 }
 
-function buildFallbackShortAnswers(chapterId: string, includeShortAnswers: boolean): string[] {
-  if (!includeShortAnswers) return [];
+function buildFallbackShortAnswers(chapterId: string, count: number): string[] {
+  if (count <= 0) return [];
   const chapter = getChapterById(chapterId);
   if (!chapter) return [];
   return cleanTextList(
     chapter.topics.slice(0, 8).map((topic) => `Write a 3-mark board-style answer on: ${topic}.`),
-    8
-  );
+    Math.max(1, count)
+  ).slice(0, count);
 }
 
-function buildFallbackLongAnswers(chapterId: string): string[] {
+function buildFallbackLongAnswers(chapterId: string, count: number): string[] {
+  if (count <= 0) return [];
   const chapter = getChapterById(chapterId);
   if (!chapter) return [];
   return cleanTextList(
     chapter.topics
       .slice(0, 5)
       .map((topic) => `Write a 5-mark board-style long answer for: ${topic}. Include key points and a final conclusion.`),
-    5
-  );
+    Math.max(1, count)
+  ).slice(0, count);
 }
 
-function buildFallbackFormulaDrill(chapterId: string, includeFormulaDrill: boolean): TeacherFormulaDrillItem[] {
-  if (!includeFormulaDrill) return [];
+function buildFallbackFormulaDrill(chapterId: string, count: number): TeacherFormulaDrillItem[] {
+  if (count <= 0) return [];
   const chapter = getChapterById(chapterId);
   if (!chapter) return [];
   const formulaItems = chapter.formulas ?? [];
   if (formulaItems.length === 0) {
-    return chapter.topics.slice(0, 5).map((topic) => ({ name: `${topic} core relation` }));
+    return chapter.topics.slice(0, count).map((topic) => ({ name: `${topic} core relation` }));
   }
-  return formulaItems.slice(0, 8).map((formula) => ({
+  return formulaItems.slice(0, count).map((formula) => ({
     name: sanitizeText(formula.name, 140),
     latex: sanitizeText(formula.latex, 240),
   }));
@@ -234,6 +247,102 @@ function ensureExactMcqCount(items: MCQItem[], chapterId: string, questionCount:
     cursor += 1;
   }
   return normalizeMCQs(output).slice(0, questionCount);
+}
+
+function ensureExactTextCount(
+  items: string[],
+  fallbackItems: string[],
+  count: number,
+  factory: (idx: number) => string
+): string[] {
+  const normalized = cleanTextList(items, Math.max(1, count)).slice(0, count);
+  const fallback = cleanTextList(fallbackItems, Math.max(1, count));
+  const output = [...normalized];
+  let cursor = 0;
+  while (output.length < count && cursor < fallback.length) {
+    output.push(fallback[cursor]);
+    cursor += 1;
+  }
+  while (output.length < count) {
+    output.push(factory(output.length));
+  }
+  return cleanTextList(output, Math.max(1, count)).slice(0, count);
+}
+
+function ensureExactFormulaCount(
+  items: TeacherFormulaDrillItem[],
+  fallbackItems: TeacherFormulaDrillItem[],
+  count: number
+): TeacherFormulaDrillItem[] {
+  const normalized = normalizeFormulaDrill(items).slice(0, count);
+  const fallback = normalizeFormulaDrill(fallbackItems);
+  const output = [...normalized];
+  let cursor = 0;
+  while (output.length < count && cursor < fallback.length) {
+    output.push(fallback[cursor]);
+    cursor += 1;
+  }
+  while (output.length < count) {
+    output.push({ name: `Formula checkpoint ${output.length + 1}` });
+  }
+  return normalizeFormulaDrill(output).slice(0, count);
+}
+
+function buildPaperBlueprint(input: {
+  mode: TeacherPaperMode;
+  questionCount: number;
+  shortAnswerCount: number;
+  longAnswerCount: number;
+  formulaDrillCount: number;
+}): TeacherPaperBlueprint {
+  const sectionPlan: TeacherPaperBlueprint['sectionPlan'] = [];
+  if (input.questionCount > 0) {
+    sectionPlan.push({
+      section: 'Section A',
+      kind: 'mcq',
+      count: input.questionCount,
+      marksPerQuestion: 1,
+      subtotalMarks: input.questionCount,
+    });
+  }
+  if (input.shortAnswerCount > 0) {
+    sectionPlan.push({
+      section: sectionPlan.length === 0 ? 'Section A' : `Section ${String.fromCharCode(65 + sectionPlan.length)}`,
+      kind: 'short',
+      count: input.shortAnswerCount,
+      marksPerQuestion: 3,
+      subtotalMarks: input.shortAnswerCount * 3,
+    });
+  }
+  if (input.longAnswerCount > 0) {
+    sectionPlan.push({
+      section: sectionPlan.length === 0 ? 'Section A' : `Section ${String.fromCharCode(65 + sectionPlan.length)}`,
+      kind: 'long',
+      count: input.longAnswerCount,
+      marksPerQuestion: 5,
+      subtotalMarks: input.longAnswerCount * 5,
+    });
+  }
+  if (input.formulaDrillCount > 0) {
+    sectionPlan.push({
+      section: sectionPlan.length === 0 ? 'Section A' : `Section ${String.fromCharCode(65 + sectionPlan.length)}`,
+      kind: 'formula',
+      count: input.formulaDrillCount,
+      marksPerQuestion: 1,
+      subtotalMarks: input.formulaDrillCount,
+    });
+  }
+  return {
+    mode: input.mode,
+    mcqCount: input.questionCount,
+    shortAnswerCount: input.shortAnswerCount,
+    longAnswerCount: input.longAnswerCount,
+    formulaDrillCount: input.formulaDrillCount,
+    totalQuestions:
+      input.questionCount + input.shortAnswerCount + input.longAnswerCount + input.formulaDrillCount,
+    totalMarks: sectionPlan.reduce((sum, row) => sum + row.subtotalMarks, 0),
+    sectionPlan,
+  };
 }
 
 function parseAnswerTokenToIndex(token: string, optionCount: number): number | null {
@@ -329,18 +438,45 @@ export async function buildTeacherAssignmentPackDraft(
 
   const questionCount = clampQuestionCount(request.questionCount);
   const difficultyMix = normalizeDifficultyMix(request.difficultyMix);
-  const includeShortAnswers = request.includeShortAnswers === true;
-  const includeLongAnswers = request.includeLongAnswers !== false; // default true for backward-compat
-  const includeFormulaDrill = request.includeFormulaDrill === true;
+  const paperMode: TeacherPaperMode = request.paperMode ?? 'mixed';
+  const includeShortAnswers = request.includeShortAnswers === true || Number(request.shortAnswerCount) > 0;
+  const includeLongAnswers = request.includeLongAnswers !== false || Number(request.longAnswerCount) > 0;
+  const includeFormulaDrill = request.includeFormulaDrill === true || Number(request.formulaDrillCount) > 0;
+
+  let shortAnswerCount = includeShortAnswers
+    ? clampOptionalCount(request.shortAnswerCount, 0, 20, paperMode === 'theory-heavy' ? 8 : 4)
+    : 0;
+  let longAnswerCount = includeLongAnswers
+    ? clampOptionalCount(request.longAnswerCount, 0, 12, paperMode === 'theory-heavy' ? 4 : 2)
+    : 0;
+  let formulaDrillCount = includeFormulaDrill
+    ? clampOptionalCount(request.formulaDrillCount, 0, 20, paperMode === 'theory-heavy' ? 2 : 3)
+    : 0;
+  if (paperMode === 'mcq-only') {
+    shortAnswerCount = 0;
+    longAnswerCount = 0;
+    formulaDrillCount = includeFormulaDrill ? formulaDrillCount : 0;
+  }
+  if (paperMode === 'theory-heavy' && shortAnswerCount + longAnswerCount === 0) {
+    shortAnswerCount = 6;
+    longAnswerCount = 2;
+  }
 
   const fallbackMcqs = buildFallbackMcqs(chapter.id, questionCount);
-  const fallbackShortAnswers = buildFallbackShortAnswers(chapter.id, includeShortAnswers);
-  const fallbackLongAnswers = includeLongAnswers ? buildFallbackLongAnswers(chapter.id) : [];
-  const fallbackFormulaDrill = buildFallbackFormulaDrill(chapter.id, includeFormulaDrill);
+  const fallbackShortAnswers = buildFallbackShortAnswers(chapter.id, shortAnswerCount);
+  const fallbackLongAnswers = buildFallbackLongAnswers(chapter.id, longAnswerCount);
+  const fallbackFormulaDrill = buildFallbackFormulaDrill(chapter.id, formulaDrillCount);
+  const paperBlueprint = buildPaperBlueprint({
+    mode: paperMode,
+    questionCount,
+    shortAnswerCount,
+    longAnswerCount,
+    formulaDrillCount,
+  });
   const fallbackMistakes = await buildFallbackCommonMistakes(chapter.id);
   const fallbackEstimatedTime = Math.max(
     20,
-    questionCount * 2 + (includeShortAnswers ? fallbackShortAnswers.length * 5 : 0)
+    questionCount * 2 + shortAnswerCount * 4 + longAnswerCount * 8 + formulaDrillCount
   );
 
   const contextPack = await getContextPack({
@@ -369,8 +505,13 @@ export async function buildTeacherAssignmentPackDraft(
   const prompt = `Create a teacher-ready assignment pack for CBSE chapter practice.
 Chapter: ${chapter.title} (${chapter.subject}, Class ${chapter.classLevel}, id ${chapter.id})
 Requested MCQs: ${questionCount}
+Paper mode: ${paperMode}
+Requested short answers: ${shortAnswerCount}
+Requested long answers: ${longAnswerCount}
+Requested formula drills: ${formulaDrillCount}
 Difficulty mix: ${difficultyMix}
 Include short answers: ${includeShortAnswers ? 'yes' : 'no'}
+Include long answers: ${includeLongAnswers ? 'yes' : 'no'}
 Include formula drill: ${includeFormulaDrill ? 'yes' : 'no'}
 PYQ hints: ${pyq ? `avg marks ${pyq.avgMarks}, high-yield topics: ${pyq.importantTopics.join(', ')}` : 'No PYQ hints available'}
 
@@ -416,17 +557,27 @@ ${buildVariationInstruction(variation)}`;
       }
     );
     const shortAnswers = includeShortAnswers
-      ? cleanTextList(data.shortAnswers, 12).length > 0
-        ? cleanTextList(data.shortAnswers, 12)
-        : fallbackShortAnswers
+      ? ensureExactTextCount(
+          data.shortAnswers,
+          fallbackShortAnswers,
+          shortAnswerCount,
+          (idx) => `Write a board-style short answer for key concept ${idx + 1}.`
+        )
       : [];
-    const longAnswers = cleanTextList(data.longAnswers, 8).length > 0
-      ? cleanTextList(data.longAnswers, 8)
-      : fallbackLongAnswers;
+    const longAnswers = includeLongAnswers
+      ? ensureExactTextCount(
+          data.longAnswers,
+          fallbackLongAnswers,
+          longAnswerCount,
+          (idx) => `Write a structured long answer for topic ${idx + 1} with conclusion.`
+        )
+      : [];
     const formulaDrill = includeFormulaDrill
-      ? normalizeFormulaDrill(data.formulaDrill).length > 0
-        ? normalizeFormulaDrill(data.formulaDrill)
-        : fallbackFormulaDrill
+      ? ensureExactFormulaCount(
+          data.formulaDrill,
+          fallbackFormulaDrill,
+          formulaDrillCount
+        )
       : [];
     const commonMistakes = cleanTextList(data.commonMistakes, 10).length > 0
       ? cleanTextList(data.commonMistakes, 10)
@@ -442,7 +593,10 @@ ${buildVariationInstruction(variation)}`;
       difficultyMix,
       dueDate: request.dueDate ? sanitizeText(request.dueDate, 40) : undefined,
       includeShortAnswers,
+      includeLongAnswers,
       includeFormulaDrill,
+      paperMode,
+      paperBlueprint,
       mcqs,
       shortAnswers,
       longAnswers,
@@ -460,7 +614,10 @@ ${buildVariationInstruction(variation)}`;
       difficultyMix,
       dueDate: request.dueDate ? sanitizeText(request.dueDate, 40) : undefined,
       includeShortAnswers,
+      includeLongAnswers,
       includeFormulaDrill,
+      paperMode,
+      paperBlueprint,
       mcqs: annotatedFallbackMcqs,
       shortAnswers: fallbackShortAnswers,
       longAnswers: fallbackLongAnswers,

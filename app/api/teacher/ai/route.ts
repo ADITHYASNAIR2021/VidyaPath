@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getChapterById } from '@/lib/data';
+import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskText } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
@@ -185,7 +186,7 @@ Total Marks: ${totalMarks}`,
 export async function POST(req: NextRequest) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     // Teachers, admins, and developers only
@@ -271,10 +272,20 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const contextPack = await getContextPack({
+      task: type === 'question-paper' || type === 'worksheet' ? 'chapter-drill' : 'chat',
+      classLevel: classLevel === 10 || classLevel === 12 ? classLevel : 12,
+      subject,
+      chapterId: chapter?.id ?? (chapterId || undefined),
+      chapterTopics: topics,
+      query: `teacher ${type} ${chapterTitle} ${difficulty} ${topics.join(' ')}`.trim(),
+      topK: 8,
+    });
+
     const generated = await generateTaskText({
       task: 'chat',
-      contextHash: `teacher-${type}-${chapterId || chapterTitle}`,
-      contextSnippets: [],
+      contextHash: contextPack.contextHash || `teacher-${type}-${chapterId || chapterTitle}`,
+      contextSnippets: contextPack.snippets,
       systemPrompt: system,
       userPrompt: user,
       temperature: 0.5,
@@ -311,6 +322,11 @@ export async function POST(req: NextRequest) {
         chapterTitle,
         subject,
         result: generated.text.trim(),
+        grounding: {
+          usedPgvector: contextPack.usedPgvector,
+          usedOnDemandFallback: contextPack.usedOnDemandFallback,
+          retrieval: contextPack.retrievalMeta,
+        },
       },
     });
   } catch (error) {

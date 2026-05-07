@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type {
   TeacherAssignmentPack,
+  TeacherAssignmentClassInsights,
+  TeacherPaperMode,
   TeacherScope,
   TeacherStorageStatus,
 } from '@/lib/teacher-types';
@@ -11,7 +13,7 @@ import type { MCQItem } from '@/lib/ai/validators';
 import {
   Package, Plus, RefreshCw, CheckCircle, Send, Archive,
   ChevronDown, ChevronUp, Calendar, Layers, Clock,
-  Edit2, Save, X as XIcon,
+  Edit2, Save, Lock, Unlock, Wand2, X as XIcon,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
@@ -26,7 +28,21 @@ function unwrap<T>(payload: unknown): T {
 function apiError(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== 'object') return fallback;
   const r = payload as Record<string, unknown>;
-  return String(r.message || r.error || fallback);
+  const base = String(r.message || r.error || fallback);
+  const issues = Array.isArray(r.issues) ? r.issues : [];
+  const issueText = issues
+    .map((issue) => {
+      if (!issue || typeof issue !== 'object') return '';
+      const entry = issue as Record<string, unknown>;
+      const path = typeof entry.path === 'string' ? entry.path : '';
+      const message = typeof entry.message === 'string' ? entry.message : '';
+      if (!message) return '';
+      return path && path !== '(root)' ? `${path}: ${message}` : message;
+    })
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' | ');
+  return issueText ? `${base} (${issueText})` : base;
 }
 
 const STATUS_LABELS: Record<string, { label: string; className: string }> = {
@@ -37,6 +53,27 @@ const STATUS_LABELS: Record<string, { label: string; className: string }> = {
 };
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E'];
+
+function normalizeQuestionNo(value: string): string {
+  const clean = String(value || '').trim().toUpperCase();
+  const numeric = Number(clean.replace(/[^0-9]/g, ''));
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  return `Q${Math.round(numeric)}`;
+}
+
+function getQuestionMeta(pack: TeacherAssignmentPack, questionNo: string): {
+  locked: boolean;
+  weakSignal: boolean;
+  quality: 'strong' | 'weak' | 'needs-review' | undefined;
+} {
+  const normalized = normalizeQuestionNo(questionNo);
+  const meta = normalized ? pack.questionMeta?.[normalized] : undefined;
+  return {
+    locked: !!meta?.locked,
+    weakSignal: !!meta?.weakSignal,
+    quality: meta?.quality,
+  };
+}
 
 function renderRagMeta(meta: MCQItem['ragMeta']) {
   if (!meta) return null;
@@ -322,6 +359,7 @@ export default function TeacherAssignmentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [packs, setPacks] = useState<TeacherAssignmentPack[]>([]);
+  const [insights, setInsights] = useState<TeacherAssignmentClassInsights | null>(null);
   const [scopes, setScopes] = useState<TeacherScope[]>([]);
   const [storageStatus, setStorageStatus] = useState<TeacherStorageStatus | null>(null);
   const [expandedPackId, setExpandedPackId] = useState<string | null>(null);
@@ -332,6 +370,10 @@ export default function TeacherAssignmentsPage() {
   const [chapterId, setChapterId] = useState('');
   const [section, setSection] = useState('');
   const [questionCount, setQuestionCount] = useState(5);
+  const [paperMode, setPaperMode] = useState<TeacherPaperMode>('mixed');
+  const [shortAnswerCount, setShortAnswerCount] = useState(4);
+  const [longAnswerCount, setLongAnswerCount] = useState(2);
+  const [formulaDrillCount, setFormulaDrillCount] = useState(3);
   const [easyPct, setEasyPct] = useState(40);
   const [mediumPct, setMediumPct] = useState(40);
   const [hardPct, setHardPct] = useState(20);
@@ -347,6 +389,7 @@ export default function TeacherAssignmentsPage() {
   const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Record<string, MCQItem[]>>({});
   const [savingEdit, setSavingEdit] = useState(false);
+  const [reviewUpdatingId, setReviewUpdatingId] = useState<string | null>(null);
 
   // Chapter filter
   const [filterChapterId, setFilterChapterId] = useState('');
@@ -380,9 +423,10 @@ export default function TeacherAssignmentsPage() {
     setLoading(true);
     setError('');
     try {
-      const [sessionRes, configRes] = await Promise.all([
+      const [sessionRes, configRes, insightsRes] = await Promise.all([
         fetch('/api/teacher/session/me', { cache: 'no-store' }),
         fetch('/api/teacher', { cache: 'no-store' }),
+        fetch('/api/teacher/assignment-insights', { cache: 'no-store' }),
       ]);
       if (!sessionRes.ok) { setError('Session expired. Please sign in again.'); return; }
       const sessionData = unwrap<Record<string, unknown>>(await sessionRes.json().catch(() => null));
@@ -394,6 +438,12 @@ export default function TeacherAssignmentsPage() {
       const sorted = [...(cfg.assignmentPacks ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       setPacks(sorted);
       setStorageStatus(cfg.storageStatus ?? null);
+      if (insightsRes.ok) {
+        const insightsBody = await insightsRes.json().catch(() => null);
+        setInsights(unwrap<TeacherAssignmentClassInsights | null>(insightsBody));
+      } else {
+        setInsights(null);
+      }
     } catch {
       setError('Failed to load assignments.');
     } finally {
@@ -411,6 +461,26 @@ export default function TeacherAssignmentsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionOptions]);
 
+  useEffect(() => {
+    if (paperMode === 'mcq-only') {
+      setIncludeShortAnswers(false);
+      setIncludeLongAnswers(false);
+      setIncludeFormulaDrill(false);
+      setShortAnswerCount(0);
+      setLongAnswerCount(0);
+      setFormulaDrillCount(0);
+      return;
+    }
+    if (paperMode === 'theory-heavy') {
+      setIncludeShortAnswers(true);
+      setIncludeLongAnswers(true);
+      setIncludeFormulaDrill(true);
+      setShortAnswerCount((current) => Math.max(6, current));
+      setLongAnswerCount((current) => Math.max(2, current));
+      setFormulaDrillCount((current) => Math.max(1, current));
+    }
+  }, [paperMode]);
+
   async function createPack() {
     const chapter = ALL_CHAPTERS.find((c) => c.id === chapterId);
     if (!chapter) return;
@@ -425,6 +495,10 @@ export default function TeacherAssignmentsPage() {
           classLevel: chapter.classLevel,
           subject: chapter.subject,
           questionCount,
+          paperMode,
+          shortAnswerCount: includeShortAnswers ? Math.max(0, shortAnswerCount) : 0,
+          longAnswerCount: includeLongAnswers ? Math.max(0, longAnswerCount) : 0,
+          formulaDrillCount: includeFormulaDrill ? Math.max(0, formulaDrillCount) : 0,
           difficultyMix,
           includeShortAnswers,
           includeLongAnswers,
@@ -445,14 +519,18 @@ export default function TeacherAssignmentsPage() {
     }
   }
 
-  async function mutatePack(action: 'regenerate' | 'approve' | 'publish' | 'archive', packId: string) {
+  async function mutatePack(
+    action: 'regenerate' | 'approve' | 'publish' | 'archive',
+    packId: string,
+    extra?: Record<string, unknown>
+  ) {
     setLoading(true);
     setError('');
     try {
       const res = await fetch(`/api/teacher/assignment-pack/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packId, feedback: feedback || undefined }),
+        body: JSON.stringify({ packId, feedback: feedback || undefined, ...(extra ?? {}) }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) { setError(apiError(body, `Failed to ${action}.`)); return; }
@@ -470,10 +548,13 @@ export default function TeacherAssignmentsPage() {
     setError('');
     try {
       const days = Number(extendDays[packId]);
+      const normalizedExtendDays = action === 'extend'
+        ? (Number.isFinite(days) ? Math.max(1, days) : 3)
+        : undefined;
       const res = await fetch(`/api/teacher/assignment-pack/${encodeURIComponent(packId)}/lifecycle`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, extendDays: action === 'extend' && Number.isFinite(days) ? Math.max(1, days) : undefined }),
+        body: JSON.stringify({ action, extendDays: normalizedExtendDays }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) { setError(apiError(body, `Failed to ${action}.`)); return; }
@@ -482,6 +563,36 @@ export default function TeacherAssignmentsPage() {
       setError(`Failed to ${action}.`);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function updateReviewControls(
+    packId: string,
+    payload: {
+      lockQuestionNos?: string[];
+      unlockQuestionNos?: string[];
+      weakQuestionNos?: string[];
+      clearWeakQuestionNos?: string[];
+    }
+  ) {
+    setReviewUpdatingId(packId);
+    setError('');
+    try {
+      const res = await fetch(`/api/teacher/assignment-pack/${encodeURIComponent(packId)}/review-controls`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(apiError(body, 'Failed to update question review controls.'));
+        return;
+      }
+      await load();
+    } catch {
+      setError('Failed to update question review controls.');
+    } finally {
+      setReviewUpdatingId(null);
     }
   }
 
@@ -559,6 +670,46 @@ export default function TeacherAssignmentsPage() {
 
       {error && <div className="mb-4 rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
+      {insights && (
+        <div className="mb-4 grid gap-3 sm:grid-cols-4">
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5">
+            <p className="text-[11px] font-semibold text-indigo-700">Completion</p>
+            <p className="text-lg font-bold text-indigo-900">{insights.overallCompletionPercent}%</p>
+          </div>
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
+            <p className="text-[11px] font-semibold text-rose-700">Unanswered</p>
+            <p className="text-lg font-bold text-rose-900">{insights.unansweredAssignments}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+            <p className="text-[11px] font-semibold text-emerald-700">Published Packs</p>
+            <p className="text-lg font-bold text-emerald-900">{insights.totalPublishedAssignments}</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <p className="text-[11px] font-semibold text-amber-700">Top Weak Topic</p>
+            <p className="text-sm font-bold text-amber-900 truncate">
+              {insights.weakTopics[0]?.topic ?? '—'}
+            </p>
+          </div>
+        </div>
+      )}
+      {insights && insights.rows.length > 0 && (
+        <div className="mb-5 rounded-xl border border-[#E8E4DC] bg-white p-3">
+          <p className="text-xs font-semibold text-gray-700 mb-2">Class-Level Insight</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {insights.rows.slice(0, 6).map((row) => (
+              <div key={row.key} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                <p className="text-xs font-semibold text-gray-700">
+                  Class {row.classLevel}{row.section ? ` • ${row.section}` : ' • All Sections'}
+                </p>
+                <p className="text-[11px] text-gray-600 mt-0.5">
+                  Completion {row.completionPercent}% • Unanswered {row.unanswered}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Create form ─────────────────────────────────────────────────── */}
       {showCreate && (
         <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 space-y-5">
@@ -600,34 +751,110 @@ export default function TeacherAssignmentsPage() {
           </div>
 
           {/* Question types — 3d */}
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-2">Additional Question Types</label>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { key: 'short', label: 'Short Answer', state: includeShortAnswers, setter: setIncludeShortAnswers },
-                { key: 'long', label: 'Long Answer', state: includeLongAnswers, setter: setIncludeLongAnswers },
-                { key: 'formula', label: 'Formula Drill', state: includeFormulaDrill, setter: setIncludeFormulaDrill },
-              ].map(({ key, label, state, setter }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setter(!state)}
-                  className={clsx(
-                    'flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium transition-colors',
-                    state ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                  )}
+          <div className="space-y-3 rounded-xl border border-amber-100 bg-white p-4">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Paper Mode</label>
+                <select
+                  value={paperMode}
+                  onChange={(e) => setPaperMode(e.target.value as TeacherPaperMode)}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
                 >
-                  {state ? <CheckCircle className="w-3.5 h-3.5" /> : <div className="w-3.5 h-3.5 rounded-full border-2 border-current" />}
-                  {label}
-                </button>
-              ))}
+                  <option value="mixed">Mixed Paper</option>
+                  <option value="mcq-only">MCQ Only</option>
+                  <option value="theory-heavy">Theory Heavy</option>
+                </select>
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+                <p className="text-[11px] font-semibold text-amber-700">Blueprint Preview</p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  {questionCount + (includeShortAnswers ? shortAnswerCount : 0) + (includeLongAnswers ? longAnswerCount : 0) + (includeFormulaDrill ? formulaDrillCount : 0)} questions
+                  {' • '}
+                  {questionCount + (includeShortAnswers ? shortAnswerCount * 3 : 0) + (includeLongAnswers ? longAnswerCount * 5 : 0) + (includeFormulaDrill ? formulaDrillCount : 0)} marks
+                </p>
+              </div>
             </div>
-            <p className="mt-2 text-[11px] text-gray-400">
-              {questionCount} MCQs
-              {includeShortAnswers ? ' + Short Answers' : ''}
-              {includeLongAnswers ? ' + Long Answers' : ''}
-              {includeFormulaDrill ? ' + Formula Drill' : ''}
-            </p>
+
+            <div className="grid sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Short Answers</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIncludeShortAnswers((value) => !value)}
+                    className={clsx(
+                      'px-2 py-1 rounded-lg text-xs font-semibold border',
+                      includeShortAnswers
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-white text-gray-500 border-gray-200'
+                    )}
+                  >
+                    {includeShortAnswers ? 'On' : 'Off'}
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    disabled={!includeShortAnswers}
+                    value={shortAnswerCount}
+                    onChange={(e) => setShortAnswerCount(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm disabled:bg-gray-100"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Long Answers</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIncludeLongAnswers((value) => !value)}
+                    className={clsx(
+                      'px-2 py-1 rounded-lg text-xs font-semibold border',
+                      includeLongAnswers
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : 'bg-white text-gray-500 border-gray-200'
+                    )}
+                  >
+                    {includeLongAnswers ? 'On' : 'Off'}
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    max={12}
+                    disabled={!includeLongAnswers}
+                    value={longAnswerCount}
+                    onChange={(e) => setLongAnswerCount(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm disabled:bg-gray-100"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Formula Drill</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIncludeFormulaDrill((value) => !value)}
+                    className={clsx(
+                      'px-2 py-1 rounded-lg text-xs font-semibold border',
+                      includeFormulaDrill
+                        ? 'bg-violet-50 text-violet-700 border-violet-200'
+                        : 'bg-white text-gray-500 border-gray-200'
+                    )}
+                  >
+                    {includeFormulaDrill ? 'On' : 'Off'}
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    disabled={!includeFormulaDrill}
+                    value={formulaDrillCount}
+                    onChange={(e) => setFormulaDrillCount(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm disabled:bg-gray-100"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-2">
@@ -706,6 +933,11 @@ export default function TeacherAssignmentsPage() {
                       <Clock className="w-3 h-3" /> {new Date(pack.updatedAt).toLocaleDateString()}
                     </span>
                   </div>
+                  {pack.paperBlueprint && (
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {pack.paperBlueprint.mode} • {pack.paperBlueprint.totalQuestions}Q • {pack.paperBlueprint.totalMarks} marks
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-400">{mcqs.length}Q</span>
@@ -731,6 +963,13 @@ export default function TeacherAssignmentsPage() {
                           />
                           <button onClick={() => mutatePack('regenerate', pack.packId)} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 disabled:opacity-50">
                             <RefreshCw className="w-3.5 h-3.5" /> Regen
+                          </button>
+                          <button
+                            onClick={() => mutatePack('regenerate', pack.packId, { onlyWeak: true, preserveLocked: true })}
+                            disabled={loading}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50"
+                          >
+                            <Wand2 className="w-3.5 h-3.5" /> Regen Weak Only
                           </button>
                         </div>
                         {/* Edit button — 3b */}
@@ -807,7 +1046,66 @@ export default function TeacherAssignmentsPage() {
                       <div className="space-y-2">
                         {displayMcqs.map((q, i) => (
                           <div key={i} className="rounded-lg bg-white border border-gray-100 p-3 text-xs">
-                            <p className="font-medium text-gray-700">Q{i + 1}. {q.question}</p>
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="font-medium text-gray-700">Q{i + 1}. {q.question}</p>
+                              <div className="flex flex-col items-end gap-1">
+                                {(() => {
+                                  const questionNo = `Q${i + 1}`;
+                                  const meta = getQuestionMeta(pack, questionNo);
+                                  return (
+                                    <>
+                                      <div className="flex items-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateReviewControls(pack.packId, meta.locked ? { unlockQuestionNos: [questionNo] } : { lockQuestionNos: [questionNo] })}
+                                          disabled={reviewUpdatingId === pack.packId}
+                                          className={clsx(
+                                            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                                            meta.locked
+                                              ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                                              : 'border-gray-200 bg-gray-50 text-gray-600'
+                                          )}
+                                        >
+                                          {meta.locked ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                                          {meta.locked ? 'Locked' : 'Lock'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateReviewControls(
+                                            pack.packId,
+                                            meta.weakSignal ? { clearWeakQuestionNos: [questionNo] } : { weakQuestionNos: [questionNo] }
+                                          )}
+                                          disabled={reviewUpdatingId === pack.packId}
+                                          className={clsx(
+                                            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                                            meta.weakSignal
+                                              ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                              : 'border-amber-200 bg-amber-50 text-amber-700'
+                                          )}
+                                        >
+                                          <Wand2 className="w-3 h-3" />
+                                          {meta.weakSignal ? 'Weak' : 'Mark Weak'}
+                                        </button>
+                                      </div>
+                                      {meta.quality && (
+                                        <span
+                                          className={clsx(
+                                            'rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                                            meta.quality === 'strong'
+                                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                              : meta.quality === 'weak'
+                                                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                                : 'border-amber-200 bg-amber-50 text-amber-700'
+                                          )}
+                                        >
+                                          {meta.quality}
+                                        </span>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
                             {renderRagMeta(q.ragMeta)}
                             {q.answerMode === 'multiple' && (
                               <p className="mt-1 text-[10px] font-semibold text-violet-600">Multiple correct answers</p>

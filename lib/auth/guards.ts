@@ -45,8 +45,8 @@ export function isLegacySessionAuthEnabled(): boolean {
   const raw = (process.env.AUTH_ENABLE_LEGACY_SESSIONS || '').trim().toLowerCase();
   if (raw === '1' || raw === 'true' || raw === 'yes') return true;
   if (raw === '0' || raw === 'false' || raw === 'no') return false;
-  // default: enabled for backward compatibility until full session migration.
-  return true;
+  // Safe default: keep legacy fallback in non-production, disable by default in production.
+  return process.env.NODE_ENV !== 'production';
 }
 
 function toRequestAuthContext(
@@ -70,7 +70,7 @@ function toRequestAuthContext(
 }
 
 async function resolveSupabaseContext(): Promise<RequestAuthContext | null> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   let accessToken = cookieStore.get(SUPABASE_ACCESS_COOKIE)?.value;
   const refreshToken = cookieStore.get(SUPABASE_REFRESH_COOKIE)?.value;
   const preferredRole = parseActiveRoleHint(cookieStore.get(ACTIVE_ROLE_COOKIE)?.value);
@@ -95,8 +95,8 @@ async function resolveSupabaseContext(): Promise<RequestAuthContext | null> {
   return toRequestAuthContext(roleContext, { iat: payload.iat, exp: payload.exp });
 }
 
-function resolveLegacyContext(): RequestAuthContext | null {
-  const cookieStore = cookies();
+async function resolveLegacyContext(): Promise<RequestAuthContext | null> {
+  const cookieStore = await cookies();
   const developerToken = cookieStore.get(DEVELOPER_SESSION_COOKIE)?.value;
   const adminToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
   const teacherToken = cookieStore.get(TEACHER_SESSION_COOKIE)?.value;
@@ -193,7 +193,7 @@ export async function getTeacherSessionFromRequestCookies() {
   const context = await requireRequestRole(['teacher']);
   if (!context?.profileId) {
     if (!isLegacySessionAuthEnabled()) return null;
-    const token = cookies().get(TEACHER_SESSION_COOKIE)?.value;
+    const token = (await cookies()).get(TEACHER_SESSION_COOKIE)?.value;
     const parsed = parseTeacherSession(token);
     if (!parsed) return null;
     return getTeacherSessionById(parsed.teacherId);
@@ -204,7 +204,7 @@ export async function getTeacherSessionFromRequestCookies() {
 export async function getStudentSessionFromRequestCookies() {
   const context = await requireRequestRole(['student']);
   if (context?.profileId && context.role === 'student') {
-    const token = cookies().get(STUDENT_SESSION_COOKIE)?.value;
+    const token = (await cookies()).get(STUDENT_SESSION_COOKIE)?.value;
     const parsed = parseStudentSession(token);
     const student = await getStudentById(context.profileId, context.schoolId || undefined);
     if (!student) return null;
@@ -231,7 +231,7 @@ export async function getStudentSessionFromRequestCookies() {
     };
   }
   if (!isLegacySessionAuthEnabled()) return null;
-  const token = cookies().get(STUDENT_SESSION_COOKIE)?.value;
+  const token = (await cookies()).get(STUDENT_SESSION_COOKIE)?.value;
   const parsed = parseStudentSession(token);
   if (!parsed) return null;
   const student = await getStudentById(parsed.studentId, parsed.schoolId || undefined).catch(() => null);

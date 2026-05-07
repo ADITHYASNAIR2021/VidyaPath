@@ -7,6 +7,9 @@ const STUDENT_SHELL_PREFIXES = [
   '/formulas',
   '/equations',
   '/papers',
+  '/student/announcements',
+  '/student/assignments',
+  '/student/weekly-plans',
   '/student/attendance',
   '/student/calendar',
   '/student/certificate',
@@ -15,9 +18,11 @@ const STUDENT_SHELL_PREFIXES = [
   '/student/srs',
   '/student/timetable',
   '/student/achievements',
+  '/student/revision',
   '/student/ai-tools',
   '/student/notes',
   '/student/questions',
+  '/student/today',
 ];
 
 const EXCLUDED_STUDENT_SHELL_PREFIXES = [

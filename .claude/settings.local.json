@@ -74,7 +74,15 @@
       "Bash(awk '{print $NF}')",
       "Bash(cd /d D:\\\\VidyaPath)",
       "Bash(dir components\\\\FloatingPomodoro.tsx components\\\\AskTeacherButton.tsx app\\\\api\\\\student\\\\questions\\\\route.ts app\\\\api\\\\teacher\\\\questions\\\\route.ts app\\\\teacher\\\\questions\\\\page.tsx app\\\\student\\\\questions\\\\page.tsx)",
-      "Bash(git -C /d/VidyaPath status --short)"
+      "Bash(git -C /d/VidyaPath status --short)",
+      "Bash(Get-ChildItem -Force)",
+      "Bash(Select-Object Name, Mode)",
+      "Bash(python3)",
+      "Bash(node -e \"const readline = require\\('readline'\\); const rl = readline.createInterface\\({ input: process.stdin }\\); rl.on\\('line', \\(line\\) => { const obj = JSON.parse\\(line\\); console.log\\('JSONL Chunk Fields:'\\); Object.keys\\(obj\\).sort\\(\\).forEach\\(k => console.log\\('  ' + k + ': ' + typeof obj[k]\\)\\); rl.close\\(\\); }\\);\")"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "claude-flow"
+  ]
 }

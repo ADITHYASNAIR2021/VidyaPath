@@ -13,6 +13,17 @@ function unwrap<T>(payload: unknown): T {
   return payload as T;
 }
 
+function extractApiMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const record = payload as Record<string, unknown>;
+  if (typeof record.message === 'string' && record.message.trim()) return record.message.trim();
+  if (record.error && typeof record.error === 'object') {
+    const nested = record.error as Record<string, unknown>;
+    if (typeof nested.message === 'string' && nested.message.trim()) return nested.message.trim();
+  }
+  return fallback;
+}
+
 type QuestionKind = 'mcq' | 'short' | 'long';
 
 export default function QuestionBankPage() {
@@ -51,13 +62,20 @@ export default function QuestionBankPage() {
   async function loadItems(chapId: string) {
     if (!chapId) { setItems([]); setLoading(false); return; }
     setLoading(true);
+    setError('');
     try {
       const res = await fetch(`/api/teacher/question-bank/item?chapterId=${encodeURIComponent(chapId)}`, { cache: 'no-store' });
       const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setItems([]);
+        setError(extractApiMessage(body, 'Unable to load chapter question bank.'));
+        return;
+      }
       const data = unwrap<{ items?: TeacherQuestionBankItem[] } | null>(body);
-      setItems(res.ok && data ? (data.items ?? []) : []);
+      setItems(data ? (data.items ?? []) : []);
     } catch {
       setItems([]);
+      setError('Unable to load chapter question bank.');
     } finally {
       setLoading(false);
     }
@@ -104,10 +122,14 @@ export default function QuestionBankPage() {
   async function deleteQuestion(itemId: string) {
     try {
       const res = await fetch(`/api/teacher/question-bank/item/${itemId}`, { method: 'DELETE' });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(extractApiMessage(body, 'Failed to delete question.'));
+        return;
+      }
       await loadItems(chapterId);
     } catch {
-      // no-op
+      setError('Failed to delete question.');
     }
   }
 
@@ -134,7 +156,7 @@ export default function QuestionBankPage() {
         <div className="flex-1 min-w-48">
           <label className="text-xs font-medium text-gray-600 block mb-1">Chapter</label>
           <select value={chapterId} onChange={(e) => setChapterId(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
-            {chapters.map((ch) => <option key={ch.id} value={ch.id}>Class {ch.classLevel} — {ch.subject} — {ch.title}</option>)}
+            {chapters.map((ch) => <option key={ch.id} value={ch.id}>Class {ch.classLevel} - {ch.subject} - {ch.title}</option>)}
           </select>
         </div>
         <div className="flex items-end gap-2">
@@ -158,7 +180,7 @@ export default function QuestionBankPage() {
           </div>
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">Question Prompt</label>
-            <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Write the question…" className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm resize-none" />
+            <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Write the question..." className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm resize-none" />
           </div>
           {kind === 'mcq' && (
             <>
@@ -175,7 +197,7 @@ export default function QuestionBankPage() {
           {kind !== 'mcq' && (
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Marking Rubric (optional)</label>
-              <textarea rows={2} value={rubric} onChange={(e) => setRubric(e.target.value)} placeholder="Key points for marking…" className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm resize-none" />
+              <textarea rows={2} value={rubric} onChange={(e) => setRubric(e.target.value)} placeholder="Key points for marking..." className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm resize-none" />
             </div>
           )}
           <div className="grid grid-cols-2 gap-4">
@@ -185,12 +207,12 @@ export default function QuestionBankPage() {
             </div>
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Image URL (optional)</label>
-              <input type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
+              <input type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             </div>
           </div>
           <div className="flex gap-2">
             <button onClick={createQuestion} disabled={!prompt.trim() || creating} className="px-4 py-2 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-50 transition-colors">
-              {creating ? 'Saving…' : 'Add Question'}
+              {creating ? 'Saving...' : 'Add Question'}
             </button>
             <button onClick={() => setShowForm(false)} className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50">Cancel</button>
           </div>
@@ -199,7 +221,7 @@ export default function QuestionBankPage() {
 
       {loading && (
         <div className="flex items-center justify-center h-32 text-gray-400">
-          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading questions…
+          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading questions...
         </div>
       )}
 
@@ -246,3 +268,4 @@ export default function QuestionBankPage() {
     </div>
   );
 }
+

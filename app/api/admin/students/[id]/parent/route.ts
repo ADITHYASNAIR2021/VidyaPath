@@ -7,7 +7,8 @@ import { createOrUpdateParentLink } from '@/lib/parent-portal-db';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request, context: { params: { id: string } }) {
+export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
@@ -20,7 +21,7 @@ export async function POST(req: Request, context: { params: { id: string } }) {
     });
   }
 
-  const studentId = context.params?.id?.trim();
+  const studentId = params.id?.trim();
   if (!studentId) {
     return errorJson({ requestId, errorCode: 'missing-student-id', message: 'Student id is required.', status: 400 });
   }

@@ -26,6 +26,8 @@ interface ParentDashboardData {
   upcomingEvents: Array<{ id: string; title: string; eventDate: string; type: string }>;
   resources: Array<{ id: string; title: string; type: string; url: string; createdAt: string }>;
   announcements: Array<{ id: string; title: string; body: string; createdAt: string }>;
+  upcomingAssignments: Array<{ packId: string; title: string; subject: string; dueDate?: string }>;
+  contactActions: Array<{ type: 'school-phone' | 'school-email' | 'teacher-desk'; label: string; value: string }>;
 }
 
 function unwrap<T>(payload: unknown): T | null {
@@ -146,10 +148,38 @@ export default function ParentDashboardPage() {
                 {dashboard.announcements.length === 0 && <p className="text-xs text-[#8A8AAA]">No announcements yet.</p>}
               </div>
             </div>
+
+            <div className="rounded-xl border border-gray-200 p-4">
+              <h2 className="text-sm font-semibold text-navy-700">Upcoming Work</h2>
+              <div className="mt-3 space-y-2 text-sm">
+                {dashboard.upcomingAssignments.slice(0, 8).map((item) => (
+                  <div key={item.packId} className="rounded-lg bg-[#F9F7F2] px-3 py-2">
+                    <p className="font-medium text-navy-700">{item.title}</p>
+                    <p className="text-xs text-[#6D6A7C]">
+                      {item.subject}
+                      {item.dueDate ? ` • Due ${new Date(item.dueDate).toLocaleDateString()}` : ''}
+                    </p>
+                  </div>
+                ))}
+                {dashboard.upcomingAssignments.length === 0 && <p className="text-xs text-[#8A8AAA]">No upcoming assignments found.</p>}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4">
+              <h2 className="text-sm font-semibold text-navy-700">Contact Actions</h2>
+              <div className="mt-3 space-y-2 text-sm">
+                {dashboard.contactActions.map((item) => (
+                  <div key={`${item.type}-${item.value}`} className="rounded-lg bg-[#F9F7F2] px-3 py-2">
+                    <p className="font-medium text-navy-700">{item.label}</p>
+                    <p className="text-xs text-[#6D6A7C]">{item.value}</p>
+                  </div>
+                ))}
+                {dashboard.contactActions.length === 0 && <p className="text-xs text-[#8A8AAA]">No contact actions configured yet.</p>}
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 }
-

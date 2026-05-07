@@ -13,6 +13,8 @@
  *   assertRequiredEnv(); // Throws in production if any required var is missing
  */
 
+import { logger } from '@/lib/logger';
+
 interface EnvSpec {
   key: string;
   /** If true, a missing value causes a hard throw in production (no fallback). */
@@ -107,6 +109,18 @@ export function validateEnv(mode: 'strict' | 'report' = 'report'): EnvValidation
     }
   }
 
+  if (process.env.NODE_ENV === 'production') {
+    const legacySessions = (process.env.AUTH_ENABLE_LEGACY_SESSIONS || '').trim().toLowerCase();
+    if (['1', 'true', 'yes'].includes(legacySessions)) {
+      missing.push('AUTH_ENABLE_LEGACY_SESSIONS must not be true in production');
+    } else if (!legacySessions) {
+      warnings.push('AUTH_ENABLE_LEGACY_SESSIONS is unset in production; set it explicitly to false.');
+    }
+    if ((process.env.SINGLE_ENV_MODE || '').trim() === '1') {
+      missing.push('SINGLE_ENV_MODE must not be 1 in production');
+    }
+  }
+
   const ok = missing.length === 0;
 
   if (mode === 'strict' && !ok) {
@@ -130,11 +144,12 @@ export function assertRequiredEnv(): void {
     // In dev/test, warn but don't throw
     const result = validateEnv('report');
     for (const warn of result.warnings) {
-      console.warn(`[env-validation] WARN: ${warn}`);
+      logger.warn({ warn }, '[env-validation] missing env var');
     }
     if (!result.ok) {
-      console.warn(
-        `[env-validation] Missing required vars in dev (would throw in production): ${result.missing.join(', ')}`,
+      logger.warn(
+        { missing: result.missing },
+        '[env-validation] missing required vars in dev (would throw in production)',
       );
     }
     return;

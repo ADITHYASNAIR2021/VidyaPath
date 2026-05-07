@@ -22,7 +22,8 @@ type SubmissionRow = {
   created_at: string;
 };
 
-export async function GET(req: Request, { params }: { params: { submissionId: string } }) {
+export async function GET(req: Request, context: { params: Promise<{ submissionId: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const session = await getTeacherSessionFromRequestCookies();
   if (!session) return unauthorizedJson('Unauthorized.', requestId);

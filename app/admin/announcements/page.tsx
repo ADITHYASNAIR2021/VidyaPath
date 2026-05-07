@@ -14,6 +14,10 @@ interface Announcement {
   audience: Audience;
   createdByRole: 'admin' | 'developer';
   createdAt: string;
+  estimatedRecipients?: number;
+  deliveredRecipients?: number;
+  deliveryStatus?: 'confirmed' | 'queued' | 'failed';
+  deliveredAt?: string;
 }
 
 function unwrap<T>(payload: unknown): T {
@@ -35,6 +39,7 @@ export default function AdminAnnouncementsPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [deliveryNote, setDeliveryNote] = useState('');
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [form, setForm] = useState({
     title: '',
@@ -84,6 +89,7 @@ export default function AdminAnnouncementsPage() {
     if (!form.title.trim() || !form.body.trim()) return;
     setSending(true);
     setError('');
+    setDeliveryNote('');
     try {
       const response = await fetch('/api/admin/announcements', {
         method: 'POST',
@@ -98,6 +104,17 @@ export default function AdminAnnouncementsPage() {
       if (!response.ok) {
         setError(body?.message || 'Failed to send announcement.');
         return;
+      }
+      const meta = body && typeof body === 'object' && 'meta' in (body as Record<string, unknown>)
+        ? ((body as Record<string, unknown>).meta as Record<string, unknown>)
+        : null;
+      const confirmation = meta && typeof meta.deliveryConfirmation === 'object'
+        ? (meta.deliveryConfirmation as Record<string, unknown>)
+        : null;
+      if (confirmation) {
+        const estimated = Number(confirmation.estimatedRecipients);
+        const status = String(confirmation.deliveryStatus || 'confirmed');
+        setDeliveryNote(`${status.toUpperCase()}: sent to approximately ${Number.isFinite(estimated) ? estimated : 0} recipients.`);
       }
       setForm({ title: '', body: '', audience: form.audience });
       await loadAnnouncements();
@@ -132,6 +149,7 @@ export default function AdminAnnouncementsPage() {
       </div>
 
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      {deliveryNote && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{deliveryNote}</div>}
 
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
         {(Object.keys(AUDIENCE_LABELS) as Audience[]).map((audience) => (
@@ -208,6 +226,11 @@ export default function AdminAnnouncementsPage() {
                   <p className="mt-2 text-[11px] text-gray-500">
                     {new Date(announcement.createdAt).toLocaleString()} | by {announcement.createdByRole}
                   </p>
+                  {typeof announcement.estimatedRecipients === 'number' && (
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      Delivery: {announcement.deliveryStatus ?? 'confirmed'} • {announcement.deliveredRecipients ?? announcement.estimatedRecipients}/{announcement.estimatedRecipients} recipients
+                    </p>
+                  )}
                 </div>
                 <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700">
                   {AUDIENCE_LABELS[announcement.audience]}

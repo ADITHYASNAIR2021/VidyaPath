@@ -15,19 +15,37 @@
 import { NextRequest } from 'next/server';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { announcementReadSchema } from '@/lib/schemas/engagement';
 import { getSupabaseAccessTokenFromRequest } from '@/lib/auth/supabase-auth';
 import { getUserClient } from '@/lib/supabase-rest';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
 const READS_TABLE = 'announcement_reads';
 
 export async function POST(req: NextRequest) {
   const requestId = getRequestId(req);
+  const ip = getClientIp(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
+    const rateLimit = await checkRateLimit({
+      key: buildRateLimitKey('student:announcements:read', [context?.profileId || context?.authUserId || ip, context?.schoolId]),
+      windowSeconds: 60,
+      maxRequests: 180,
+      blockSeconds: 120,
+      metadata: { endpoint: '/api/student/announcements/read' },
+    });
+    if (!rateLimit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many read updates. Please retry shortly.',
+        status: 429,
+        hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
+      });
+    }
 
     const bodyResult = await parseAndValidateJsonBody(req, 4 * 1024, announcementReadSchema);
     if (!bodyResult.ok) {

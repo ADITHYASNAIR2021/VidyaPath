@@ -3,9 +3,10 @@ import { buildTeacherAssignmentPackDraft, buildTeacherPackUrls, sanitizePackTitl
 import { getStudentSessionFromRequestCookies, getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getSubjectsForAcademicTrack } from '@/lib/academic-taxonomy';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { z } from 'zod';
+import { logger } from '@/lib/logger';
 
 const teacherActionSchema = z.enum([
   'set-important-topics',
@@ -17,7 +18,11 @@ const teacherActionSchema = z.enum([
 const teacherActionEnvelopeSchema = z.record(z.string(), z.unknown());
 const sectionSchema = z.string().trim().max(40).optional();
 const chapterIdSchema = z.string().trim().min(1).max(80);
-const dueDateSchema = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/);
+const dueDateSchema = z.union([
+  z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  z.string().trim().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/),
+  z.string().trim().datetime({ offset: true }),
+]);
 
 const setImportantTopicsActionSchema = z.object({
   action: z.literal('set-important-topics'),
@@ -54,8 +59,13 @@ const createAssignmentPackActionSchema = z.object({
   classLevel: z.coerce.number().refine((value) => value === 10 || value === 12),
   subject: z.string().trim().min(1).max(80),
   questionCount: z.coerce.number().int().min(1).max(24).optional(),
+  paperMode: z.enum(['mcq-only', 'mixed', 'theory-heavy']).optional(),
+  shortAnswerCount: z.coerce.number().int().min(0).max(20).optional(),
+  longAnswerCount: z.coerce.number().int().min(0).max(12).optional(),
+  formulaDrillCount: z.coerce.number().int().min(0).max(20).optional(),
   difficultyMix: z.string().trim().max(100).optional(),
   includeShortAnswers: z.boolean().optional(),
+  includeLongAnswers: z.boolean().optional(),
   includeFormulaDrill: z.boolean().optional(),
   dueDate: dueDateSchema.optional(),
   section: sectionSchema,
@@ -72,6 +82,7 @@ import {
 import { getStudentEnrolledSubjects } from '@/lib/school-management-db';
 import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
  
 export const dynamic = 'force-dynamic';
 
@@ -195,7 +206,7 @@ export async function GET(req: Request) {
     }
     return dataJson({ requestId, data: config });
   } catch (error) {
-    console.error('[teacher:get] error', error);
+    logger.error({ err: error }, '[teacher:get] error');
     return errorJson({
       requestId,
       errorCode: 'teacher-config-read-failed',
@@ -207,6 +218,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
+  const ip = getClientIp(req);
   try {
     const session = await getTeacherSessionFromRequestCookies();
     if (!session) {
@@ -309,6 +321,22 @@ export async function POST(req: Request) {
     }
 
     if (action === 'add-announcement') {
+      const rateLimit = await checkRateLimit({
+        key: buildRateLimitKey('teacher:announcements:add', [session.teacher.id, session.teacher.schoolId || ip]),
+        windowSeconds: 120,
+        maxRequests: 30,
+        blockSeconds: 300,
+        metadata: { endpoint: '/api/teacher', action: 'add-announcement' },
+      });
+      if (!rateLimit.allowed) {
+        return errorJson({
+          requestId,
+          errorCode: 'rate-limit-exceeded',
+          message: 'Too many announcement publishes. Please retry shortly.',
+          status: 429,
+          hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
+        });
+      }
       const parsedAction = addAnnouncementActionSchema.safeParse(body);
       if (!parsedAction.success) {
         return errorJson({
@@ -345,6 +373,22 @@ export async function POST(req: Request) {
     }
 
     if (action === 'remove-announcement') {
+      const rateLimit = await checkRateLimit({
+        key: buildRateLimitKey('teacher:announcements:remove', [session.teacher.id, session.teacher.schoolId || ip]),
+        windowSeconds: 120,
+        maxRequests: 60,
+        blockSeconds: 180,
+        metadata: { endpoint: '/api/teacher', action: 'remove-announcement' },
+      });
+      if (!rateLimit.allowed) {
+        return errorJson({
+          requestId,
+          errorCode: 'rate-limit-exceeded',
+          message: 'Too many announcement updates. Please retry shortly.',
+          status: 429,
+          hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
+        });
+      }
       const parsedAction = removeAnnouncementActionSchema.safeParse(body);
       if (!parsedAction.success) {
         return errorJson({
@@ -389,6 +433,7 @@ export async function POST(req: Request) {
       const questionCount = Number(parsedAction.data.questionCount);
       const difficultyMix = parsedAction.data.difficultyMix ?? '40% easy, 40% medium, 20% hard';
       const includeShortAnswers = parsedAction.data.includeShortAnswers !== false;
+      const includeLongAnswers = parsedAction.data.includeLongAnswers !== false;
       const includeFormulaDrill = parsedAction.data.includeFormulaDrill !== false;
       const dueDate = parsedAction.data.dueDate;
 
@@ -397,8 +442,13 @@ export async function POST(req: Request) {
         classLevel,
         subject,
         questionCount: Number.isFinite(questionCount) ? questionCount : 8,
+        paperMode: parsedAction.data.paperMode,
+        shortAnswerCount: parsedAction.data.shortAnswerCount,
+        longAnswerCount: parsedAction.data.longAnswerCount,
+        formulaDrillCount: parsedAction.data.formulaDrillCount,
         difficultyMix,
         includeShortAnswers,
+        includeLongAnswers,
         includeFormulaDrill,
         dueDate,
       });
@@ -437,7 +487,7 @@ export async function POST(req: Request) {
       status: 400,
     });
   } catch (error) {
-    console.error('[teacher:post] error', error);
+    logger.error({ err: error }, '[teacher:post] error');
     const message = error instanceof Error ? error.message : 'Failed to update teacher config.';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(message) ? 503 : 500;
     return errorJson({

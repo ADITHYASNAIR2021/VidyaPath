@@ -32,31 +32,26 @@ export default function DeveloperPortalNav() {
   const pathname = usePathname();
 
   return (
-    <div className="sticky top-0 z-30 border-b border-[#E8E4DC] bg-white/90 backdrop-blur">
-      <div className="mx-auto max-w-7xl px-4 py-2">
-        <nav className="flex gap-2 overflow-x-auto whitespace-nowrap" aria-label="Developer portal navigation">
-          {NAV_LINKS.map((item) => {
-            const active = isActive(pathname, item.href);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={clsx(
-                  'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
-                  active
-                    ? 'border-violet-200 bg-violet-50 text-violet-700'
-                    : 'border-[#E8E4DC] bg-white text-[#4A4A6A] hover:bg-gray-50',
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
-    </div>
+    <nav className="flex gap-2 overflow-x-auto whitespace-nowrap" aria-label="Developer portal navigation">
+      {NAV_LINKS.map((item) => {
+        const active = isActive(pathname, item.href);
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={clsx(
+              'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
+              active
+                ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-400/50 dark:bg-violet-500/20 dark:text-violet-100'
+                : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-soft)]',
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
-

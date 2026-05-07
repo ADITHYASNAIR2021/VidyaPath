@@ -4,6 +4,7 @@ import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-r
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { createAssignmentPackSchema } from '@/lib/schemas/teacher-pack';
 import { logServerEvent } from '@/lib/observability';
+import { logger } from '@/lib/logger';
 import {
   canTeacherAccessAssignmentPack,
   getAssignmentPack,
@@ -21,6 +22,15 @@ import { assertTeacherStorageWritable } from '@/lib/persistence/teacher-storage'
 import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
+
+function normalizeDateInput(value?: string): string | undefined {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString();
+}
 
 function parseClassLevel(value: unknown): 10 | 12 {
   return Number(value) === 10 ? 10 : 12;
@@ -176,7 +186,7 @@ export async function GET(req: Request) {
     });
     return dataJson({ requestId, data: pack });
   } catch (error) {
-    console.error('[teacher-assignment-pack:get] error', error);
+    logger.error({ err: error }, '[teacher-assignment-pack:get] error');
     return errorJson({
       requestId,
       errorCode: 'assignment-pack-read-failed',
@@ -217,23 +227,43 @@ export async function POST(req: Request) {
         errorCode: bodyResult.reason,
         message: bodyResult.message,
         status: bodyReasonToStatus(bodyResult.reason),
-      issues: bodyResult.issues,
+        issues: bodyResult.issues,
       });
     }
     const body = bodyResult.value;
-    const { chapterId, section, classLevel, subject, questionCount, difficultyMix,
-      includeShortAnswers, includeLongAnswers, includeFormulaDrill, dueDate, packId: incomingPackId } = body;
+    const {
+      chapterId,
+      section,
+      classLevel,
+      subject,
+      questionCount,
+      paperMode,
+      shortAnswerCount,
+      longAnswerCount,
+      formulaDrillCount,
+      difficultyMix,
+      includeShortAnswers,
+      includeLongAnswers,
+      includeFormulaDrill,
+      dueDate,
+      packId: incomingPackId,
+    } = body;
+    const normalizedDueDate = normalizeDateInput(dueDate);
 
     const draft = await buildTeacherAssignmentPackDraft({
       chapterId,
       classLevel,
       subject,
       questionCount,
+      paperMode,
+      shortAnswerCount,
+      longAnswerCount,
+      formulaDrillCount,
       difficultyMix: difficultyMix ?? '40% easy, 40% medium, 20% hard',
       includeShortAnswers: includeShortAnswers !== false,
       includeLongAnswers: includeLongAnswers !== false,
       includeFormulaDrill: includeFormulaDrill !== false,
-      dueDate,
+      dueDate: normalizedDueDate,
     });
 
     const packId = (incomingPackId?.trim()) || randomUUID();
@@ -278,7 +308,7 @@ export async function POST(req: Request) {
       meta: { committedAt },
     });
   } catch (error) {
-    console.error('[teacher-assignment-pack:post] error', error);
+    logger.error({ err: error }, '[teacher-assignment-pack:post] error');
     const errorMessage = error instanceof Error ? error.message : '';
     const status = /supabase|storage|missing table|scripts\/sql\/supabase_init\.sql/i.test(errorMessage) ? 503 : 500;
     return errorJson({

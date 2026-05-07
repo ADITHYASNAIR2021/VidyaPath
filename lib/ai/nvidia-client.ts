@@ -100,6 +100,18 @@ function normalizeMessageContent(content: unknown): string {
   return '';
 }
 
+const NVIDIA_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS) || 30_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), NVIDIA_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function callNvidiaChatCompletion(options: NvidiaChatOptions): Promise<NvidiaCompletionResult> {
   const url = `${resolveIntegrateBaseUrl()}/chat/completions`;
   const messages =
@@ -110,7 +122,7 @@ export async function callNvidiaChatCompletion(options: NvidiaChatOptions): Prom
           { role: 'user', content: options.userPrompt },
         ];
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.apiKey}`,
@@ -165,7 +177,7 @@ export async function callNvidiaChatCompletion(options: NvidiaChatOptions): Prom
 
 export async function createNvidiaEmbeddings(options: NvidiaEmbeddingOptions): Promise<number[][]> {
   const url = `${resolveIntegrateBaseUrl()}/embeddings`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.apiKey}`,
@@ -196,7 +208,7 @@ export async function rerankWithNvidia(options: NvidiaRerankOptions): Promise<un
   const endpoint =
     options.endpoint?.trim() ||
     `${resolveAiBaseUrl()}/retrieval/${options.model}/reranking`;
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.apiKey}`,
@@ -222,7 +234,7 @@ export async function runNvidiaOcr(options: {
   imageDataUrl: string;
 }): Promise<unknown> {
   const endpoint = options.modelEndpoint?.trim() || `${resolveAiBaseUrl()}/cv/nvidia/nemotron-ocr-v1`;
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.apiKey}`,
@@ -241,7 +253,7 @@ export async function runNvidiaOcr(options: {
 }
 
 export async function runNvidiaImageGeneration(options: NvidiaImageGenerationOptions): Promise<unknown> {
-  const response = await fetch(options.modelEndpoint, {
+  const response = await fetchWithTimeout(options.modelEndpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.apiKey}`,

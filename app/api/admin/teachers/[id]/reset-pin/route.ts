@@ -1,6 +1,7 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { generateStrongPassword, validatePasswordPolicy } from '@/lib/auth/password-policy';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { resetPinSchema } from '@/lib/schemas/admin-management';
 import { getTeacherById, resetTeacherPassword } from '@/lib/teacher/auth.db';
@@ -9,10 +10,26 @@ import { recordAuditEvent } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const requestId = getRequestId(req);
   const adminSession = await getAdminSessionFromRequestCookies();
   if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
+  const limit = await checkRateLimit({
+    key: buildRateLimitKey('admin:reset-pin', [adminSession.authUserId, getClientIp(req)]),
+    windowSeconds: 60,
+    maxRequests: 5,
+    blockSeconds: 300,
+  });
+  if (!limit.allowed) {
+    return errorJson({
+      requestId,
+      errorCode: 'rate-limit-exceeded',
+      message: 'Too many password reset attempts. Please try again later.',
+      status: 429,
+      hint: `Retry after ${limit.retryAfterSeconds}s`,
+    });
+  }
   if (adminSession.role === 'admin' && !adminSession.schoolId) {
     return errorJson({
       requestId,

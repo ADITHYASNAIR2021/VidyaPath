@@ -11,6 +11,17 @@ interface ChapterIntelligenceHubProps {
   classLevel: number;
   chapterTopics: string[];
   flashcardCount: number;
+  onDrillReady?: (payload: {
+    totalQuestions: number;
+    questionType: 'mcq' | 'short' | 'long' | 'mixed';
+    difficulty: string;
+  }) => void;
+  onDiagnoseReady?: (payload: { riskLevel: 'low' | 'medium' | 'high'; weakTags: string[] }) => void;
+  onRegisterActions?: (actions: {
+    generateDrill: () => Promise<void>;
+    runDiagnosis: () => Promise<void>;
+    buildRemediation: () => Promise<void>;
+  }) => void;
 }
 
 interface ChapterPackData {
@@ -23,6 +34,7 @@ interface ChapterPackData {
 interface ChapterDrillData {
   chapterId: string;
   difficulty: string;
+  questionType?: 'mcq' | 'short' | 'long' | 'mixed';
   questions: Array<{
     question: string;
     options: string[];
@@ -36,6 +48,8 @@ interface ChapterDrillData {
       qualityScore?: number;
     };
   }>;
+  shortQuestions?: string[];
+  longQuestions?: string[];
 }
 
 interface ChapterDiagnoseData {
@@ -93,6 +107,9 @@ export default function ChapterIntelligenceHub({
   classLevel,
   chapterTopics,
   flashcardCount,
+  onDrillReady,
+  onDiagnoseReady,
+  onRegisterActions,
 }: ChapterIntelligenceHubProps) {
   const [packData, setPackData] = useState<ChapterPackData | null>(null);
   const [drillData, setDrillData] = useState<ChapterDrillData | null>(null);
@@ -108,6 +125,18 @@ export default function ChapterIntelligenceHub({
 
   const [difficulty, setDifficulty] = useState('mixed');
   const [questionCount, setQuestionCount] = useState(8);
+  const [questionType, setQuestionType] = useState<'mcq' | 'short' | 'long' | 'mixed'>('mixed');
+
+  useEffect(() => {
+    setPackData(null);
+    setDrillData(null);
+    setDiagnoseData(null);
+    setRemediateData(null);
+    setError(null);
+    setDifficulty('mixed');
+    setQuestionCount(8);
+    setQuestionType('mixed');
+  }, [chapterId]);
 
   useEffect(() => {
     let active = true;
@@ -163,14 +192,22 @@ export default function ChapterIntelligenceHub({
     return { quizScore, flashcardsDue, studied, bookmarked };
   }, [chapterId, flashcardCount]);
 
+  useEffect(() => {
+    onRegisterActions?.({
+      generateDrill,
+      runDiagnosis,
+      buildRemediation,
+    });
+  }, [onRegisterActions, generateDrill, runDiagnosis, buildRemediation]);
+
   if (aiEnabled === false) {
     return (
-      <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
-        <h3 className="font-fraunces text-lg font-bold text-navy-700 flex items-center gap-2">
+      <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <h3 className="flex items-center gap-2 font-fraunces text-lg font-bold text-navy-700 dark:text-slate-100">
           <BrainCircuit className="w-5 h-5 text-indigo-500" />
           Chapter Intelligence
         </h3>
-        <p className="mt-2 text-sm text-[#4A4A6A]">
+        <p className="mt-2 text-sm text-[#4A4A6A] dark:text-slate-300">
           Login with any account to unlock AI chapter tools.
         </p>
         <div className="mt-3">
@@ -220,6 +257,7 @@ export default function ChapterIntelligenceHub({
           chapterId,
           questionCount,
           difficulty,
+          questionType,
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -230,6 +268,14 @@ export default function ChapterIntelligenceHub({
         return;
       }
       setDrillData(data);
+      onDrillReady?.({
+        totalQuestions:
+          (data.questions?.length ?? 0) +
+          (data.shortQuestions?.length ?? 0) +
+          (data.longQuestions?.length ?? 0),
+        questionType: data.questionType ?? 'mixed',
+        difficulty: data.difficulty ?? difficulty,
+      });
     } catch {
       setError('Network error while generating drill set.');
     } finally {
@@ -260,6 +306,7 @@ export default function ChapterIntelligenceHub({
         return;
       }
       setDiagnoseData(data);
+      onDiagnoseReady?.({ riskLevel: data.riskLevel, weakTags: data.weakTags ?? [] });
     } catch {
       setError('Network error while running diagnosis.');
     } finally {
@@ -296,10 +343,21 @@ export default function ChapterIntelligenceHub({
     }
   }
 
+  const totalDrillQuestions =
+    (drillData?.questions?.length ?? 0) +
+    (drillData?.shortQuestions?.length ?? 0) +
+    (drillData?.longQuestions?.length ?? 0);
+
+  const nextFlowStep: 'drill' | 'diagnose' | 'revision' = !drillData
+    ? 'drill'
+    : !diagnoseData
+      ? 'diagnose'
+      : 'revision';
+
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-5">
+    <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h3 className="font-fraunces text-lg font-bold text-navy-700 flex items-center gap-2">
+        <h3 className="flex items-center gap-2 font-fraunces text-lg font-bold text-navy-700 dark:text-slate-100">
           <BrainCircuit className="w-5 h-5 text-indigo-500" />
           Chapter Intelligence
         </h3>
@@ -308,12 +366,57 @@ export default function ChapterIntelligenceHub({
         </span>
       </div>
 
-      <p className="text-xs text-[#6A6A84] mb-4">
+      <p className="mb-4 text-xs text-[#6A6A84] dark:text-slate-300">
         Custom chapter workflow for {chapterTitle}: build context pack, generate drill, diagnose weakness, and get remediation plan.
       </p>
 
+      <div className="mb-4 rounded-xl border border-sky-100 bg-sky-50 p-3 text-xs text-sky-700 dark:border-sky-400/40 dark:bg-sky-500/20 dark:text-sky-100">
+        <p className="font-semibold text-sky-800 dark:text-sky-100">Practice Quiz vs Chapter Intelligence</p>
+        <p className="mt-1">Practice Quiz is quick MCQ practice. Chapter Intelligence Drill is deeper and can generate MCQ, short-answer, long-answer, or mixed sets for structured revision.</p>
+      </div>
+
+      <div className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs dark:border-emerald-500/40 dark:bg-emerald-500/20">
+        <p className="font-semibold text-emerald-900 dark:text-emerald-100">Study Flow: Quiz {'->'} Drill {'->'} Diagnose {'->'} Revision</p>
+        <p className="mt-1 text-emerald-700 dark:text-emerald-200">
+          {nextFlowStep === 'drill'
+            ? 'Step 2 pending: generate chapter drill set.'
+            : nextFlowStep === 'diagnose'
+              ? 'Step 3 pending: run diagnosis on this chapter.'
+              : 'Step 4 ready: continue to Revision Hub for weekly planning.'}
+        </p>
+        <div className="mt-2">
+          {nextFlowStep === 'drill' ? (
+            <button
+              onClick={generateDrill}
+              disabled={loadingDrill}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+            >
+              {loadingDrill ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardList className="h-3.5 w-3.5" />}
+              One-click next: Generate Drill
+            </button>
+          ) : nextFlowStep === 'diagnose' ? (
+            <button
+              onClick={runDiagnosis}
+              disabled={loadingDiagnose}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+            >
+              {loadingDiagnose ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+              One-click next: Diagnose
+            </button>
+          ) : (
+            <Link
+              href={`/student/revision?chapter=${encodeURIComponent(chapterId)}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-slate-900 dark:text-emerald-100 dark:hover:bg-emerald-500/20"
+            >
+              <Target className="h-3.5 w-3.5" />
+              One-click next: Open Revision Hub
+            </Link>
+          )}
+        </div>
+      </div>
+
       {error && (
-        <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2.5 py-2">
+        <div className="mb-3 rounded-lg border border-red-100 bg-red-50 px-2.5 py-2 text-xs text-red-700 dark:border-red-400/40 dark:bg-red-500/20 dark:text-red-100">
           {error}
         </div>
       )}
@@ -343,21 +446,33 @@ export default function ChapterIntelligenceHub({
         <select
           value={difficulty}
           onChange={(event) => setDifficulty(event.target.value)}
-          className="text-xs border border-[#E8E4DC] rounded-lg px-2 py-1.5 bg-white text-[#4A4A6A]"
+          className="rounded-lg border border-[#E8E4DC] bg-white px-2 py-1.5 text-xs text-[#4A4A6A] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
         >
           <option value="easy-heavy">Easy-heavy</option>
           <option value="mixed">Mixed</option>
           <option value="hard-heavy">Hard-heavy</option>
         </select>
         <select
+          value={questionType}
+          onChange={(event) => setQuestionType(event.target.value as 'mcq' | 'short' | 'long' | 'mixed')}
+          className="rounded-lg border border-[#E8E4DC] bg-white px-2 py-1.5 text-xs text-[#4A4A6A] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+        >
+          <option value="mcq">MCQ only</option>
+          <option value="short">Short answers</option>
+          <option value="long">Long answers</option>
+          <option value="mixed">Mixed (MCQ + Short + Long)</option>
+        </select>
+        <select
           value={questionCount}
           onChange={(event) => setQuestionCount(Number(event.target.value))}
-          className="text-xs border border-[#E8E4DC] rounded-lg px-2 py-1.5 bg-white text-[#4A4A6A]"
+          className="rounded-lg border border-[#E8E4DC] bg-white px-2 py-1.5 text-xs text-[#4A4A6A] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
         >
           <option value={6}>6Q</option>
           <option value={8}>8Q</option>
           <option value={10}>10Q</option>
           <option value={12}>12Q</option>
+          <option value={16}>16Q</option>
+          <option value={20}>20Q</option>
         </select>
         <button
           onClick={generateDrill}
@@ -379,25 +494,24 @@ export default function ChapterIntelligenceHub({
       </button>
 
       {packData && (
-        <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50 p-3">
-          <div className="text-xs font-semibold text-indigo-800 mb-1">High-yield topics</div>
-          <div className="text-xs text-indigo-700">{packData.highYieldTopics.slice(0, 5).join(' | ')}</div>
-          <div className="text-xs font-semibold text-indigo-800 mt-2 mb-1">Common mistakes</div>
-          <div className="text-xs text-indigo-700">{packData.commonMistakes.slice(0, 2).join(' | ')}</div>
+        <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50 p-3 dark:border-indigo-400/40 dark:bg-indigo-500/20">
+          <div className="mb-1 text-xs font-semibold text-indigo-800 dark:text-indigo-100">High-yield topics</div>
+          <div className="text-xs text-indigo-700 dark:text-indigo-200">{packData.highYieldTopics.slice(0, 5).join(' | ')}</div>
+          <div className="mb-1 mt-2 text-xs font-semibold text-indigo-800 dark:text-indigo-100">Common mistakes</div>
+          <div className="text-xs text-indigo-700 dark:text-indigo-200">{packData.commonMistakes.slice(0, 2).join(' | ')}</div>
         </div>
       )}
 
       {drillData && (
-        <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
-          <div className="text-xs font-semibold text-emerald-800 mb-1">
-            Drill ready: {drillData.questions.length} questions ({drillData.difficulty})
+        <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 dark:border-emerald-400/40 dark:bg-emerald-500/20">
+          <div className="mb-1 text-xs font-semibold text-emerald-800 dark:text-emerald-100">
+            Drill ready: {totalDrillQuestions} questions
+            {' '}({drillData.questionType ?? 'mixed'}, {drillData.difficulty})
           </div>
           <div className="max-h-56 overflow-y-auto pr-1 space-y-2">
             {drillData.questions.map((question, index) => (
-              <div key={`${index}-${question.question.slice(0, 40)}`} className="text-xs text-emerald-700">
-                <p className="font-semibold">
-                  {index + 1}. {question.question}
-                </p>
+              <div key={`${index}-${question.question.slice(0, 40)}`} className="text-xs text-emerald-700 dark:text-emerald-200">
+                <p className="font-semibold">MCQ {index + 1}. {question.question}</p>
                 {question.ragMeta && (
                   <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
                     <span className="rounded-full border border-emerald-200 bg-emerald-100/60 px-1.5 py-0.5 text-emerald-800">
@@ -428,37 +542,47 @@ export default function ChapterIntelligenceHub({
                 </div>
               </div>
             ))}
+            {(drillData.shortQuestions ?? []).map((question, index) => (
+              <div key={`short-${index}-${question.slice(0, 30)}`} className="text-xs text-emerald-700 dark:text-emerald-200">
+                <p className="font-semibold">Short {index + 1}. {question}</p>
+              </div>
+            ))}
+            {(drillData.longQuestions ?? []).map((question, index) => (
+              <div key={`long-${index}-${question.slice(0, 30)}`} className="text-xs text-emerald-700 dark:text-emerald-200">
+                <p className="font-semibold">Long {index + 1}. {question}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
       {diagnoseData && (
-        <div className="mb-3 rounded-xl border border-amber-100 bg-amber-50 p-3">
-          <div className="text-xs font-semibold text-amber-800 mb-1">
+        <div className="mb-3 rounded-xl border border-amber-100 bg-amber-50 p-3 dark:border-amber-400/40 dark:bg-amber-500/20">
+          <div className="mb-1 text-xs font-semibold text-amber-800 dark:text-amber-100">
             Risk: {diagnoseData.riskLevel.toUpperCase()}
           </div>
-          <div className="text-xs text-amber-700 mb-1">
+          <div className="mb-1 text-xs text-amber-700 dark:text-amber-200">
             Weak tags: {diagnoseData.weakTags.slice(0, 3).join(' | ')}
           </div>
-          <div className="text-xs text-amber-700">
+          <div className="text-xs text-amber-700 dark:text-amber-200">
             Next: {diagnoseData.nextActions.slice(0, 2).join(' | ')}
           </div>
         </div>
       )}
 
       {remediateData && (
-        <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-          <div className="text-xs font-semibold text-sky-800 mb-1">
+        <div className="rounded-xl border border-sky-100 bg-sky-50 p-3 dark:border-sky-400/40 dark:bg-sky-500/20">
+          <div className="mb-1 text-xs font-semibold text-sky-800 dark:text-sky-100">
             Expected lift: {remediateData.expectedScoreLift}
           </div>
           <div className="space-y-1">
             {remediateData.dayPlan.slice(0, 3).map((day) => (
-              <p key={`${day.day}-${day.focus}`} className="text-xs text-sky-700">
+              <p key={`${day.day}-${day.focus}`} className="text-xs text-sky-700 dark:text-sky-200">
                 Day {day.day}: {day.focus}
               </p>
             ))}
           </div>
-          <div className="text-xs text-sky-700 mt-1">
+          <div className="mt-1 text-xs text-sky-700 dark:text-sky-200">
             Topics baseline: {chapterTopics.slice(0, 3).join(' | ')}
           </div>
         </div>

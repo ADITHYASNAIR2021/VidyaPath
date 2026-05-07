@@ -1,6 +1,7 @@
 import { getTeacherSessionFromRequestCookies } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { getTeacherSubmissionSummary } from '@/lib/teacher-admin-db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +39,7 @@ export async function GET(req: Request) {
     }
     return dataJson({ requestId, data: summary });
   } catch (error) {
-    console.error('[teacher-submission-summary:get] error', error);
+    logger.error({ err: error }, '[teacher-submission-summary:get] error');
     return errorJson({
       requestId,
       errorCode: 'submission-summary-read-failed',

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Activity, RefreshCw, Send } from 'lucide-react';
 import BackButton from '@/components/BackButton';
+import RoleStatusPanel from '@/components/RoleStatusPanel';
 import clsx from 'clsx';
 
 interface AlertItem {
@@ -26,6 +27,13 @@ interface ObservabilitySummary {
     authEvents: number;
     activeThrottleBuckets: number;
     tokenEvents: number;
+    sampledApiRequests: number;
+    sampledApiErrors: number;
+    sampledApiErrorRatePct: number;
+    routeDropoffs: number;
+    pageLoads: number;
+    avgPageLoadMs: number;
+    slowPageLoads: number;
   };
   alerts: AlertItem[];
 }
@@ -149,22 +157,34 @@ export default function DeveloperObservabilityPage() {
         </div>
       )}
 
-      {loading ? (
-        <div className="flex h-40 items-center justify-center text-gray-400">
-          <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
-          Loading summary...
-        </div>
-      ) : !summary ? (
-        <div className="rounded-2xl border border-dashed border-gray-300 p-10 text-center text-gray-500">
-          No observability summary available.
-        </div>
-      ) : (
+      {loading && !summary && !error ? (
+        <RoleStatusPanel
+          role="developer"
+          variant="loading"
+          title="Loading Observability Summary"
+          message="Collecting auth, API, and UX telemetry signals."
+        />
+      ) : !loading && !summary && !error ? (
+        <RoleStatusPanel
+          role="developer"
+          variant="empty"
+          title="No Observability Summary"
+          message="Telemetry is not available yet for this time window."
+        />
+      ) : summary ? (
         <>
-          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-6">
             <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Auth Failures</p><p className="text-xl font-semibold">{summary.counters.authFailures}</p></div>
             <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">5xx Events</p><p className="text-xl font-semibold">{summary.counters.fiveXxEvents}</p></div>
             <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Throttle Blocks</p><p className="text-xl font-semibold">{summary.counters.blockedThrottleBuckets}</p></div>
             <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Tokens (24h)</p><p className="text-xl font-semibold">{summary.counters.totalTokens.toLocaleString()}</p></div>
+            <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">API Error Rate</p><p className="text-xl font-semibold">{summary.counters.sampledApiErrorRatePct.toFixed(2)}%</p></div>
+            <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Route Drop-offs</p><p className="text-xl font-semibold">{summary.counters.routeDropoffs}</p></div>
+            <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Page Loads</p><p className="text-xl font-semibold">{summary.counters.pageLoads}</p></div>
+            <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Avg Page Load</p><p className="text-xl font-semibold">{Math.round(summary.counters.avgPageLoadMs)} ms</p></div>
+            <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Slow Loads ({'>=3s'})</p><p className="text-xl font-semibold">{summary.counters.slowPageLoads}</p></div>
+            <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Sampled API Errors</p><p className="text-xl font-semibold">{summary.counters.sampledApiErrors}</p></div>
+            <div className="rounded-xl border border-[#E8E4DC] bg-white p-3"><p className="text-xs text-gray-500">Sampled API Calls</p><p className="text-xl font-semibold">{summary.counters.sampledApiRequests}</p></div>
           </div>
 
           <div className="space-y-3">
@@ -190,7 +210,7 @@ export default function DeveloperObservabilityPage() {
             ))}
           </div>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

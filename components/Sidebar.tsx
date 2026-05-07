@@ -8,7 +8,7 @@ import {
   ClipboardList, PenSquare, FileCheck, Megaphone, Wand2, HelpCircle,
   BookMarked, CalendarDays, Package, LayoutDashboard, School, Activity,
   Settings, ScrollText, Menu, X, ChevronLeft, ChevronRight,
-  Bell, ClipboardCheck, Layers, Bookmark, MessageSquare, BrainCircuit,
+  Bell, ClipboardCheck, Layers, Bookmark, MessageSquare, BrainCircuit, Target, AlertTriangle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useTheme } from '@/components/ThemeProvider';
@@ -26,6 +26,7 @@ interface NavItem {
 
 const TEACHER_NAV: NavItem[] = [
   { href: '/teacher',               label: 'Overview',       icon: LayoutDashboard },
+  { href: '/teacher/review-queue',  label: 'Review Queue',   icon: AlertTriangle },
   { href: '/teacher/announcements', label: 'Announcements',  icon: Megaphone },
   { href: '/teacher/assignments',   label: 'Assignments',    icon: Package },
   { href: '/teacher/grading',       label: 'Grading Desk',   icon: PenSquare },
@@ -40,10 +41,12 @@ const TEACHER_NAV: NavItem[] = [
   { href: '/teacher/gradebook',       label: 'Gradebook',       icon: ScrollText },
   { href: '/teacher/calendar',        label: 'Calendar',        icon: CalendarDays },
   { href: '/teacher/questions',       label: 'Student Q&A',     icon: MessageSquare },
+  { href: '/notifications',           label: 'Notifications',   icon: Bell },
 ];
 
 const STUDENT_NAV: NavItem[] = [
   { href: '/dashboard',         label: 'Overview',      icon: LayoutDashboard },
+  { href: '/student/today',     label: 'Today',         icon: Target },
   { href: '/chapters',          label: 'Study',         icon: BookOpen },
   { href: '/formulas',          label: 'Formulas',      icon: BookMarked },
   { href: '/equations',         label: 'Equations',     icon: HelpCircle },
@@ -59,12 +62,15 @@ const STUDENT_NAV: NavItem[] = [
   { href: '/student/calendar',  label: 'Calendar',      icon: CalendarDays },
   { href: '/student/achievements', label: 'Achievements', icon: Activity },
   { href: '/student/notes',        label: 'My Notes',      icon: PenSquare },
-  { href: '/student/ai-tools',     label: 'AI Study Tools', icon: BrainCircuit },
+  { href: '/student/ai-tools',     label: 'AI Study Hub',   icon: BrainCircuit },
+  { href: '/student/revision',     label: 'Revision Hub',   icon: Target },
   { href: '/student/questions',    label: 'My Questions',  icon: MessageSquare },
+  { href: '/notifications',        label: 'Notifications', icon: Bell },
 ];
 
 const ADMIN_NAV: NavItem[] = [
   { href: '/admin',                 label: 'Overview',       icon: LayoutDashboard },
+  { href: '/admin/onboarding',      label: 'Onboarding',     icon: ClipboardList },
   { href: '/admin/teachers',        label: 'Teachers',       icon: Users },
   { href: '/admin/students',        label: 'Students',       icon: GraduationCap },
   { href: '/admin/class-sections',  label: 'Class Sections', icon: Layers },
@@ -74,7 +80,9 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/timetable',       label: 'Timetable',      icon: CalendarDays },
   { href: '/admin/events',          label: 'Events',         icon: Activity },
   { href: '/admin/roster-import',   label: 'Roster Import',  icon: Upload },
+  { href: '/admin/recovery',        label: 'Recovery Tools', icon: AlertTriangle },
   { href: '/admin/settings',        label: 'Settings',       icon: Settings },
+  { href: '/notifications',         label: 'Notifications',  icon: Bell },
 ];
 
 const DEVELOPER_NAV: NavItem[] = [
@@ -175,6 +183,11 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
   const [studentNotificationSummary, setStudentNotificationSummary] = useState<{
     newGradesCount: number;
   }>({ newGradesCount: 0 });
+  const [adminNotificationSummary, setAdminNotificationSummary] = useState<{
+    pendingQuestions: number;
+    ungradedSubmissions: number;
+  }>({ pendingQuestions: 0, ungradedSubmissions: 0 });
+  const [developerPendingAffiliates, setDeveloperPendingAffiliates] = useState(0);
   const cfg = ROLE_CONFIG[role];
 
   // Close mobile drawer on navigation
@@ -229,6 +242,53 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
     };
   }, [role, pathname]);
 
+  useEffect(() => {
+    if (role !== 'admin') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/admin/notifications/summary', { cache: 'no-store' });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || cancelled) return;
+        const data = payload && typeof payload === 'object' && 'data' in payload
+          ? (payload as { data: { pendingQuestions?: number; ungradedSubmissions?: number } }).data
+          : (payload as { pendingQuestions?: number; ungradedSubmissions?: number } | null);
+        if (!data || cancelled) return;
+        setAdminNotificationSummary({
+          pendingQuestions: Math.max(0, Number(data.pendingQuestions) || 0),
+          ungradedSubmissions: Math.max(0, Number(data.ungradedSubmissions) || 0),
+        });
+      } catch {
+        // keep sidebar usable without badges
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [role, pathname]);
+
+  useEffect(() => {
+    if (role !== 'developer') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/developer/affiliate-requests?status=pending&limit=200', { cache: 'no-store' });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || cancelled) return;
+        const data = payload && typeof payload === 'object' && 'data' in payload
+          ? (payload as { data: { requests?: Array<unknown> } }).data
+          : (payload as { requests?: Array<unknown> } | null);
+        if (!data || cancelled) return;
+        setDeveloperPendingAffiliates(Array.isArray(data.requests) ? data.requests.length : 0);
+      } catch {
+        // keep sidebar usable without badges
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [role, pathname]);
+
   async function handleLogout() {
     setLoggingOut(true);
     await fetch(cfg.logoutUrl, { method: 'POST', credentials: 'include' }).catch(() => undefined);
@@ -271,6 +331,30 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
             ...item,
             badge: studentNotificationSummary.newGradesCount > 0
               ? String(studentNotificationSummary.newGradesCount)
+              : undefined,
+          } satisfies NavItem;
+        }
+        return item;
+      })
+    : role === 'admin'
+      ? cfg.nav.map((item) => {
+        if (item.href === '/admin/gradebook') {
+          return {
+            ...item,
+            badge: adminNotificationSummary.ungradedSubmissions > 0
+              ? String(adminNotificationSummary.ungradedSubmissions)
+              : undefined,
+          } satisfies NavItem;
+        }
+        return item;
+      })
+    : role === 'developer'
+      ? cfg.nav.map((item) => {
+        if (item.href === '/developer/onboarding') {
+          return {
+            ...item,
+            badge: developerPendingAffiliates > 0
+              ? String(developerPendingAffiliates)
               : undefined,
           } satisfies NavItem;
         }
@@ -417,4 +501,3 @@ export default function Sidebar({ role, displayName }: SidebarProps) {
     </>
   );
 }
-

@@ -107,7 +107,7 @@ export default function TeacherAnnouncementsPage() {
       const res = await fetch('/api/teacher', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'remove-announcement', announcementId: id }),
+        body: JSON.stringify({ action: 'remove-announcement', id }),
       });
       const resBody = await res.json().catch(() => null);
       if (!res.ok) { setError(resBody?.message ?? 'Failed to delete announcement.'); return; }
@@ -174,11 +174,11 @@ export default function TeacherAnnouncementsPage() {
           <h2 className="font-semibold text-amber-800">New Announcement</h2>
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">Title</label>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Brief subject…" className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Brief subject..." className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
           </div>
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">Message</label>
-            <textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write your announcement…" className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm resize-none" />
+            <textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write your announcement..." className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm resize-none" />
           </div>
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-2">Audience</label>
@@ -196,7 +196,7 @@ export default function TeacherAnnouncementsPage() {
             </div>
           </div>
 
-          {/* Chapter selector — shown only when scope === 'chapter' */}
+          {/* Chapter selector - shown only when scope === 'chapter' */}
           {scope === 'chapter' && (
             <div>
               <label className="text-xs font-medium text-gray-600 block mb-1">Select Chapter</label>
@@ -205,10 +205,10 @@ export default function TeacherAnnouncementsPage() {
                 onChange={(e) => setChapterId(e.target.value)}
                 className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
               >
-                <option value="">— Choose a chapter —</option>
+                <option value="">- Choose a chapter -</option>
                 {chapters.map((ch) => (
                   <option key={ch.id} value={ch.id}>
-                    Class {ch.classLevel} · {ch.subject} · {ch.title}
+                    Class {ch.classLevel} | {ch.subject} | {ch.title}
                   </option>
                 ))}
               </select>
@@ -224,7 +224,7 @@ export default function TeacherAnnouncementsPage() {
 
           <div className="flex gap-2">
             <button onClick={send} disabled={!title.trim() || !body.trim() || sending} className="px-4 py-2 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-50 transition-colors">
-              {sending ? 'Sending…' : 'Send Announcement'}
+              {sending ? 'Sending...' : 'Send Announcement'}
             </button>
             <button onClick={() => setShowForm(false)} className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50">Cancel</button>
           </div>
@@ -233,7 +233,7 @@ export default function TeacherAnnouncementsPage() {
 
       {loading && announcements.length === 0 && (
         <div className="flex items-center justify-center h-40 text-gray-400">
-          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading…
+          <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading...
         </div>
       )}
 

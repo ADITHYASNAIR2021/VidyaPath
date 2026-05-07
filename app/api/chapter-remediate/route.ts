@@ -17,6 +17,7 @@ import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-r
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { chapterRemediateRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { logger } from '@/lib/logger';
 
 interface ChapterRemediateRequest {
   chapterId: string;
@@ -105,7 +106,7 @@ function alignFocus(focus: string, chapterTitle: string, chapterTopics: string[]
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth();
+    const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
@@ -254,11 +255,11 @@ Return ONLY JSON:
       });
       return dataJson({ requestId, data: payload });
     } catch (aiError) {
-      console.error('[chapter-remediate] AI fallback triggered', aiError);
+      logger.warn({ err: aiError }, '[chapter-remediate] AI fallback triggered');
       return dataJson({ requestId, data: fallback });
     }
   } catch (error) {
-    console.error('[chapter-remediate] error', error);
+    logger.error({ err: error }, '[chapter-remediate] error');
     const message = error instanceof Error ? error.message : 'Failed to create remediation plan.';
     return errorJson({
       requestId,

@@ -22,6 +22,14 @@ function unwrap<T>(payload: unknown): T {
   return payload as T;
 }
 
+function extractApiMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object' && 'message' in (payload as Record<string, unknown>)) {
+    const maybe = (payload as Record<string, unknown>).message;
+    if (typeof maybe === 'string' && maybe.trim()) return maybe.trim();
+  }
+  return fallback;
+}
+
 const QUICK_LINKS = [
   { href: '/teacher/announcements',label: 'Announcements', icon: Megaphone,     desc: 'Send class notices',        color: 'from-violet-500 to-purple-500'  },
   { href: '/teacher/assignments',  label: 'Assignments',   icon: Package,       desc: 'Create & publish packs',    color: 'from-amber-500 to-orange-500'   },
@@ -31,6 +39,7 @@ const QUICK_LINKS = [
   { href: '/teacher/question-bank',label: 'Question Bank', icon: HelpCircle,    desc: 'Manage questions',          color: 'from-cyan-500 to-sky-500'       },
   { href: '/teacher/attendance',   label: 'Attendance',    icon: ClipboardCheck,desc: 'Mark daily attendance',     color: 'from-lime-500 to-green-500'     },
   { href: '/teacher/gradebook',    label: 'Gradebook',     icon: ScrollText,    desc: 'Consolidated grades',       color: 'from-orange-500 to-amber-600'   },
+  { href: '/teacher/review-queue', label: 'Review Queue',  icon: AlertCircle,   desc: 'Ungraded and intervention tasks', color: 'from-rose-500 to-red-500'   },
   { href: '/teacher/resources',    label: 'Resources',     icon: BookMarked,    desc: 'Teaching materials',        color: 'from-fuchsia-500 to-violet-500' },
   { href: '/teacher/calendar',              label: 'Calendar',          icon: CalendarDays,  desc: 'School events',             color: 'from-sky-500 to-blue-600'       },
   { href: '/teacher/timetable',             label: 'My Timetable',      icon: CalendarRange, desc: 'Weekly class schedule',     color: 'from-teal-500 to-cyan-500'      },
@@ -48,30 +57,39 @@ export default function TeacherOverviewPage() {
   const [scopes, setScopes] = useState<TeacherScope[]>([]);
   const [pendingQuestionCount, setPendingQuestionCount] = useState(0);
   const [ungradedSubmissionCount, setUngradedSubmissionCount] = useState(0);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     async function load() {
       setLoading(true);
+      setError('');
       try {
         const [sessionRes, configRes, notificationSummaryRes] = await Promise.all([
           fetch('/api/teacher/session/me', { cache: 'no-store' }),
           fetch('/api/teacher', { cache: 'no-store' }),
           fetch('/api/teacher/notifications/summary', { cache: 'no-store' }),
         ]);
-        if (!sessionRes.ok) { return; }
+        if (!sessionRes.ok) {
+          setError('Session expired. Please sign in again.');
+          return;
+        }
         const sessionData = unwrap<Record<string, unknown> | null>(await sessionRes.json().catch(() => null));
         const teacherInfo = sessionData?.teacher as { name?: string } | undefined;
         setTeacherName(typeof teacherInfo?.name === 'string' && teacherInfo.name.trim() ? teacherInfo.name : 'Teacher');
         setScopes(Array.isArray(sessionData?.effectiveScopes) ? sessionData.effectiveScopes as TeacherScope[] : []);
 
         const cfgBody = await configRes.json().catch(() => null);
+        if (!configRes.ok) {
+          setError(extractApiMessage(cfgBody, 'Failed to load teacher dashboard data.'));
+          return;
+        }
         const cfg = unwrap<{
           assignmentAnalytics?: TeacherAssignmentAnalytics;
           assignmentPacks?: TeacherAssignmentPack[];
           actionHistory?: TeacherActionHistoryEntry[];
           storageStatus?: TeacherStorageStatus;
         } | null>(cfgBody);
-        if (configRes.ok && cfg) {
+        if (cfg) {
           setAnalytics(cfg.assignmentAnalytics ?? null);
           setPacks(cfg.assignmentPacks ?? []);
           setHistory(cfg.actionHistory ?? []);
@@ -87,6 +105,8 @@ export default function TeacherOverviewPage() {
           setPendingQuestionCount(Math.max(0, Number(notificationSummary?.pendingQuestions) || 0));
           setUngradedSubmissionCount(Math.max(0, Number(notificationSummary?.ungradedSubmissions) || 0));
         }
+      } catch {
+        setError('Failed to load teacher dashboard.');
       } finally {
         setLoading(false);
       }
@@ -129,6 +149,12 @@ export default function TeacherOverviewPage() {
           <LayoutDashboard className="w-8 h-8 text-white/40 flex-shrink-0" />
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
 
       {/* Storage & alerts */}
       {storageStatus && (

@@ -8,9 +8,7 @@ import { BlockMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 import { getAllFormulaEntries } from '@/lib/formulas';
 import { FORMULA_SOURCE_DOCS } from '@/lib/formula-handbook';
-import { fetchClientStudentSession } from '@/lib/client-student-session';
 import { fetchClientAuthSession } from '@/lib/client-auth-session';
-import type { Subject } from '@/lib/data';
 import PushNotificationToggle from '@/components/PushNotificationToggle';
 
 const SUBJECTS = [
@@ -35,47 +33,25 @@ export default function EquationsPage() {
   const [selectedSubject, setSelectedSubject] = useState<(typeof SUBJECTS)[number]>('All');
   const [selectedClass, setSelectedClass] = useState<(typeof CLASSES)[number]>('All');
   const [jeeOnly, setJeeOnly] = useState(false);
-  const [isStudent, setIsStudent] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [enrolledSubjects, setEnrolledSubjects] = useState<Subject[]>([]);
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      fetchClientStudentSession().catch(() => null),
-      fetchClientAuthSession().catch(() => ({ role: 'anonymous', authenticated: false as const })),
-    ])
-      .then(([studentSession, authSession]) => {
+    fetchClientAuthSession()
+      .then((authSession) => {
         if (!active) return;
         setIsAuthenticated(authSession.role !== 'anonymous');
-        if (!studentSession?.studentId) {
-          setIsStudent(false);
-          setEnrolledSubjects([]);
-          return;
-        }
-        setIsStudent(true);
-        setEnrolledSubjects(studentSession.enrolledSubjects);
       })
       .catch(() => {
         if (!active) return;
-        setIsStudent(false);
         setIsAuthenticated(false);
-        setEnrolledSubjects([]);
       });
     return () => {
       active = false;
     };
   }, []);
 
-  const enrolledSubjectSet = useMemo(() => {
-    if (!isStudent) return null;
-    return new Set<Subject>(enrolledSubjects);
-  }, [enrolledSubjects, isStudent]);
-
-  const subjectChoices = useMemo(
-    () => SUBJECTS.filter((subject) => subject === 'All' || !enrolledSubjectSet || enrolledSubjectSet.has(subject as Subject)),
-    [enrolledSubjectSet]
-  );
+  const subjectChoices = useMemo(() => SUBJECTS, []);
 
   useEffect(() => {
     if (selectedSubject === 'All') return;
@@ -105,7 +81,6 @@ export default function EquationsPage() {
       if (selectedSubject !== 'All' && item.subject !== selectedSubject) return false;
       if (selectedClass !== 'All' && String(item.classLevel) !== selectedClass) return false;
       if (jeeOnly && !item.appearsInJee) return false;
-      if (enrolledSubjectSet && !enrolledSubjectSet.has(item.subject as Subject)) return false;
       return true;
     });
     if (!deferredQuery.trim()) return base;
@@ -113,7 +88,7 @@ export default function EquationsPage() {
     return base
       .filter((item) => ranked.has(item.id))
       .sort((a, b) => (ranked.get(a.id) ?? 9999) - (ranked.get(b.id) ?? 9999));
-  }, [deferredQuery, enrolledSubjectSet, fuse, jeeOnly, selectedClass, selectedSubject]);
+  }, [deferredQuery, fuse, jeeOnly, selectedClass, selectedSubject]);
 
   const grouped = useMemo(() => {
     const subjectMap = new Map<string, Map<string, typeof filtered>>();
@@ -210,14 +185,9 @@ export default function EquationsPage() {
         <p className="mb-4 text-sm text-[#6A6A84] dark:text-gray-300">
           Showing <span className="font-semibold text-navy-700">{filtered.length}</span> equations
         </p>
-        {isStudent && (
-          <p className="mb-4 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-            Showing enrolled subjects only: {enrolledSubjects.join(', ') || 'None assigned yet'}.
-          </p>
-        )}
-        {!isStudent && (
+        {!isAuthenticated && (
           <div className="mb-4 rounded-xl border border-indigo-100 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 px-4 py-2.5 flex items-center gap-3 text-sm">
-            <span className="text-indigo-700 dark:text-indigo-200">Login to filter equations by your enrolled subjects and save favourites.</span>
+            <span className="text-indigo-700 dark:text-indigo-200">Login to save favourites and track revision progress.</span>
             <Link href="/student/login" className="ml-auto flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">Login</Link>
           </div>
         )}

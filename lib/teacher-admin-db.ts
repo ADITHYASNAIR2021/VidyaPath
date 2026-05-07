@@ -7,6 +7,7 @@ import {
   type AcademicStream,
 } from '@/lib/academic-taxonomy';
 import { getAnalyticsSummary } from '@/lib/analytics-store';
+import { getTokenUsageRollup } from '@/lib/platform-rbac-db';
 import { hashPin, isValidPin, verifyPin } from '@/lib/auth/pin';
 import { createSupabaseAuthUser, updateSupabaseAuthUser } from '@/lib/auth/supabase-auth';
 import { issueFriendlyIdentifier } from '@/lib/auth/friendly-ids';
@@ -23,6 +24,7 @@ import type {
   TeacherActionHistoryEntry,
   TeacherAnnouncement,
   TeacherAssignmentAnalytics,
+  TeacherAssignmentClassInsights,
   TeacherAssignmentPack,
   TeacherClassPreset,
   TeacherProfile,
@@ -202,6 +204,41 @@ interface StudentProfileRow {
   updated_at: string;
 }
 
+interface AttendanceRecordRow {
+  id: RowId;
+  school_id: RowId;
+  student_id: RowId;
+  class_level?: number;
+  section?: string | null;
+  status: 'present' | 'absent' | 'late' | 'excused';
+  date: string;
+  marked_at: string;
+}
+
+interface ParentLinkRow {
+  id: RowId;
+  student_id: RowId;
+  school_id: RowId;
+  status: 'active' | 'inactive';
+}
+
+interface AuditEventRow {
+  id: RowId;
+  endpoint: string;
+  action: string;
+  status_code: number;
+  created_at: string;
+  school_id?: string | null;
+}
+
+interface StudentQuestionLatencyRow {
+  id: RowId;
+  school_id: RowId;
+  created_at: string;
+  answered_at: string | null;
+  status: 'pending' | 'answered' | 'closed';
+}
+
 interface PlatformUserRoleRow {
   id: RowId;
   auth_user_id: RowId;
@@ -281,8 +318,12 @@ const TABLES = {
   weeklyPlans: 'teacher_weekly_plans',
   examSessions: 'exam_sessions',
   examViolations: 'exam_violations',
+  attendance: 'attendance_records',
   students: 'student_profiles',
   questionBank: 'teacher_question_bank',
+  studentQuestions: 'student_questions',
+  parentLinks: 'parent_links',
+  auditEvents: 'audit_events',
   appState: 'app_state',
 };
 
@@ -2471,11 +2512,15 @@ export async function updateAssignmentPackLifecycle(input: {
   packId: string;
   action: 'extend' | 'close' | 'reopen';
   extendDays?: number;
+  validUntil?: string;
 }): Promise<TeacherAssignmentPack | null> {
   const pack = await getAssignmentPack(input.packId);
   if (!pack) return null;
   const canAccess = await canTeacherAccessAssignmentPack(input.teacherId, input.packId);
   if (!canAccess) return null;
+  if (pack.status !== 'published') {
+    throw new Error('Lifecycle updates are allowed only for published assignment packs.');
+  }
 
   const now = new Date();
   const next: TeacherAssignmentPack = {
@@ -2489,18 +2534,42 @@ export async function updateAssignmentPackLifecycle(input: {
   };
 
   if (input.action === 'close') {
+    if (next.visibilityStatus === 'closed') {
+      throw new Error('Assignment is already closed.');
+    }
     next.visibilityStatus = 'closed';
     next.closedAt = now.toISOString();
   }
   if (input.action === 'reopen') {
+    if (next.visibilityStatus === 'open') {
+      throw new Error('Assignment is already open.');
+    }
     next.visibilityStatus = 'open';
     next.closedAt = undefined;
     next.reopenedCount = Number(next.reopenedCount || 0) + 1;
   }
   if (input.action === 'extend') {
-    const extendDays = Math.max(1, Math.min(120, Number(input.extendDays) || 3));
-    const base = next.validUntil ? new Date(next.validUntil) : (next.dueDate ? new Date(next.dueDate) : now);
-    if (!Number.isNaN(base.getTime())) {
+    const normalizedValidUntil = typeof input.validUntil === 'string' ? input.validUntil.trim() : '';
+    if (!normalizedValidUntil && !Number.isFinite(Number(input.extendDays))) {
+      throw new Error('Provide extendDays or validUntil for extend action.');
+    }
+    if (normalizedValidUntil) {
+      const parsed = new Date(normalizedValidUntil);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new Error('validUntil must be a valid date.');
+      }
+      next.validUntil = /^\d{4}-\d{2}-\d{2}$/.test(normalizedValidUntil)
+        ? normalizedValidUntil
+        : parsed.toISOString();
+      next.dueDate = next.validUntil;
+      next.extendedCount = Number(next.extendedCount || 0) + 1;
+      next.visibilityStatus = 'open';
+    } else {
+      const extendDays = Math.max(1, Math.min(120, Number(input.extendDays) || 3));
+      const base = next.validUntil ? new Date(next.validUntil) : (next.dueDate ? new Date(next.dueDate) : now);
+      if (Number.isNaN(base.getTime())) {
+        throw new Error('Current due date is invalid. Provide validUntil to extend this assignment.');
+      }
       base.setDate(base.getDate() + extendDays);
       next.validUntil = base.toISOString();
       next.dueDate = next.validUntil;
@@ -2532,6 +2601,7 @@ export async function updateAssignmentPackLifecycle(input: {
     metadata: {
       lifecycleAction: input.action,
       extendDays: input.extendDays,
+      requestedValidUntil: input.validUntil,
       validUntil: next.validUntil,
     },
   });
@@ -2810,6 +2880,131 @@ export async function getTeacherSubmissionSummary(teacherId: string, packId: str
   const canAccess = await canTeacherAccessAssignmentPack(teacherId, packId);
   if (!canAccess) return null;
   return getSubmissionSummary(packId);
+}
+
+export async function getTeacherAssignmentClassInsights(teacherId: string): Promise<TeacherAssignmentClassInsights> {
+  const generatedAt = new Date().toISOString();
+  const empty: TeacherAssignmentClassInsights = {
+    generatedAt,
+    totalPublishedAssignments: 0,
+    overallCompletionPercent: 0,
+    unansweredAssignments: 0,
+    weakTopics: [],
+    rows: [],
+  };
+  if (!isSupabaseServiceConfigured()) return empty;
+
+  const cleanTeacherId = sanitizeText(teacherId, 80);
+  if (!cleanTeacherId) return empty;
+  const schoolId = await getTeacherSchoolId(cleanTeacherId);
+  const packRows = await supabaseSelect<TeacherAssignmentPackRow>(TABLES.assignmentPacks, {
+    select: '*',
+    filters: [
+      { column: 'teacher_id', value: cleanTeacherId },
+      { column: 'status', value: 'published' },
+      ...(schoolId ? [{ column: 'school_id', value: schoolId }] : []),
+    ],
+    orderBy: 'updated_at',
+    ascending: false,
+    limit: 1500,
+  }).catch(() => []);
+  const packs = packRows.map((row) => toAssignmentPack(row)).filter((item): item is TeacherAssignmentPack => !!item);
+  if (packs.length === 0) return empty;
+
+  const packIds = packs.map((pack) => sanitizeText(pack.packId, 80)).filter(Boolean);
+  const classLevels = Array.from(new Set(packs.map((pack) => pack.classLevel)));
+  const [students, submissions] = await Promise.all([
+    supabaseSelect<StudentProfileRow>(TABLES.students, {
+      select: '*',
+      filters: [
+        { column: 'status', value: 'active' },
+        ...(schoolId ? [{ column: 'school_id', value: schoolId }] : []),
+        ...(classLevels.length > 0 ? [{ column: 'class_level', op: 'in', value: classLevels }] : []),
+      ],
+      limit: 30000,
+    }).catch(() => []),
+    supabaseSelect<TeacherSubmissionRow>(TABLES.submissions, {
+      select: '*',
+      filters: [{ column: 'pack_id', op: 'in', value: packIds }],
+      orderBy: 'created_at',
+      ascending: false,
+      limit: 12000,
+    }).catch(() => []),
+  ]);
+
+  const rowAgg = new Map<string, {
+    key: string;
+    classLevel: 10 | 12;
+    section?: string;
+    assigned: number;
+    submitted: number;
+    unanswered: number;
+  }>();
+  const weakTopicMap = new Map<string, number>();
+
+  for (const submission of submissions) {
+    for (const weak of submission.result?.weakTopics ?? []) {
+      const key = sanitizeText(weak, 120).toLowerCase();
+      if (!key) continue;
+      weakTopicMap.set(key, (weakTopicMap.get(key) ?? 0) + 1);
+    }
+  }
+
+  for (const pack of packs) {
+    const key = `${pack.classLevel}:${pack.section || 'all'}`;
+    const eligibleStudents = students.filter((student) => {
+      const classLevel = student.class_level === 10 ? 10 : student.class_level === 12 ? 12 : null;
+      if (!classLevel) return false;
+      if (classLevel !== pack.classLevel) return false;
+      if (pack.section) return sanitizeText(student.section ?? '', 40) === sanitizeText(pack.section, 40);
+      return true;
+    });
+    const submissionCodes = new Set(
+      submissions
+        .filter((submission) => submission.pack_id === pack.packId)
+        .map((submission) => normalizeSubmissionCode(submission.submission_code))
+        .filter(Boolean)
+    );
+    const assigned = eligibleStudents.length;
+    const submitted = Math.min(submissionCodes.size, assigned);
+    const unanswered = Math.max(0, assigned - submitted);
+    const existing = rowAgg.get(key) ?? {
+      key,
+      classLevel: pack.classLevel,
+      section: pack.section || undefined,
+      assigned: 0,
+      submitted: 0,
+      unanswered: 0,
+    };
+    existing.assigned += assigned;
+    existing.submitted += submitted;
+    existing.unanswered += unanswered;
+    rowAgg.set(key, existing);
+  }
+
+  const rows = [...rowAgg.values()]
+    .map((row) => ({
+      ...row,
+      completionPercent: row.assigned > 0
+        ? Math.round((row.submitted / row.assigned) * 10000) / 100
+        : 0,
+    }))
+    .sort((a, b) => b.unanswered - a.unanswered || a.classLevel - b.classLevel);
+  const totalAssigned = rows.reduce((sum, row) => sum + row.assigned, 0);
+  const totalSubmitted = rows.reduce((sum, row) => sum + row.submitted, 0);
+  const unansweredAssignments = rows.reduce((sum, row) => sum + row.unanswered, 0);
+
+  return {
+    generatedAt,
+    totalPublishedAssignments: packs.length,
+    overallCompletionPercent: totalAssigned > 0 ? Math.round((totalSubmitted / totalAssigned) * 10000) / 100 : 0,
+    unansweredAssignments,
+    weakTopics: [...weakTopicMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([topic, count]) => ({ topic, count })),
+    rows,
+  };
 }
 
 export async function getStudentSubmissionResults(input: {
@@ -3172,10 +3367,12 @@ export async function completeExamSession(sessionId: string): Promise<ExamIntegr
 }
 
 export async function getAdminOverview(schoolId?: string): Promise<{
+  generatedAt: string;
   totalTeachers: number;
   activeTeachers: number;
   totalStudents: number;
   activeStudents: number;
+  studentsByClass: Array<{ classLevel: 10 | 12; count: number }>;
   scopesByClass: Array<{ classLevel: 10 | 12; count: number }>;
   scopesBySubject: Array<{ subject: string; count: number }>;
   scopesBySection: Array<{ section: string; count: number }>;
@@ -3185,14 +3382,76 @@ export async function getAdminOverview(schoolId?: string): Promise<{
   analytics: Awaited<ReturnType<typeof getAnalyticsSummary>>;
   storageStatus: Awaited<ReturnType<typeof getTeacherStorageStatus>>;
   highRiskExamSessions: number;
+  attendanceRisk: {
+    trackedStudents: number;
+    highRiskStudents: number;
+  };
+  assignmentCompliance: {
+    assigned: number;
+    submitted: number;
+    percent: number;
+    pendingApprovals: number;
+    unreleasedGraded: number;
+  };
+  teacherActivity: {
+    activeIn7d: number;
+    inactiveIn7d: number;
+    activityRatePercent: number;
+  };
+  tokenUsage: {
+    events: number;
+    totalTokens: number;
+    topEndpoints: Array<{ endpoint: string; totalTokens: number; events: number }>;
+  };
+  needActionQueue: Array<{
+    id: string;
+    priority: 'high' | 'medium';
+    title: string;
+    description: string;
+    href: string;
+    riskReason?: string;
+  }>;
+  riskExplanations: {
+    attendanceRisk: string;
+    inactiveTeachers: string;
+    pendingApprovals: string;
+    unreleasedGraded: string;
+  };
+  drilldowns: {
+    attendanceRisk: Array<{ classLevel: 10 | 12; section: string; highRiskStudents: number; trackedStudents: number }>;
+    inactiveTeachers: Array<{ classLevel: 10 | 12; section: string; inactiveTeachers: number; totalTeachers: number }>;
+    pendingApprovals: Array<{ classLevel: 10 | 12; section: string; count: number }>;
+    unreleasedGraded: Array<{ classLevel: 10 | 12; section: string; count: number }>;
+  };
+  parentEngagement: {
+    linkedParents: number;
+    parentLogins24h: number;
+    unreadAnnouncementsEstimate: number;
+    lowContactStudents: number;
+  };
+  slaMetrics: {
+    gradingTurnaroundHours: number;
+    publishToSubmitConversionPercent: number;
+    teacherResponseTimeHours: number;
+  };
+  dataFreshness: {
+    analyticsUpdatedAt?: string;
+    latestAttendanceAt?: string;
+    latestTeacherActivityAt?: string;
+    latestSubmissionAt?: string;
+    latestTokenUsageAt?: string;
+    latestParentLoginAt?: string;
+  };
 }> {
   const storageStatus = await getTeacherStorageStatus();
   if (!isSupabaseServiceConfigured()) {
     return {
+      generatedAt: new Date().toISOString(),
       totalTeachers: 0,
       activeTeachers: 0,
       totalStudents: 0,
       activeStudents: 0,
+      studentsByClass: [],
       scopesByClass: [],
       scopesBySubject: [],
       scopesBySection: [],
@@ -3202,10 +3461,43 @@ export async function getAdminOverview(schoolId?: string): Promise<{
       analytics: await getAnalyticsSummary(12),
       storageStatus,
       highRiskExamSessions: 0,
+      attendanceRisk: { trackedStudents: 0, highRiskStudents: 0 },
+      assignmentCompliance: { assigned: 0, submitted: 0, percent: 0, pendingApprovals: 0, unreleasedGraded: 0 },
+      teacherActivity: { activeIn7d: 0, inactiveIn7d: 0, activityRatePercent: 0 },
+      tokenUsage: { events: 0, totalTokens: 0, topEndpoints: [] },
+      needActionQueue: [],
+      riskExplanations: {
+        attendanceRisk: 'Attendance risk rises when consistent absences reduce concept continuity.',
+        inactiveTeachers: 'Inactive teachers often indicate delivery bottlenecks and delayed student support.',
+        pendingApprovals: 'Pending approvals delay assignment availability and lower practice cadence.',
+        unreleasedGraded: 'Unreleased graded work blocks feedback loops and slows correction cycles.',
+      },
+      drilldowns: {
+        attendanceRisk: [],
+        inactiveTeachers: [],
+        pendingApprovals: [],
+        unreleasedGraded: [],
+      },
+      parentEngagement: {
+        linkedParents: 0,
+        parentLogins24h: 0,
+        unreadAnnouncementsEstimate: 0,
+        lowContactStudents: 0,
+      },
+      slaMetrics: {
+        gradingTurnaroundHours: 0,
+        publishToSubmitConversionPercent: 0,
+        teacherResponseTimeHours: 0,
+      },
+      dataFreshness: {},
     };
   }
   const scopedSchoolId = schoolId ? sanitizeText(schoolId, 80) : undefined;
-  const [teachers, students, scopes, submissions, packs, analytics, examSessions] = await Promise.all([
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const [teachers, students, scopes, submissions, packs, analytics, examSessions, attendanceRows, activityRows, tokenUsageRollup, parentLinks, auditRows, questionRows] = await Promise.all([
     supabaseSelect<TeacherProfileRow>(TABLES.profiles, {
       select: '*',
       filters: scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : undefined,
@@ -3232,6 +3524,52 @@ export async function getAdminOverview(schoolId?: string): Promise<{
     }).catch(() => []),
     getAnalyticsSummary(12),
     supabaseSelect<ExamSessionRow>(TABLES.examSessions, { select: '*', limit: 3000 }).catch(() => []),
+    supabaseSelect<AttendanceRecordRow>(TABLES.attendance, {
+      select: '*',
+      filters: [
+        ...(scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : []),
+        { column: 'date', op: 'gte', value: thirtyDaysAgo.toISOString().slice(0, 10) },
+      ],
+      limit: 50000,
+    }).catch(() => []),
+    supabaseSelect<TeacherActivityRow>(TABLES.activity, {
+      select: '*',
+      orderBy: 'created_at',
+      ascending: false,
+      limit: 8000,
+    }).catch(() => []),
+    getTokenUsageRollup({
+      schoolId: scopedSchoolId,
+      limit: 2000,
+    }),
+    supabaseSelect<ParentLinkRow>(TABLES.parentLinks, {
+      select: 'id,student_id,school_id,status',
+      filters: [
+        ...(scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : []),
+        { column: 'status', value: 'active' },
+      ],
+      limit: 50000,
+    }).catch(() => []),
+    supabaseSelect<AuditEventRow>(TABLES.auditEvents, {
+      select: 'id,endpoint,action,status_code,created_at,school_id',
+      filters: [
+        ...(scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : []),
+        { column: 'created_at', op: 'gte', value: sevenDaysAgo.toISOString() },
+      ],
+      orderBy: 'created_at',
+      ascending: false,
+      limit: 12000,
+    }).catch(() => []),
+    supabaseSelect<StudentQuestionLatencyRow>(TABLES.studentQuestions, {
+      select: 'id,school_id,created_at,answered_at,status',
+      filters: [
+        ...(scopedSchoolId ? [{ column: 'school_id', value: scopedSchoolId }] : []),
+        { column: 'created_at', op: 'gte', value: thirtyDaysAgo.toISOString() },
+      ],
+      orderBy: 'created_at',
+      ascending: false,
+      limit: 12000,
+    }).catch(() => []),
   ]);
   const scopedPackIds = scopedSchoolId ? new Set(packs.map((pack) => pack.id)) : null;
   const scopedSubmissions = scopedPackIds
@@ -3240,8 +3578,15 @@ export async function getAdminOverview(schoolId?: string): Promise<{
   const scopedExamSessions = scopedPackIds
     ? examSessions.filter((session) => scopedPackIds.has(session.pack_id))
     : examSessions;
+  const scopedTeacherIds = new Set(teachers.map((teacher) => sanitizeText(teacher.id, 80)).filter(Boolean));
+  const scopedActivityRows = activityRows.filter((row) => {
+    if (!row.teacher_id) return false;
+    const teacherId = sanitizeText(row.teacher_id, 80);
+    return scopedTeacherIds.has(teacherId);
+  });
 
   const classMap = new Map<10 | 12, number>();
+  const studentClassMap = new Map<10 | 12, number>();
   const subjectMap = new Map<string, number>();
   const sectionMap = new Map<string, number>();
   for (const scope of scopes) {
@@ -3251,6 +3596,12 @@ export async function getAdminOverview(schoolId?: string): Promise<{
     }
     subjectMap.set(scope.subject, (subjectMap.get(scope.subject) ?? 0) + 1);
     sectionMap.set(scope.section || 'All Sections', (sectionMap.get(scope.section || 'All Sections') ?? 0) + 1);
+  }
+  for (const student of students) {
+    if (student.status !== 'active') continue;
+    const classLevel = student.class_level === 10 ? 10 : student.class_level === 12 ? 12 : null;
+    if (!classLevel) continue;
+    studentClassMap.set(classLevel, (studentClassMap.get(classLevel) ?? 0) + 1);
   }
   const weakMap = new Map<string, number>();
   for (const row of scopedSubmissions) {
@@ -3269,11 +3620,288 @@ export async function getAdminOverview(schoolId?: string): Promise<{
   const weekStart = new Date();
   weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
   weekStart.setHours(0, 0, 0, 0);
+  const activeTeacherRows = teachers.filter((teacher) => teacher.status === 'active');
+  const activeTeacherIds = new Set(activeTeacherRows.map((teacher) => sanitizeText(teacher.id, 80)).filter(Boolean));
+  const activeTeacherIn7d = new Set(
+    scopedActivityRows
+      .filter((row) => !!row.teacher_id && new Date(row.created_at).getTime() >= sevenDaysAgo.getTime())
+      .map((row) => sanitizeText(row.teacher_id as string, 80))
+      .filter((teacherId) => activeTeacherIds.has(teacherId))
+  );
+  const teacherActivity = {
+    activeIn7d: activeTeacherIn7d.size,
+    inactiveIn7d: Math.max(0, activeTeacherRows.length - activeTeacherIn7d.size),
+    activityRatePercent: activeTeacherRows.length > 0
+      ? Math.round((activeTeacherIn7d.size / activeTeacherRows.length) * 10000) / 100
+      : 0,
+  };
+
+  const publishedPacks = packs.filter((pack) => pack.status === 'published');
+  const publishedPackSet = new Set(publishedPacks.map((pack) => pack.id));
+  const submissionsByPack = new Map<string, Set<string>>();
+  for (const submission of scopedSubmissions) {
+    if (!publishedPackSet.has(submission.pack_id)) continue;
+    const set = submissionsByPack.get(submission.pack_id) ?? new Set<string>();
+    const code = normalizeSubmissionCode(submission.submission_code);
+    if (code) set.add(code);
+    submissionsByPack.set(submission.pack_id, set);
+  }
+  let complianceAssigned = 0;
+  let complianceSubmitted = 0;
+  for (const pack of publishedPacks) {
+    const classLevel = pack.class_level === 10 ? 10 : pack.class_level === 12 ? 12 : null;
+    if (!classLevel) continue;
+    const section = sanitizeText(pack.section ?? '', 40);
+    const eligible = students.filter((student) => {
+      if (student.status !== 'active') return false;
+      const studentClass = student.class_level === 10 ? 10 : student.class_level === 12 ? 12 : null;
+      if (studentClass !== classLevel) return false;
+      if (!section) return true;
+      return sanitizeText(student.section ?? '', 40) === section;
+    }).length;
+    const submitted = Math.min(eligible, submissionsByPack.get(pack.id)?.size ?? 0);
+    complianceAssigned += eligible;
+    complianceSubmitted += submitted;
+  }
+  const pendingApprovals = packs.filter((pack) => pack.status === 'review').length;
+  const unreleasedGraded = scopedSubmissions.filter((submission) => submission.status === 'graded').length;
+  const assignmentCompliance = {
+    assigned: complianceAssigned,
+    submitted: complianceSubmitted,
+    percent: complianceAssigned > 0
+      ? Math.round((complianceSubmitted / complianceAssigned) * 10000) / 100
+      : 0,
+    pendingApprovals,
+    unreleasedGraded,
+  };
+
+  const attendanceByStudent = new Map<string, { presentEquivalent: number; total: number }>();
+  for (const row of attendanceRows) {
+    const studentId = sanitizeText(row.student_id, 80);
+    if (!studentId) continue;
+    const current = attendanceByStudent.get(studentId) ?? { presentEquivalent: 0, total: 0 };
+    current.total += 1;
+    if (row.status === 'present') current.presentEquivalent += 1;
+    if (row.status === 'late' || row.status === 'excused') current.presentEquivalent += 0.5;
+    attendanceByStudent.set(studentId, current);
+  }
+  let trackedStudents = 0;
+  let highRiskStudents = 0;
+  for (const [, stat] of attendanceByStudent.entries()) {
+    if (stat.total < 5) continue;
+    trackedStudents += 1;
+    const percent = (stat.presentEquivalent / stat.total) * 100;
+    if (percent < 75) highRiskStudents += 1;
+  }
+  const attendanceRisk = { trackedStudents, highRiskStudents };
+  const classSectionKey = (classLevel: 10 | 12, section: string) => `${classLevel}::${section || 'ALL'}`;
+  const parseClassSectionKey = (key: string): { classLevel: 10 | 12; section: string } => {
+    const [rawClass, rawSection] = key.split('::');
+    return {
+      classLevel: rawClass === '10' ? 10 : 12,
+      section: rawSection || 'ALL',
+    };
+  };
+
+  const studentById = new Map(
+    students.map((student) => [sanitizeText(student.id, 80), student])
+  );
+  const attendanceDrillMap = new Map<string, { trackedStudents: number; highRiskStudents: number }>();
+  for (const [studentId, stat] of attendanceByStudent.entries()) {
+    if (stat.total < 5) continue;
+    const student = studentById.get(studentId);
+    if (!student) continue;
+    const classLevel = student.class_level === 10 ? 10 : student.class_level === 12 ? 12 : null;
+    if (!classLevel) continue;
+    const section = sanitizeText(student.section ?? '', 40).toUpperCase() || 'ALL';
+    const key = classSectionKey(classLevel, section);
+    const current = attendanceDrillMap.get(key) ?? { trackedStudents: 0, highRiskStudents: 0 };
+    current.trackedStudents += 1;
+    const percent = (stat.presentEquivalent / stat.total) * 100;
+    if (percent < 75) current.highRiskStudents += 1;
+    attendanceDrillMap.set(key, current);
+  }
+
+  const inactiveTeacherIds = new Set(
+    activeTeacherRows
+      .map((teacher) => sanitizeText(teacher.id, 80))
+      .filter((teacherId) => teacherId && !activeTeacherIn7d.has(teacherId))
+  );
+  const scopeTeacherMap = new Map<string, { totalTeachers: Set<string>; inactiveTeachers: Set<string> }>();
+  for (const scope of scopes) {
+    const classLevel = scope.class_level === 10 ? 10 : scope.class_level === 12 ? 12 : null;
+    if (!classLevel) continue;
+    const teacherId = sanitizeText(scope.teacher_id, 80);
+    if (!teacherId || !activeTeacherIds.has(teacherId)) continue;
+    const section = sanitizeText(scope.section ?? '', 40).toUpperCase() || 'ALL';
+    const key = classSectionKey(classLevel, section);
+    const bucket = scopeTeacherMap.get(key) ?? { totalTeachers: new Set<string>(), inactiveTeachers: new Set<string>() };
+    bucket.totalTeachers.add(teacherId);
+    if (inactiveTeacherIds.has(teacherId)) bucket.inactiveTeachers.add(teacherId);
+    scopeTeacherMap.set(key, bucket);
+  }
+
+  const pendingApprovalsBySection = new Map<string, number>();
+  const packById = new Map<string, TeacherAssignmentPackRow>(packs.map((pack) => [pack.id, pack]));
+  for (const pack of packs) {
+    if (pack.status !== 'review') continue;
+    const classLevel = pack.class_level === 10 ? 10 : pack.class_level === 12 ? 12 : null;
+    if (!classLevel) continue;
+    const section = sanitizeText(pack.section ?? '', 40).toUpperCase() || 'ALL';
+    const key = classSectionKey(classLevel, section);
+    pendingApprovalsBySection.set(key, (pendingApprovalsBySection.get(key) ?? 0) + 1);
+  }
+  const unreleasedBySection = new Map<string, number>();
+  for (const submission of scopedSubmissions) {
+    if (submission.status !== 'graded') continue;
+    const pack = packById.get(submission.pack_id);
+    if (!pack) continue;
+    const classLevel = pack.class_level === 10 ? 10 : pack.class_level === 12 ? 12 : null;
+    if (!classLevel) continue;
+    const section = sanitizeText(pack.section ?? '', 40).toUpperCase() || 'ALL';
+    const key = classSectionKey(classLevel, section);
+    unreleasedBySection.set(key, (unreleasedBySection.get(key) ?? 0) + 1);
+  }
+
+  const parentLogins24h = auditRows.filter((row) => {
+    if (Number(row.status_code) >= 400) return false;
+    return row.endpoint.includes('/api/parent/session/login');
+  }).length;
+  const linkedParentStudentIds = new Set(parentLinks.map((row) => sanitizeText(row.student_id, 80)));
+  const activeStudentIds = new Set(
+    students
+      .filter((student) => student.status === 'active')
+      .map((student) => sanitizeText(student.id, 80))
+      .filter(Boolean)
+  );
+  let linkedParents = 0;
+  for (const studentId of linkedParentStudentIds) {
+    if (activeStudentIds.has(studentId)) linkedParents += 1;
+  }
+  const lowContactStudents = Math.max(0, activeStudentIds.size - linkedParents);
+  const unreadAnnouncementsEstimate = Math.max(0, (pendingApprovals + unreleasedGraded) * 2 + lowContactStudents - parentLogins24h);
+
+  const gradedWithRelease = scopedSubmissions
+    .filter((submission) => submission.status === 'released' && !!submission.released_at)
+    .map((submission) => {
+      const createdMs = Date.parse(submission.created_at);
+      const releasedMs = Date.parse(submission.released_at || '');
+      if (!Number.isFinite(createdMs) || !Number.isFinite(releasedMs) || releasedMs < createdMs) return null;
+      return (releasedMs - createdMs) / (1000 * 60 * 60);
+    })
+    .filter((value): value is number => value !== null);
+  const gradingTurnaroundHours = gradedWithRelease.length > 0
+    ? Math.round((gradedWithRelease.reduce((sum, value) => sum + value, 0) / gradedWithRelease.length) * 100) / 100
+    : 0;
+
+  const answeredLatencies = questionRows
+    .filter((row) => row.status === 'answered' && !!row.answered_at)
+    .map((row) => {
+      const createdMs = Date.parse(row.created_at);
+      const answeredMs = Date.parse(row.answered_at || '');
+      if (!Number.isFinite(createdMs) || !Number.isFinite(answeredMs) || answeredMs < createdMs) return null;
+      return (answeredMs - createdMs) / (1000 * 60 * 60);
+    })
+    .filter((value): value is number => value !== null);
+  const teacherResponseTimeHours = answeredLatencies.length > 0
+    ? Math.round((answeredLatencies.reduce((sum, value) => sum + value, 0) / answeredLatencies.length) * 100) / 100
+    : 0;
+
+  const drilldowns = {
+    attendanceRisk: [...attendanceDrillMap.entries()]
+      .map(([key, value]) => ({ ...parseClassSectionKey(key), ...value }))
+      .sort((a, b) => b.highRiskStudents - a.highRiskStudents)
+      .slice(0, 20),
+    inactiveTeachers: [...scopeTeacherMap.entries()]
+      .map(([key, value]) => ({
+        ...parseClassSectionKey(key),
+        inactiveTeachers: value.inactiveTeachers.size,
+        totalTeachers: value.totalTeachers.size,
+      }))
+      .sort((a, b) => b.inactiveTeachers - a.inactiveTeachers)
+      .slice(0, 20),
+    pendingApprovals: [...pendingApprovalsBySection.entries()]
+      .map(([key, count]) => ({ ...parseClassSectionKey(key), count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20),
+    unreleasedGraded: [...unreleasedBySection.entries()]
+      .map(([key, count]) => ({ ...parseClassSectionKey(key), count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20),
+  };
+
+  const endpointMap = new Map<string, { endpoint: string; totalTokens: number; events: number }>();
+  for (const record of tokenUsageRollup.records) {
+    const endpoint = sanitizeText(record.endpoint || 'unknown', 120) || 'unknown';
+    const current = endpointMap.get(endpoint) ?? { endpoint, totalTokens: 0, events: 0 };
+    current.totalTokens += Math.max(0, Number(record.totalTokens) || 0);
+    current.events += 1;
+    endpointMap.set(endpoint, current);
+  }
+  const tokenUsage = {
+    events: tokenUsageRollup.events,
+    totalTokens: tokenUsageRollup.totalTokens,
+    topEndpoints: [...endpointMap.values()]
+      .sort((a, b) => b.totalTokens - a.totalTokens)
+      .slice(0, 8),
+  };
+
+  const needActionQueue: Array<{
+    id: string;
+    priority: 'high' | 'medium';
+    title: string;
+    description: string;
+    href: string;
+    riskReason?: string;
+  }> = [];
+  if (attendanceRisk.highRiskStudents > 0) {
+    needActionQueue.push({
+      id: 'attendance-risk',
+      priority: 'high',
+      title: 'Attendance Risk',
+      description: `${attendanceRisk.highRiskStudents} students are below 75% attendance in the recent window.`,
+      href: '/admin/analytics',
+      riskReason: 'Sustained attendance loss is strongly correlated with learning regression and higher exam risk.',
+    });
+  }
+  if (teacherActivity.inactiveIn7d > 0) {
+    needActionQueue.push({
+      id: 'inactive-teachers',
+      priority: 'high',
+      title: 'Inactive Teachers',
+      description: `${teacherActivity.inactiveIn7d} active teachers have no recent activity in the last 7 days.`,
+      href: '/admin/teachers',
+      riskReason: 'Teacher inactivity usually delays interventions, assignment publishing, and question resolution.',
+    });
+  }
+  if (assignmentCompliance.pendingApprovals > 0) {
+    needActionQueue.push({
+      id: 'pending-approvals',
+      priority: 'medium',
+      title: 'Pending Assignment Approvals',
+      description: `${assignmentCompliance.pendingApprovals} assignment packs are waiting for publish action.`,
+      href: '/admin/analytics',
+      riskReason: 'Approval backlog reduces practice volume and creates syllabus pacing gaps across sections.',
+    });
+  }
+  if (assignmentCompliance.unreleasedGraded > 0) {
+    needActionQueue.push({
+      id: 'pending-releases',
+      priority: 'medium',
+      title: 'Unreleased Graded Work',
+      description: `${assignmentCompliance.unreleasedGraded} graded submissions are not released yet.`,
+      href: '/admin/analytics',
+      riskReason: 'Without released grades, students miss corrective feedback and repeat avoidable mistakes.',
+    });
+  }
+
   return {
+    generatedAt: new Date().toISOString(),
     totalTeachers: teachers.length,
-    activeTeachers: teachers.filter((teacher) => teacher.status === 'active').length,
+    activeTeachers: activeTeacherRows.length,
     totalStudents: students.length,
     activeStudents: students.filter((student) => student.status === 'active').length,
+    studentsByClass: [10, 12].map((level) => ({ classLevel: level as 10 | 12, count: studentClassMap.get(level as 10 | 12) ?? 0 })),
     scopesByClass: [10, 12].map((level) => ({ classLevel: level as 10 | 12, count: classMap.get(level as 10 | 12) ?? 0 })),
     scopesBySubject: [...subjectMap.entries()].sort((a, b) => b[1] - a[1]).map(([subject, count]) => ({ subject, count })),
     scopesBySection: [...sectionMap.entries()].sort((a, b) => b[1] - a[1]).map(([section, count]) => ({ section, count })),
@@ -3283,5 +3911,42 @@ export async function getAdminOverview(schoolId?: string): Promise<{
     analytics,
     storageStatus,
     highRiskExamSessions: scopedExamSessions.filter((item) => Number(item.total_violations) >= 6).length,
+    attendanceRisk,
+    assignmentCompliance,
+    teacherActivity,
+    tokenUsage,
+    needActionQueue,
+    riskExplanations: {
+      attendanceRisk: 'Attendance decline indicates reduced instructional exposure and often predicts chapter-level weakness.',
+      inactiveTeachers: 'Inactive teachers can create response bottlenecks for grading, doubts, and assignment execution.',
+      pendingApprovals: 'Pending approvals delay student practice loops and compress assessment cycles near exams.',
+      unreleasedGraded: 'Unreleased grades withhold feedback, so students cannot correct misconceptions in time.',
+    },
+    drilldowns,
+    parentEngagement: {
+      linkedParents,
+      parentLogins24h,
+      unreadAnnouncementsEstimate,
+      lowContactStudents,
+    },
+    slaMetrics: {
+      gradingTurnaroundHours,
+      publishToSubmitConversionPercent: assignmentCompliance.percent,
+      teacherResponseTimeHours,
+    },
+    dataFreshness: {
+      analyticsUpdatedAt: analytics.updatedAt,
+      latestAttendanceAt: attendanceRows
+        .map((row) => row.marked_at)
+        .filter(Boolean)
+        .sort((a, b) => b.localeCompare(a))[0],
+      latestTeacherActivityAt: scopedActivityRows[0]?.created_at,
+      latestSubmissionAt: scopedSubmissions
+        .map((row) => row.created_at)
+        .filter(Boolean)
+        .sort((a, b) => b.localeCompare(a))[0],
+      latestTokenUsageAt: tokenUsageRollup.records[0]?.createdAt,
+      latestParentLoginAt: auditRows.find((row) => row.endpoint.includes('/api/parent/session/login'))?.created_at,
+    },
   };
 }

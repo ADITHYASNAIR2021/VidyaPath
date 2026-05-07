@@ -11,7 +11,6 @@ import {
   filterPapers, getPaperStats,
   type PaperEntry, type PaperType,
 } from '@/lib/papers';
-import type { Subject } from '@/lib/data';
 import { fetchClientStudentSession } from '@/lib/client-student-session';
 
 // ── Design tokens ────────────────────────────────────────────
@@ -182,17 +181,6 @@ function YearSection({ year, papers }: { year: number; papers: PaperEntry[] }) {
   );
 }
 
-function paperVisibleForEnrollment(paper: PaperEntry, enrolledSubjectSet: Set<Subject> | null): boolean {
-  if (!enrolledSubjectSet) return true;
-  if (paper.subject === 'All Subjects' || paper.subject === 'Marking Scheme') {
-    return enrolledSubjectSet.size > 0;
-  }
-  if (paper.subject === 'Science') {
-    return enrolledSubjectSet.has('Physics') || enrolledSubjectSet.has('Chemistry') || enrolledSubjectSet.has('Biology');
-  }
-  return enrolledSubjectSet.has(paper.subject as Subject);
-}
-
 // ── Main page ─────────────────────────────────────────────────
 export default function PapersPage() {
   const stats = useMemo(() => getPaperStats(), []);
@@ -204,10 +192,8 @@ export default function PapersPage() {
   const [studentSession, setStudentSession] = useState<{
     isStudent: boolean;
     classLevel?: 10 | 12;
-    enrolledSubjects: Subject[];
   }>({
     isStudent: false,
-    enrolledSubjects: [],
   });
   const [sessionLoaded, setSessionLoaded] = useState(false);
 
@@ -217,7 +203,7 @@ export default function PapersPage() {
       .then((session) => {
         if (!active) return;
         if (!session?.studentId) {
-          setStudentSession({ isStudent: false, enrolledSubjects: [] });
+          setStudentSession({ isStudent: false });
           return;
         }
         if (session.classLevel === 10 || session.classLevel === 12) {
@@ -226,12 +212,11 @@ export default function PapersPage() {
         setStudentSession({
           isStudent: true,
           classLevel: session.classLevel,
-          enrolledSubjects: session.enrolledSubjects,
         });
       })
       .catch(() => {
         if (!active) return;
-        setStudentSession({ isStudent: false, enrolledSubjects: [] });
+        setStudentSession({ isStudent: false });
       })
       .finally(() => {
         if (active) setSessionLoaded(true);
@@ -240,19 +225,10 @@ export default function PapersPage() {
       active = false;
     };
   }, []);
-
-  const enrolledSubjectSet = useMemo(() => {
-    if (!studentSession.isStudent) return null;
-    // Class 10 has public subject scope — no enrollment gating
-    if (studentSession.classLevel === 10) return null;
-    if (studentSession.enrolledSubjects.length === 0) return null;
-    return new Set<Subject>(studentSession.enrolledSubjects);
-  }, [studentSession.classLevel, studentSession.enrolledSubjects, studentSession.isStudent]);
-
   // Derive available subjects for selected class
   const classPapers = useMemo(
-    () => filterPapers({ classLevel: activeClass }).filter((paper) => paperVisibleForEnrollment(paper, enrolledSubjectSet)),
-    [activeClass, enrolledSubjectSet]
+    () => filterPapers({ classLevel: activeClass }),
+    [activeClass]
   );
   const subjects = useMemo(
     () => ['All', ...Array.from(new Set(classPapers.map((p) => p.subject))).sort()],
@@ -267,10 +243,8 @@ export default function PapersPage() {
 
   // Final filtered set
   const filtered = useMemo(
-    () =>
-      filterPapers({ classLevel: activeClass, subject: activeSubject, paperType: activeType })
-        .filter((paper) => paperVisibleForEnrollment(paper, enrolledSubjectSet)),
-    [activeClass, activeSubject, activeType, enrolledSubjectSet]
+    () => filterPapers({ classLevel: activeClass, subject: activeSubject, paperType: activeType }),
+    [activeClass, activeSubject, activeType]
   );
 
   // Years present in filtered set
@@ -400,9 +374,9 @@ export default function PapersPage() {
         </motion.div>
 
         {/* ── Results summary ── */}
-        {sessionLoaded && studentSession.isStudent && studentSession.classLevel !== 10 && studentSession.enrolledSubjects.length > 0 && (
+        {sessionLoaded && studentSession.isStudent && studentSession.classLevel === 12 && (
           <p className="mb-4 text-xs font-semibold text-indigo-700">
-            Showing only your enrolled subjects: {studentSession.enrolledSubjects.join(', ')}.
+            Showing complete Class 12 paper library. Use subject filters to narrow down.
           </p>
         )}
         <div className="flex items-center justify-between mb-5">
@@ -456,3 +430,4 @@ export default function PapersPage() {
     </div>
   );
 }
+

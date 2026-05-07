@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs';
 import { getPYQData } from '@/lib/pyq';
 import { getChapterById } from '@/lib/data';
 import { isUsableNvidiaApiKey, rerankWithNvidia } from '@/lib/ai/nvidia-client';
+import { logger } from '@/lib/logger';
 
 export type ContextTask =
   | 'chat'
@@ -26,7 +27,8 @@ interface ContextChunk {
   sourcePath: string;
   classLevel: number;
   subject: string;
-  sourceType?: 'paper' | 'textbook';
+  sourceType?: 'paper' | 'textbook' | 'image-ocr';
+  hasImages?: boolean;
   medium?: string;
   language?: string;
   chapterTitle?: string;
@@ -34,6 +36,7 @@ interface ContextChunk {
   chapterId?: string | null;
   year?: number;
   paperType?: PaperType;
+  page?: number;
 }
 
 interface RerankIndexCandidate {
@@ -55,7 +58,8 @@ export interface ContextSnippet {
   sourcePath: string;
   classLevel: number;
   subject: string;
-  sourceType?: 'paper' | 'textbook';
+  sourceType?: 'paper' | 'textbook' | 'image-ocr';
+  hasImages?: boolean;
   medium?: string;
   language?: string;
   chapterId?: string;
@@ -79,6 +83,12 @@ export interface ContextPack {
   contextHash: string;
   usedOnDemandFallback: boolean;
   usedPgvector: boolean;
+  retrievalMeta?: {
+    snippetCount: number;
+    averageRelevance: number;
+    sourceMix: Array<'paper' | 'textbook' | 'image-ocr'>;
+    chapterMatchCount: number;
+  };
 }
 
 const CONTEXT_DIR = path.join(process.cwd(), 'lib', 'context');
@@ -130,6 +140,23 @@ function tokenize(text: string): string[] {
     }
     return true;
   });
+}
+
+function buildHyDEQuery(
+  query: string,
+  subject: string,
+  classLevel: number,
+  chapterTopics: string[],
+  pyqTopics: string[]
+): string {
+  const allTopics = [...new Set([...pyqTopics.slice(0, 5), ...chapterTopics.slice(0, 5)])].filter(Boolean);
+  if (allTopics.length === 0) return query;
+  const topicStr = allTopics.slice(0, 6).join(', ');
+  const hypothetical =
+    `NCERT Class ${classLevel} ${subject} textbook explains ${topicStr}. ` +
+    `Key concepts: definitions laws formulae reactions processes applications of ${topicStr}. ` +
+    `Board exam questions on ${allTopics.slice(0, 3).join(' ')} test conceptual understanding numerical application.`;
+  return `${query} ${hypothetical}`.trim();
 }
 
 function canonicalizeSourcePath(sourcePath: string): string {
@@ -366,7 +393,9 @@ async function loadContextArtifacts(force = false): Promise<void> {
         const chapterId = typeof entry.chapterId === 'string' && entry.chapterId.trim().length > 0
           ? entry.chapterId.trim()
           : null;
-        const sourceType: 'paper' | 'textbook' = entry.sourceType === 'textbook' ? 'textbook' : 'paper';
+        const sourceType: 'paper' | 'textbook' | 'image-ocr' =
+          entry.sourceType === 'textbook' ? 'textbook' :
+          entry.sourceType === 'image-ocr' ? 'image-ocr' : 'paper';
         return {
           ...entry,
           chapterId,
@@ -409,7 +438,7 @@ async function loadContextArtifacts(force = false): Promise<void> {
       }
     }, {});
   } catch (error) {
-    console.error('[context-retriever] Failed to load context artifacts', error);
+    logger.error({ err: error }, '[context-retriever] Failed to load context artifacts');
     cachedChunks = [];
     cachedIndex = {};
   }
@@ -460,10 +489,53 @@ function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: 
       score += 2;
     }
   }
+  if (chunk.sourceType === 'image-ocr') {
+    // OCR'd image content: valuable for diagram/equation-heavy questions
+    score += 3;
+    if (query.chapterId && chunk.chapterId === query.chapterId) score += 5;
+  }
 
   score += paperTypeWeight(chunk.paperType);
   score += yearWeight(chunk.year);
   return score;
+}
+
+function applyMMR(
+  scored: Array<{ chunk: ContextChunk; score: number }>,
+  topK: number,
+  lambda = 0.6
+): Array<{ chunk: ContextChunk; score: number }> {
+  if (scored.length <= topK) return scored;
+  const maxScore = scored[0]?.score ?? 1;
+  const minScore = scored[scored.length - 1]?.score ?? 0;
+  const scoreRange = Math.max(1, maxScore - minScore);
+  const selected: typeof scored = [];
+  const remaining = [...scored];
+  while (selected.length < topK && remaining.length > 0) {
+    let bestIdx = 0;
+    let bestMMR = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const normScore = (remaining[i].score - minScore) / scoreRange;
+      let maxSim = 0;
+      if (selected.length > 0) {
+        let candEmb = chunkEmbeddingCache.get(remaining[i].chunk.id) ?? persistedEmbeddingCache.get(remaining[i].chunk.id);
+        if (!candEmb) {
+          candEmb = buildLocalEmbedding(remaining[i].chunk.text);
+          chunkEmbeddingCache.set(remaining[i].chunk.id, candEmb);
+        }
+        for (const sel of selected) {
+          const selEmb = chunkEmbeddingCache.get(sel.chunk.id) ?? persistedEmbeddingCache.get(sel.chunk.id) ?? buildLocalEmbedding(sel.chunk.text);
+          const sim = cosineSimilarity(candEmb, selEmb);
+          if (sim > maxSim) maxSim = sim;
+        }
+      }
+      const mmr = lambda * normScore - (1 - lambda) * maxSim;
+      if (mmr > bestMMR) { bestMMR = mmr; bestIdx = i; }
+    }
+    selected.push(remaining[bestIdx]);
+    remaining.splice(bestIdx, 1);
+  }
+  return selected;
 }
 
 function shouldUseNvidiaRerank(query: ContextQuery): boolean {
@@ -485,8 +557,9 @@ function markPgvectorTemporarilyUnavailable(reason: string): void {
   pgvectorUnavailableUntilMs = Date.now() + PGVECTOR_UNAVAILABLE_COOLDOWN_MS;
   if (pgvectorMissingHintLogged) return;
   pgvectorMissingHintLogged = true;
-  console.warn(
-    `[context-retriever] pgvector unavailable (${reason}). Retrying after ${Math.round(PGVECTOR_UNAVAILABLE_COOLDOWN_MS / 60000)} minutes.`,
+  logger.warn(
+    { reason, retryAfterMinutes: Math.round(PGVECTOR_UNAVAILABLE_COOLDOWN_MS / 60000) },
+    '[context-retriever] pgvector unavailable',
   );
 }
 
@@ -579,6 +652,31 @@ function buildContextHash(snippets: ContextSnippet[]): string {
   return digest.digest('hex');
 }
 
+function buildRetrievalMeta(
+  snippets: ContextSnippet[],
+  chapterId?: string
+): ContextPack['retrievalMeta'] {
+  const snippetCount = snippets.length;
+  const averageRelevance = snippetCount > 0
+    ? Number((snippets.reduce((sum, snippet) => sum + Number(snippet.relevanceScore || 0), 0) / snippetCount).toFixed(2))
+    : 0;
+  const sourceMix = Array.from(
+    new Set(snippets.map((snippet) =>
+      snippet.sourceType === 'textbook' ? 'textbook' :
+      snippet.sourceType === 'image-ocr' ? 'image-ocr' : 'paper'
+    ))
+  ) as Array<'paper' | 'textbook' | 'image-ocr'>;
+  const chapterMatchCount = chapterId
+    ? snippets.filter((snippet) => snippet.chapterId === chapterId).length
+    : 0;
+  return {
+    snippetCount,
+    averageRelevance,
+    sourceMix,
+    chapterMatchCount,
+  };
+}
+
 function selectFallbackSource(query: ContextQuery): string | null {
   const sourcePriority = (sourcePath: string): number => {
     if (/^\d{4}(?:-COMPTT)?\/Class_(10|12)\//.test(sourcePath)) return 0; // CBSE paper dataset
@@ -604,7 +702,7 @@ function selectFallbackSource(query: ContextQuery): string | null {
 async function appendChunkToCache(chunk: ContextChunk): Promise<void> {
   const normalizedChunk: ContextChunk = {
     ...chunk,
-    sourceType: chunk.sourceType === 'textbook' ? 'textbook' : 'paper',
+    sourceType: chunk.sourceType === 'textbook' ? 'textbook' : chunk.sourceType === 'image-ocr' ? 'image-ocr' : 'paper',
     chapterId: typeof chunk.chapterId === 'string' && chunk.chapterId.trim().length > 0 ? chunk.chapterId.trim() : null,
     sourcePath: canonicalizeSourcePath(chunk.sourcePath),
     text: sanitizeChunkText(chunk.text),
@@ -633,7 +731,7 @@ async function appendChunkToCache(chunk: ContextChunk): Promise<void> {
 
     await fs.writeFile(INDEX_PATHS[0], JSON.stringify(cachedIndex, null, 2), 'utf-8');
   } catch (error) {
-    console.error('[context-retriever] Failed to write-through chunk cache', error);
+    logger.error({ err: error }, '[context-retriever] Failed to write-through chunk cache');
   }
 }
 
@@ -753,10 +851,14 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
     ]);
     if (!isSupabaseServiceConfigured()) return null;
 
-    const queryText = [query.query ?? '', ...(query.chapterTopics ?? [])]
-      .filter(Boolean)
-      .join(' ')
-      .slice(0, 2048);
+    const pyqForHyDE = query.chapterId ? getPYQData(query.chapterId) : null;
+    const queryText = buildHyDEQuery(
+      query.query ?? '',
+      query.subject,
+      query.classLevel,
+      query.chapterTopics ?? [],
+      pyqForHyDE?.importantTopics ?? []
+    ).slice(0, 2048);
 
     const [embedding] = await createNvidiaEmbeddings({
       apiKey: nvidiaKey,
@@ -791,7 +893,7 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
         sourcePath: canonicalizeSourcePath(row.source_path),
         classLevel: row.class_level,
         subject: row.subject,
-        sourceType: row.source_type === 'textbook' ? 'textbook' : 'paper',
+        sourceType: row.source_type === 'textbook' ? 'textbook' : row.source_type === 'image-ocr' ? 'image-ocr' : 'paper',
         chapterId: row.chapter_id ?? undefined,
         year: row.year ?? undefined,
         paperType: row.paper_type as PaperType | undefined,
@@ -827,16 +929,31 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
       contextHash: buildContextHash(reranked),
       usedOnDemandFallback: false,
       usedPgvector: true,
+      retrievalMeta: buildRetrievalMeta(reranked, query.chapterId),
     };
   }
 
   await loadContextArtifacts();
-  const topK = Math.max(1, Math.min(8, query.topK ?? 4));
+
+  // Question-generation tasks benefit from source diversity (textbook + paper)
+  const QUESTION_TASKS = new Set<ContextTask>(['mcq', 'adaptive-test', 'chapter-drill', 'flashcards', 'chapter-diagnose', 'chapter-remediate', 'chapter-pack']);
+  const needsDiversity = QUESTION_TASKS.has(query.task);
+  // For question tasks use a wider pool; cap at 14 to stay within LLM context budget
+  const topK = needsDiversity
+    ? Math.max(8, Math.min(14, query.topK ?? 10))
+    : Math.max(1, Math.min(8, query.topK ?? 4));
+
   const normalizedSubject = normalizeSubject(query.classLevel, query.subject);
   const chapter = query.chapterId ? getChapterById(query.chapterId) : undefined;
-  const queryEmbedding = buildLocalEmbedding(
-    [query.query ?? '', ...(query.chapterTopics ?? []), ...(chapter?.topics ?? [])].join(' ')
+  const localPyq = query.chapterId ? getPYQData(query.chapterId) : null;
+  const hydeQuery = buildHyDEQuery(
+    query.query ?? '',
+    query.subject,
+    query.classLevel,
+    [...(query.chapterTopics ?? []), ...(chapter?.topics ?? [])],
+    localPyq?.importantTopics ?? []
   );
+  const queryEmbedding = buildLocalEmbedding(hydeQuery);
 
   const subjectScoped = cachedChunks
     .filter((chunk) => {
@@ -850,14 +967,24 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     : subjectScoped;
   const candidatePool = chapterScoped.length >= Math.min(topK, 2) ? chapterScoped : subjectScoped;
 
-  const ranked = candidatePool
-    .map((chunk) => ({
-      chunk,
-      score: computeScore(chunk, query, queryEmbedding),
-    }))
+  // Score all candidates without pre-slicing so diversity selection has the full pool
+  const allScored = candidatePool
+    .map((chunk) => ({ chunk, score: computeScore(chunk, query, queryEmbedding) }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
     .filter((entry) => entry.score > 0);
+
+  let ranked: typeof allScored;
+  if (needsDiversity && allScored.length > topK) {
+    // Guarantee textbook chunks for NCERT grounding; apply MMR to paper/ocr pool for content diversity.
+    const textbookPool = allScored.filter((e) => e.chunk.sourceType === 'textbook');
+    const otherPool = allScored.filter((e) => e.chunk.sourceType !== 'textbook');
+    const textbookQuota = Math.min(Math.max(3, Math.floor(topK * 0.35)), textbookPool.length);
+    const textbookPicked = textbookPool.slice(0, textbookQuota);
+    const otherMMR = applyMMR(otherPool, topK - textbookPicked.length);
+    ranked = [...textbookPicked, ...otherMMR].sort((a, b) => b.score - a.score);
+  } else {
+    ranked = applyMMR(allScored, topK);
+  }
 
   const dedupeSet = new Set<string>();
   const snippets: ContextSnippet[] = [];
@@ -898,5 +1025,6 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     contextHash: buildContextHash(reranked),
     usedOnDemandFallback,
     usedPgvector: false,
+    retrievalMeta: buildRetrievalMeta(reranked, query.chapterId),
   };
 }
