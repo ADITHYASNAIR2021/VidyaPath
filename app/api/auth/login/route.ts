@@ -39,28 +39,18 @@ function isStudentLikeIdentifier(value: string): boolean {
 }
 
 function buildCandidateRoles(identifier: string, portalHint?: LoginRole): LoginRole[] {
-  const roleSet = new Set<LoginRole>();
-  if (portalHint) roleSet.add(portalHint);
+  // When the user is on a specific portal's login page, only try that handler.
+  // Cascading through multiple handlers multiplies rate-limit consumption across
+  // unrelated buckets and lets the lowest-limit handler (developer: 8/min) block
+  // all users on a shared IP after very few attempts.
+  if (portalHint) return [portalHint];
 
-  if (isEmailIdentifier(identifier)) {
-    roleSet.add('admin');
-    roleSet.add('teacher');
-    roleSet.add('developer');
-  } else if (isStudentLikeIdentifier(identifier)) {
-    roleSet.add('student');
-    roleSet.add('teacher');
-    roleSet.add('developer');
-  } else if (isMostlyNumeric(identifier)) {
-    roleSet.add('teacher');
-    roleSet.add('student');
-    roleSet.add('developer');
-  } else {
-    roleSet.add('developer');
-    roleSet.add('teacher');
-    roleSet.add('student');
-  }
-
-  return [...roleSet];
+  // Generic login page: auto-detect role, never include developer
+  // (developer portal always provides portalHint explicitly from /developer/login)
+  if (isEmailIdentifier(identifier)) return ['admin', 'teacher'];
+  if (isStudentLikeIdentifier(identifier)) return ['student'];
+  if (isMostlyNumeric(identifier)) return ['teacher', 'student'];
+  return ['teacher', 'student'];
 }
 
 function buildRolePayload(role: LoginRole, identifier: string, password: string): Record<string, unknown> {
