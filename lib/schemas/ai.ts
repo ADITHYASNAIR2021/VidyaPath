@@ -74,6 +74,7 @@ const chapterContextSchema = z
 export const aiTutorRequestSchema = z.object({
   messages: z.array(chatMessageSchema).min(1),
   chapterContext: chapterContextSchema,
+  responseMode: z.enum(['answer-only', 'teaching']).optional(),
 });
 export type AiTutorRequest = z.infer<typeof aiTutorRequestSchema>;
 
@@ -153,6 +154,43 @@ export const adaptiveTestRequestSchema = z.object({
 export type AdaptiveTestRequest = z.infer<typeof adaptiveTestRequestSchema>;
 
 // ---------------------------------------------------------------------------
+// /api/ai/question-feedback
+// ---------------------------------------------------------------------------
+
+const questionFeedbackItemSchema = z.object({
+  question: trimmedString.min(1).max(400),
+  correct: z.boolean(),
+});
+
+export const questionFeedbackRequestSchema = z.object({
+  chapterId: nonEmpty,
+  results: z.array(questionFeedbackItemSchema).min(1).max(60),
+  task: z
+    .enum([
+      'chat',
+      'flashcards',
+      'mcq',
+      'adaptive-test',
+      'revision-plan',
+      'paper-evaluate',
+      'chapter-pack',
+      'chapter-drill',
+      'chapter-diagnose',
+      'chapter-remediate',
+    ])
+    .optional(),
+  subject: optionalTrimmed,
+  responseId: optionalTrimmed,
+  provider: optionalTrimmed,
+  model: optionalTrimmed,
+  issueType: z.enum(['unsafe-answer', 'weak-grounding', 'missing-citation', 'hallucination-flag', 'other']).optional(),
+  note: z.string().trim().max(1000).optional(),
+  retrievalMiss: z.boolean().optional(),
+  hallucinationFlag: z.boolean().optional(),
+});
+export type QuestionFeedbackRequest = z.infer<typeof questionFeedbackRequestSchema>;
+
+// ---------------------------------------------------------------------------
 // /api/revision-plan
 // ---------------------------------------------------------------------------
 
@@ -202,7 +240,15 @@ export type PaperEvaluateRequest = z.infer<typeof paperEvaluateRequestSchema>;
 // Kept permissive — shape is dynamic based on tool type.
 export const teacherAiRequestSchema = z
   .object({
-    type: z.enum(['worksheet', 'lesson-plan', 'question-paper']),
+    type: z.enum([
+      'worksheet',
+      'lesson-plan',
+      'question-paper',
+      'weak-students',
+      'remedial-set',
+      'next-day-recap',
+      'revision-sheet',
+    ]),
     chapterId: optionalTrimmed,
     chapterTitle: optionalTrimmed,
     subject: optionalTrimmed,

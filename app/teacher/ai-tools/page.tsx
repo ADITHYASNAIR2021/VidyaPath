@@ -19,6 +19,10 @@ const TOOL_TYPES = [
   { id: 'worksheet',      label: 'Worksheet',      desc: 'Structured practice worksheet with answer key' },
   { id: 'lesson-plan',    label: 'Lesson Plan',    desc: '45-min lesson plan with activities & CBSE alignment' },
   { id: 'question-paper', label: 'Question Paper', desc: 'Board-format question paper with sections & marks' },
+  { id: 'weak-students',  label: 'Weak Students',  desc: 'Find who is struggling in this chapter and why' },
+  { id: 'remedial-set',   label: 'Remedial Set',   desc: 'Generate a targeted set only for weak students' },
+  { id: 'next-day-recap', label: '15-min Recap',   desc: 'Prepare tomorrow’s short reteach from recent mistakes' },
+  { id: 'revision-sheet', label: 'Revision Sheet', desc: 'Turn repeated class mistakes into a clean handout' },
 ] as const;
 
 type ToolId = typeof TOOL_TYPES[number]['id'];
@@ -38,6 +42,23 @@ interface HistoryEntry {
   difficulty?: string;
   result: string;
   generatedAt: string;
+}
+
+interface ClassroomSignals {
+  weakStudents: Array<{
+    studentId?: string;
+    studentName: string;
+    submissionCode: string;
+    chapterAverage: number;
+    attempts: number;
+    releasedCount: number;
+  }>;
+  relevantPackCount: number;
+  relevantStudentCount: number;
+  averageScore: number;
+  lowScoreCount: number;
+  packTitles: string[];
+  summary: string;
 }
 
 const HISTORY_KEY = 'vidyapath_ai_tools_history';
@@ -170,7 +191,7 @@ export default function AIToolsPage() {
   const [customContext, setCustomContext] = useState('');
   const [tweakInput, setTweakInput] = useState('');
   const [result, setResult] = useState('');
-  const [resultMeta, setResultMeta] = useState<{ chapterTitle: string; subject: string } | null>(null);
+  const [resultMeta, setResultMeta] = useState<{ chapterTitle: string; subject: string; classroomSignals?: ClassroomSignals | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
@@ -230,11 +251,15 @@ export default function AIToolsPage() {
         }),
       });
       const body = await res.json().catch(() => null);
-      const data = unwrap<{ result?: string; chapterTitle?: string; subject?: string } | null>(body);
+      const data = unwrap<{ result?: string; chapterTitle?: string; subject?: string; classroomSignals?: ClassroomSignals | null } | null>(body);
       if (!res.ok || !data) { setError(body?.message ?? 'Generation failed. Try again.'); return; }
       const text = data.result ?? '';
       setResult(text);
-      setResultMeta({ chapterTitle: data.chapterTitle ?? chapter?.title ?? '', subject: data.subject ?? chapter?.subject ?? '' });
+      setResultMeta({
+        chapterTitle: data.chapterTitle ?? chapter?.title ?? '',
+        subject: data.subject ?? chapter?.subject ?? '',
+        classroomSignals: data.classroomSignals ?? null,
+      });
       setActiveTab('preview');
       setTweakInput('');
 
@@ -291,7 +316,7 @@ export default function AIToolsPage() {
 
   function restoreHistory(entry: HistoryEntry) {
     setResult(entry.result);
-    setResultMeta({ chapterTitle: entry.chapterTitle, subject: entry.subject });
+    setResultMeta({ chapterTitle: entry.chapterTitle, subject: entry.subject, classroomSignals: null });
     setToolType(entry.toolType);
     setActiveTab('preview');
     setShowHistory(false);
@@ -387,7 +412,7 @@ export default function AIToolsPage() {
             {/* Question count / marks */}
             <div>
               <label className="text-xs font-semibold text-gray-600 block mb-1">
-                {toolType === 'question-paper' ? 'Total Marks' : 'Questions'}
+                {toolType === 'question-paper' ? 'Total Marks' : toolType === 'weak-students' ? 'Focus Count' : 'Questions'}
               </label>
               <input type="number" min={5} max={50} value={questionCount} onChange={(e) => setQuestionCount(Number(e.target.value))} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             </div>
@@ -499,6 +524,21 @@ export default function AIToolsPage() {
               </div>
             )}
           </div>
+
+          {resultMeta?.classroomSignals && (
+            <div className="mb-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900">
+              <p className="font-semibold uppercase tracking-wide text-emerald-700">Classroom signals used</p>
+              <p className="mt-1">{resultMeta.classroomSignals.summary}</p>
+              <p className="mt-1 text-emerald-800">
+                Relevant packs: {resultMeta.classroomSignals.relevantPackCount} | Students scored: {resultMeta.classroomSignals.relevantStudentCount} | Below 60%: {resultMeta.classroomSignals.lowScoreCount}
+              </p>
+              {resultMeta.classroomSignals.weakStudents.length > 0 && (
+                <p className="mt-1 text-emerald-800">
+                  Weak cluster: {resultMeta.classroomSignals.weakStudents.slice(0, 5).map((student) => `${student.studentName} (${student.chapterAverage}%)`).join(', ')}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Content area */}
           <div className={clsx(

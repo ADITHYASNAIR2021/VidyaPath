@@ -17,6 +17,22 @@ function validateBuildEnv() {
 validateBuildEnv();
 
 const nextConfig = {
+  // Limit parallel static-generation workers to prevent OOM on machines
+  // with large RAG context files (retrieval_index.json etc.) in lib/context/.
+  experimental: {
+    workerThreads: false,
+    cpus: 2,
+  },
+  // Prevent webpack from bundling large runtime-only context files (chunks.jsonl,
+  // retrieval_index.json, etc.) that are read via fs.readFile at runtime.
+  webpack(config) {
+    config.module.rules.push({
+      test: /lib[\\/]context[\\/].+\.(jsonl|json)$/,
+      type: 'javascript/auto',
+      loader: 'null-loader',
+    });
+    return config;
+  },
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'ncert.nic.in' },

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ContextSnippet, ContextTask } from '@/lib/ai/context-retriever';
 import { getTaskChatModelCandidates, type LlmProvider, type LlmModelConfig } from '@/lib/ai/model-routing';
 import { callNvidiaChatCompletion, isUsableNvidiaApiKey, type LlmUsageCounts } from '@/lib/ai/nvidia-client';
-import { recordAiQualityRecord } from '@/lib/ai/quality-store';
+import { rankModelCandidatesForTask, recordAiQualityRecord } from '@/lib/ai/quality-store';
 
 export type { LlmUsageCounts };
 
@@ -27,6 +27,22 @@ export interface GenerationResult {
   latencyMs: number;
 }
 
+export interface GenerationQualityMeta {
+  schoolId?: string;
+  authUserId?: string;
+  role?: 'student' | 'teacher' | 'admin' | 'developer';
+  subject?: string;
+  chapterId?: string;
+  endpoint?: string;
+  requestId?: string;
+  responseId?: string;
+  promptVersion?: string;
+  routingKey?: string;
+  retrievalConfidence?: number;
+  retrievalConfidenceLevel?: 'low' | 'medium' | 'high';
+  retrievalAvgRelevance?: number;
+}
+
 interface BaseGenerateOptions {
   task: ContextTask;
   systemPrompt: string;
@@ -39,6 +55,7 @@ interface BaseGenerateOptions {
   includeCitations?: boolean;
   temperature?: number;
   maxOutputTokens?: number;
+  qualityMeta?: GenerationQualityMeta;
 }
 
 interface GenerateTextOptions extends BaseGenerateOptions {
@@ -102,21 +119,36 @@ function resolveMaxTokens(candidate: LlmModelConfig, requestValue: number | unde
   return configured ?? 1600;
 }
 
+const CONTEXT_CHAR_BUDGET = Number(process.env.AI_CONTEXT_CHAR_BUDGET) || 24_000;
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
 function buildContextSection(snippets: ContextSnippet[]): string {
   if (snippets.length === 0) return 'No retrieved paper context available for this request.';
-  return snippets
-    .map((snippet, idx) => {
-      const source = [
-        `Source ${idx + 1}: ${snippet.sourcePath}`,
-        snippet.year ? `Year ${snippet.year}` : null,
-        snippet.paperType ? `Type ${snippet.paperType}` : null,
-        snippet.chapterId ? `Chapter ${snippet.chapterId}` : null,
-      ]
-        .filter(Boolean)
-        .join(' | ');
-      return `${source}\n${snippet.text}`;
-    })
-    .join('\n\n');
+  let charBudget = CONTEXT_CHAR_BUDGET;
+  const parts: string[] = [];
+  for (let idx = 0; idx < snippets.length; idx++) {
+    const snippet = snippets[idx];
+    const source = [
+      `Source ${idx + 1}: ${snippet.sourcePath}`,
+      snippet.year ? `Year ${snippet.year}` : null,
+      snippet.paperType ? `Type ${snippet.paperType}` : null,
+      snippet.chapterId ? `Chapter ${snippet.chapterId}` : null,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+    const entry = `${source}\n${snippet.text}`;
+    if (charBudget - entry.length < 0 && parts.length > 0) break;
+    parts.push(entry);
+    charBudget -= entry.length;
+  }
+  return parts.join('\n\n');
+}
+
+function estimatePromptTokens(systemPrompt: string, contextBlock: string, userPrompt: string): number {
+  return estimateTokens(systemPrompt) + estimateTokens(contextBlock) + estimateTokens(userPrompt) + 64;
 }
 
 function buildCacheKey(options: GenerateTextOptions): string {
@@ -126,6 +158,8 @@ function buildCacheKey(options: GenerateTextOptions): string {
   digest.update(options.chapterId ?? '');
   digest.update('|');
   digest.update(options.difficulty ?? '');
+  digest.update('|');
+  digest.update(options.systemPrompt);
   digest.update('|');
   digest.update(options.contextHash);
   digest.update('|');
@@ -145,6 +179,24 @@ function buildCacheKey(options: GenerateTextOptions): string {
 }
 
 const AI_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS) || 30_000;
+
+function buildQualityRecordBase(options: GenerateTextOptions) {
+  return {
+    schoolId: options.qualityMeta?.schoolId,
+    authUserId: options.qualityMeta?.authUserId,
+    role: options.qualityMeta?.role,
+    subject: options.qualityMeta?.subject,
+    chapterId: options.qualityMeta?.chapterId ?? options.chapterId,
+    endpoint: options.qualityMeta?.endpoint,
+    requestId: options.qualityMeta?.requestId,
+    responseId: options.qualityMeta?.responseId,
+    promptVersion: options.qualityMeta?.promptVersion,
+    routingKey: options.qualityMeta?.routingKey,
+    retrievalConfidence: options.qualityMeta?.retrievalConfidence,
+    retrievalConfidenceLevel: options.qualityMeta?.retrievalConfidenceLevel,
+    retrievalAvgRelevance: options.qualityMeta?.retrievalAvgRelevance,
+  };
+}
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -202,6 +254,7 @@ async function callGemini(
       promptTokenCount?: number;
       candidatesTokenCount?: number;
       totalTokenCount?: number;
+      cachedContentTokenCount?: number;
     };
   };
   const text =
@@ -218,6 +271,7 @@ async function callGemini(
       promptTokens: m.promptTokenCount,
       completionTokens: m.candidatesTokenCount,
       totalTokens: m.totalTokenCount ?? m.promptTokenCount + m.candidatesTokenCount,
+      cachedPromptTokens: typeof m.cachedContentTokenCount === 'number' ? m.cachedContentTokenCount : undefined,
     };
   }
   return { text, usage };
@@ -264,7 +318,12 @@ async function callOpenAICompatibleEndpoint(
 
   const payload = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      prompt_tokens_details?: { cached_tokens?: number };
+    };
   };
   const text = payload.choices?.[0]?.message?.content?.trim() ?? '';
   if (!text) throw new Error(`${providerTag}/${model} returned empty output`);
@@ -276,6 +335,10 @@ async function callOpenAICompatibleEndpoint(
       promptTokens: u.prompt_tokens,
       completionTokens: u.completion_tokens,
       totalTokens: u.total_tokens ?? u.prompt_tokens + u.completion_tokens,
+      cachedPromptTokens:
+        typeof u.prompt_tokens_details?.cached_tokens === 'number'
+          ? u.prompt_tokens_details.cached_tokens
+          : undefined,
     };
   }
   return { text, usage };
@@ -437,8 +500,19 @@ function collectStringLeaves(value: unknown, output: string[], budget: { chars: 
   }
 }
 
+function normalizeChemForGrounding(text: string): string {
+  return text
+    .replace(/[₀₁₂₃₄₅₆₇₈₉]/g, (ch) => String('₀₁₂₃₄₅₆₇₈₉'.indexOf(ch)))
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, (ch) => {
+      const idx = '⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(ch);
+      return idx >= 0 ? (idx < 10 ? String(idx) : idx === 10 ? '+' : '-') : ch;
+    })
+    .replace(/²/g, '2').replace(/³/g, '3');
+}
+
 function tokenizeForGrounding(text: string): string[] {
-  return (text.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((token) => {
+  const normalized = normalizeChemForGrounding(text);
+  return (normalized.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []).filter((token) => {
     return !['with', 'from', 'that', 'this', 'your', 'their', 'which', 'about', 'chapter'].includes(token);
   });
 }
@@ -468,7 +542,7 @@ function evaluateJsonGrounding(
     if (snippetTokens.has(token)) overlap += 1;
   }
   const overlapRatio = outputTokens.length > 0 ? overlap / outputTokens.length : 0;
-  const groundednessScore = Math.max(0, Math.min(100, Math.round((35 + overlapRatio * 75) * 100) / 100));
+  const groundednessScore = Math.max(0, Math.min(100, Math.round(overlapRatio * 100 * 100) / 100));
 
   if (!includeCitations) {
     return {
@@ -514,10 +588,16 @@ async function runGeneration(options: GenerateTextOptions): Promise<GenerationRe
 - Do not include source tags like [S1], [S2] in student-facing JSON/text fields.`;
   const fullSystemPrompt = `${options.systemPrompt}
 
-Retrieved Paper Context:
+${citationBlock}`;
+  const contextAwareUserPrompt = `Retrieved Paper Context:
 ${contextBlock}
 
-${citationBlock}`;
+User Request:
+${options.userPrompt}`;
+  const modelMessages: ChatMessage[] | undefined =
+    options.messages && options.messages.length > 0
+      ? [{ role: 'user', content: `Retrieved Paper Context:\n${contextBlock}` }, ...options.messages.slice(-12)]
+      : undefined;
 
   const geminiKey = process.env.GEMINI_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
@@ -526,7 +606,7 @@ ${citationBlock}`;
   const mistralKey = process.env.MISTRAL_API_KEY;
   const errors: string[] = [];
   const missingProviderNotice = new Set<LlmProvider>();
-  const candidates = getTaskChatModelCandidates(options.task);
+  const candidates = await rankModelCandidatesForTask(options.task, getTaskChatModelCandidates(options.task));
 
   if (candidates.length === 0) {
     throw new Error(`No chat model configured for task ${options.task}.`);
@@ -550,9 +630,9 @@ ${citationBlock}`;
           apiKey: nvidiaKey,
           model: candidate.model,
           systemPrompt: fullSystemPrompt,
-          userPrompt: options.userPrompt,
-          messages: options.messages
-            ? options.messages.map((message) => ({
+          userPrompt: contextAwareUserPrompt,
+          messages: modelMessages
+            ? modelMessages.map((message) => ({
                 role: message.role,
                 content: message.content,
               }))
@@ -575,6 +655,7 @@ ${citationBlock}`;
           task: options.task,
           provider: 'nvidia',
           model: candidate.model,
+          ...buildQualityRecordBase(options),
           latencyMs,
           promptTokens: nvidiaResult.usage?.promptTokens,
           completionTokens: nvidiaResult.usage?.completionTokens,
@@ -604,8 +685,8 @@ ${citationBlock}`;
           geminiKey,
           candidate.model,
           fullSystemPrompt,
-          options.userPrompt,
-          options.messages,
+          contextAwareUserPrompt,
+          modelMessages,
           temperature,
           maxOutputTokens,
           topP
@@ -623,6 +704,7 @@ ${citationBlock}`;
           task: options.task,
           provider: 'gemini',
           model: candidate.model,
+          ...buildQualityRecordBase(options),
           latencyMs,
           promptTokens: geminiResult.usage?.promptTokens,
           completionTokens: geminiResult.usage?.completionTokens,
@@ -649,14 +731,25 @@ ${citationBlock}`;
           continue;
         }
         const groqResult = await callGroq(
-          groqKey, candidate.model, fullSystemPrompt, options.userPrompt,
-          options.messages, temperature, maxOutputTokens, topP
+          groqKey, candidate.model, fullSystemPrompt,
+          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, { text: groqResult.text, provider: 'groq', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
         }
         const latencyMs = now() - candidateStart;
-        void recordAiQualityRecord({ task: options.task, provider: 'groq', model: candidate.model, latencyMs, promptTokens: groqResult.usage?.promptTokens, completionTokens: groqResult.usage?.completionTokens, totalTokens: groqResult.usage?.totalTokens, contextSnippetCount: options.contextSnippets.length, success: true });
+        void recordAiQualityRecord({
+          task: options.task,
+          provider: 'groq',
+          model: candidate.model,
+          ...buildQualityRecordBase(options),
+          latencyMs,
+          promptTokens: groqResult.usage?.promptTokens,
+          completionTokens: groqResult.usage?.completionTokens,
+          totalTokens: groqResult.usage?.totalTokens,
+          contextSnippetCount: options.contextSnippets.length,
+          success: true,
+        });
         return { text: groqResult.text, provider: 'groq', model: candidate.model, cacheHit: false, usage: groqResult.usage, latencyMs };
       }
 
@@ -669,14 +762,25 @@ ${citationBlock}`;
           continue;
         }
         const result = await callCerebras(
-          cerebrasKey, candidate.model, fullSystemPrompt, options.userPrompt,
-          options.messages, temperature, maxOutputTokens, topP
+          cerebrasKey, candidate.model, fullSystemPrompt,
+          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, { text: result.text, provider: 'cerebras', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
         }
         const latencyMs = now() - candidateStart;
-        void recordAiQualityRecord({ task: options.task, provider: 'cerebras', model: candidate.model, latencyMs, promptTokens: result.usage?.promptTokens, completionTokens: result.usage?.completionTokens, totalTokens: result.usage?.totalTokens, contextSnippetCount: options.contextSnippets.length, success: true });
+        void recordAiQualityRecord({
+          task: options.task,
+          provider: 'cerebras',
+          model: candidate.model,
+          ...buildQualityRecordBase(options),
+          latencyMs,
+          promptTokens: result.usage?.promptTokens,
+          completionTokens: result.usage?.completionTokens,
+          totalTokens: result.usage?.totalTokens,
+          contextSnippetCount: options.contextSnippets.length,
+          success: true,
+        });
         return { text: result.text, provider: 'cerebras', model: candidate.model, cacheHit: false, usage: result.usage, latencyMs };
       }
 
@@ -689,14 +793,25 @@ ${citationBlock}`;
           continue;
         }
         const result = await callMistral(
-          mistralKey, candidate.model, fullSystemPrompt, options.userPrompt,
-          options.messages, temperature, maxOutputTokens, topP
+          mistralKey, candidate.model, fullSystemPrompt,
+          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, { text: result.text, provider: 'mistral', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
         }
         const latencyMs = now() - candidateStart;
-        void recordAiQualityRecord({ task: options.task, provider: 'mistral', model: candidate.model, latencyMs, promptTokens: result.usage?.promptTokens, completionTokens: result.usage?.completionTokens, totalTokens: result.usage?.totalTokens, contextSnippetCount: options.contextSnippets.length, success: true });
+        void recordAiQualityRecord({
+          task: options.task,
+          provider: 'mistral',
+          model: candidate.model,
+          ...buildQualityRecordBase(options),
+          latencyMs,
+          promptTokens: result.usage?.promptTokens,
+          completionTokens: result.usage?.completionTokens,
+          totalTokens: result.usage?.totalTokens,
+          contextSnippetCount: options.contextSnippets.length,
+          success: true,
+        });
         return { text: result.text, provider: 'mistral', model: candidate.model, cacheHit: false, usage: result.usage, latencyMs };
       }
     } catch (error) {
@@ -705,6 +820,7 @@ ${citationBlock}`;
         task: options.task,
         provider: candidate.provider,
         model: candidate.model,
+        ...buildQualityRecordBase(options),
         latencyMs: now() - candidateStart,
         contextSnippetCount: options.contextSnippets.length,
         success: false,
@@ -742,11 +858,12 @@ export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Prom
   const firstResult = await runGeneration(options);
   const firstParsed = tryParseJsonCandidates(firstResult.text);
   const acceptedFirst = firstParsed.parsed ? evaluateAndAccept(firstParsed.parsed) : null;
-  if (acceptedFirst && (acceptedFirst.quality.retrievalMiss || acceptedFirst.quality.groundednessScore >= 52)) {
+  if (acceptedFirst && (acceptedFirst.quality.retrievalMiss || acceptedFirst.quality.groundednessScore >= 30)) {
     void recordAiQualityRecord({
       task: options.task,
       provider: firstResult.provider,
       model: firstResult.model,
+      ...buildQualityRecordBase(options),
       latencyMs: firstResult.latencyMs,
       promptTokens: firstResult.usage?.promptTokens,
       completionTokens: firstResult.usage?.completionTokens,
@@ -755,6 +872,8 @@ export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Prom
       groundednessScore: acceptedFirst.quality.groundednessScore,
       citationCoverageScore: acceptedFirst.quality.citationCoverageScore,
       retrievalMiss: acceptedFirst.quality.retrievalMiss,
+      hallucinationFlag: !acceptedFirst.quality.retrievalMiss && acceptedFirst.quality.groundednessScore < 20,
+      lowQuality: acceptedFirst.quality.groundednessScore < 45 || acceptedFirst.quality.citationCoverageScore < 35,
       repaired: false,
       rejected: false,
       success: true,
@@ -779,11 +898,12 @@ CRITICAL:
   const retryResult = await runGeneration(retryOptions);
   const retryParsed = tryParseJsonCandidates(retryResult.text);
   const acceptedRetry = retryParsed.parsed ? evaluateAndAccept(retryParsed.parsed) : null;
-  if (acceptedRetry && (acceptedRetry.quality.retrievalMiss || acceptedRetry.quality.groundednessScore >= 45)) {
+  if (acceptedRetry && (acceptedRetry.quality.retrievalMiss || acceptedRetry.quality.groundednessScore >= 20)) {
     void recordAiQualityRecord({
       task: options.task,
       provider: retryResult.provider,
       model: retryResult.model,
+      ...buildQualityRecordBase(options),
       latencyMs: retryResult.latencyMs,
       promptTokens: retryResult.usage?.promptTokens,
       completionTokens: retryResult.usage?.completionTokens,
@@ -792,6 +912,8 @@ CRITICAL:
       groundednessScore: acceptedRetry.quality.groundednessScore,
       citationCoverageScore: acceptedRetry.quality.citationCoverageScore,
       retrievalMiss: acceptedRetry.quality.retrievalMiss,
+      hallucinationFlag: !acceptedRetry.quality.retrievalMiss && acceptedRetry.quality.groundednessScore < 20,
+      lowQuality: acceptedRetry.quality.groundednessScore < 45 || acceptedRetry.quality.citationCoverageScore < 35,
       repaired: true,
       rejected: false,
       success: true,
@@ -803,6 +925,7 @@ CRITICAL:
     task: options.task,
     provider: retryResult.provider,
     model: retryResult.model,
+    ...buildQualityRecordBase(options),
     latencyMs: retryResult.latencyMs,
     promptTokens: retryResult.usage?.promptTokens,
     completionTokens: retryResult.usage?.completionTokens,
@@ -811,6 +934,11 @@ CRITICAL:
     groundednessScore: acceptedRetry?.quality.groundednessScore,
     citationCoverageScore: acceptedRetry?.quality.citationCoverageScore,
     retrievalMiss: acceptedRetry?.quality.retrievalMiss,
+    hallucinationFlag:
+      !acceptedRetry?.quality.retrievalMiss &&
+      typeof acceptedRetry?.quality.groundednessScore === 'number' &&
+      acceptedRetry.quality.groundednessScore < 20,
+    lowQuality: true,
     repaired: true,
     rejected: true,
     success: false,

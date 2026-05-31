@@ -442,7 +442,7 @@ export default async function ChapterDetailPage({
             })()}
 
             {/* Formulas & Mermaid */}
-            {chapter.formulas && <FormulaCard formulas={chapter.formulas} />}
+            {chapter.formulas && <FormulaCard formulas={chapter.formulas} chapterId={chapter.id} />}
             {chapter.mermaidDiagram && <MermaidRenderer chart={chapter.mermaidDiagram} title="Process Workflow" />}
 
             {/* Flashcards stay directly on chapter page for quick revision */}

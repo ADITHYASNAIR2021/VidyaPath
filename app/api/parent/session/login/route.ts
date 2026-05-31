@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createParentSessionToken, attachParentSessionCookie } from '@/lib/auth/parent-session';
-import { errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { errorJson, getClientIp, getRequestId, hasResolvedClientIp } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { parentLoginSchema } from '@/lib/schemas/auth';
 import { authenticateParent } from '@/lib/parent-portal-db';
@@ -35,20 +35,23 @@ export async function POST(req: Request) {
     });
   }
 
-  const ipLimit = await checkRateLimit({
-    key: buildRateLimitKey('auth:parent:ip', [ip]),
-    windowSeconds: 60,
-    maxRequests: 20,
-    blockSeconds: 180,
-  });
-  if (!ipLimit.allowed) {
-    return errorJson({
-      requestId,
-      errorCode: 'rate-limit-exceeded',
-      message: 'Too many login attempts. Please wait before retrying.',
-      status: 429,
-      hint: `Retry after ${ipLimit.retryAfterSeconds}s`,
+  if (hasResolvedClientIp(ip)) {
+    const ipLimit = await checkRateLimit({
+      key: buildRateLimitKey('auth:parent:ip', [ip]),
+      windowSeconds: 60,
+      maxRequests: 20,
+      blockSeconds: 180,
+      failOpen: true,
     });
+    if (!ipLimit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many login attempts. Please wait before retrying.',
+        status: 429,
+        hint: `Retry after ${ipLimit.retryAfterSeconds}s`,
+      });
+    }
   }
 
   const identityLimit = await checkRateLimit({
@@ -56,6 +59,7 @@ export async function POST(req: Request) {
     windowSeconds: 60,
     maxRequests: 8,
     blockSeconds: 300,
+    failOpen: true,
   });
   if (!identityLimit.allowed) {
     return errorJson({

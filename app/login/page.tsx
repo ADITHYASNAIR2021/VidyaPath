@@ -2,8 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
+
+function useClientSearchParams(): URLSearchParams {
+  if (typeof window === 'undefined') return new URLSearchParams();
+  return new URLSearchParams(window.location.search);
+}
 
 type LoginRole = 'student' | 'teacher' | 'admin' | 'developer';
 
@@ -67,7 +72,7 @@ function resolvePostLoginDestination(role: LoginRole, payload: Record<string, un
 
 export default function UnifiedLoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const searchParams = useClientSearchParams();
   const portal = searchParams.get('portal');
   const nextPath = normalizeNextPath(searchParams.get('next'), portal);
   const reason = searchParams.get('reason')?.trim() || '';
@@ -166,12 +171,16 @@ export default function UnifiedLoginPage() {
           </p>
         )}
 
-        <div className="space-y-3 mt-5">
+        <form
+          className="space-y-3 mt-5"
+          onSubmit={(e) => { e.preventDefault(); login(); }}
+        >
           <input
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}
             placeholder="ID (student ID / email / username)"
             className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5"
+            autoComplete="username"
           />
           <div className="relative">
             <input
@@ -180,6 +189,7 @@ export default function UnifiedLoginPage() {
               placeholder="Password"
               type={showPassword ? 'text' : 'password'}
               className="w-full text-sm border border-[#E8E4DC] rounded-xl px-3 py-2.5 pr-11"
+              autoComplete="current-password"
             />
             <button
               type="button"
@@ -191,13 +201,13 @@ export default function UnifiedLoginPage() {
             </button>
           </div>
           <button
-            onClick={login}
+            type="submit"
             disabled={loading}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm px-4 py-2.5 rounded-xl disabled:opacity-50"
           >
             {loading ? 'Signing in...' : 'Login'}
           </button>
-        </div>
+        </form>
         {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
         <p className="mt-4 text-xs text-[#7A7490]">
           Home: <Link href="/" className="font-semibold text-indigo-700 hover:text-indigo-800">Back to home</Link>
@@ -206,3 +216,4 @@ export default function UnifiedLoginPage() {
     </div>
   );
 }
+

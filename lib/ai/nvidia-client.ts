@@ -45,6 +45,7 @@ export interface LlmUsageCounts {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cachedPromptTokens?: number;
 }
 
 export interface NvidiaCompletionResult {

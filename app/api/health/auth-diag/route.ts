@@ -8,7 +8,7 @@
  */
 
 import { getAdminSessionFromRequestCookies } from '@/lib/auth/guards';
-import { isSupabaseServiceConfigured, supabaseSelect } from '@/lib/supabase-rest';
+import { isSupabaseServiceConfigured, supabaseRpc, supabaseSelect } from '@/lib/supabase-rest';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,9 @@ function getConfiguredDiagKey(): string {
 }
 
 function isAuthorizedByHeader(req: Request): boolean {
-  if (process.env.NODE_ENV === 'production') return false;
+  const url = new URL(req.url);
+  const isLocalHost = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
+  if (process.env.NODE_ENV === 'production' && !isLocalHost) return false;
   const configured = getConfiguredDiagKey();
   const provided = req.headers.get('x-admin-diag-key')?.trim() || '';
   return !!configured && provided === configured;
@@ -180,6 +182,47 @@ export async function GET(req: Request) {
   } catch (err: unknown) {
     result.schoolTableAccessible = false;
     result.schoolTableError = err instanceof Error ? err.message : String(err);
+  }
+
+  try {
+    const throttleRows = await supabaseSelect<{
+      throttle_key: string;
+      bucket_start: string;
+      request_count: number;
+      blocked_until: string | null;
+      last_seen_at: string;
+    }>('request_throttle', {
+      select: 'throttle_key,bucket_start,request_count,blocked_until,last_seen_at',
+      orderBy: 'last_seen_at',
+      ascending: false,
+      limit: 5,
+    });
+    result.requestThrottleTableAccessible = true;
+    result.requestThrottleSample = throttleRows;
+  } catch (err: unknown) {
+    result.requestThrottleTableAccessible = false;
+    result.requestThrottleTableError = err instanceof Error ? err.message : String(err);
+  }
+
+  try {
+    const rpcProbe = await supabaseRpc<Array<{
+      allowed: boolean;
+      retry_after_seconds: number;
+      remaining: number;
+      limit: number;
+    }>>('check_rate_limit', {
+      p_throttle_key: 'auth-diag-probe',
+      p_bucket_start: new Date().toISOString(),
+      p_window_seconds: 60,
+      p_limit: 5,
+      p_block_seconds: 60,
+      p_metadata: { source: 'auth-diag' },
+    });
+    result.checkRateLimitRpcAccessible = true;
+    result.checkRateLimitRpcProbe = Array.isArray(rpcProbe) ? rpcProbe[0] ?? null : rpcProbe;
+  } catch (err: unknown) {
+    result.checkRateLimitRpcAccessible = false;
+    result.checkRateLimitRpcError = err instanceof Error ? err.message : String(err);
   }
 
   result.loginInstructions = {

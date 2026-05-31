@@ -18,6 +18,11 @@ interface Quiz {
   };
 }
 
+interface QuizOutcome {
+  question: string;
+  correct: boolean;
+}
+
 function toQuiz(item: unknown): Quiz | null {
   if (!item || typeof item !== 'object') return null;
   const record = item as Record<string, unknown>;
@@ -69,6 +74,7 @@ export default function QuizEngine({
   const [generationProgress, setGenerationProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [generationStage, setGenerationStage] = useState<'idle' | 'requesting' | 'validating' | 'completed'>('idle');
+  const [sessionResults, setSessionResults] = useState<QuizOutcome[]>([]);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -136,6 +142,7 @@ export default function QuizEngine({
     setShowAnswer(false);
     setScore(0);
     setFinished(false);
+    setSessionResults([]);
   };
 
   useEffect(() => {
@@ -146,6 +153,19 @@ export default function QuizEngine({
       onQuizReady?.({ count: initialQuizzes.length, source: 'existing' });
     }
   }, [chapterId, initialQuizzes, onQuizReady]);
+
+  const submitQuestionFeedback = async (results: QuizOutcome[]) => {
+    if (!chapterId || results.length === 0) return;
+    try {
+      await fetch('/api/ai/question-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapterId, results }),
+      });
+    } catch {
+      // Ignore silent feedback write failures during quiz completion.
+    }
+  };
 
   const handleGenerateValues = async () => {
     const requestedCount = 10;
@@ -254,6 +274,13 @@ export default function QuizEngine({
     setShowAnswer(true);
 
     const isCorrect = index === quizzes[currentQ].correctAnswerIndex;
+    setSessionResults((prev) => [
+      ...prev,
+      {
+        question: quizzes[currentQ].question,
+        correct: isCorrect,
+      },
+    ]);
     if (isCorrect) setScore((prev) => prev + 1);
   };
 
@@ -266,6 +293,7 @@ export default function QuizEngine({
     }
 
     setFinished(true);
+    void submitQuestionFeedback(sessionResults);
     const newScore = Math.round((score / quizzes.length) * 100);
     if (!bestScore || newScore > bestScore) {
       localStorage.setItem(`quiz-score-[${chapterId}]`, newScore.toString());

@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import re
 import sys
 import warnings
@@ -34,6 +35,15 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
+
+from pdf_visual_pipeline import (
+    FITZ_AVAILABLE,
+    detect_visual_pages,
+    infer_visual_tags,
+    ocr_page_via_nvidia,
+    render_page_as_base64,
+    save_rendered_page_image,
+)
 
 try:
     from pypdf import PdfReader
@@ -107,6 +117,9 @@ class TextbookChunk:
     chunkIndex: int
     wordCount: int
     text: str
+    page: Optional[int] = None
+    hasImages: bool = False
+    visualTags: Optional[List[str]] = None
 
 
 def slugify(value: str) -> str:
@@ -202,10 +215,11 @@ def extract_pdf_text(pdf_path: Path) -> str:
 
     reader = PdfReader(str(pdf_path))
     lines: List[str] = []
-    for page in reader.pages:
+    for page_num, page in enumerate(reader.pages):
         try:
             page_text = page.extract_text() or ""
-        except Exception:
+        except Exception as page_exc:
+            print(f"[WARN] {pdf_path.name} page {page_num}: {page_exc}", file=sys.stderr)
             page_text = ""
         if not page_text.strip():
             continue
@@ -581,6 +595,10 @@ def build_semantic_index(
     max_words: int,
     min_words: int,
     merge_main_index: bool,
+    extract_images: bool,
+    save_images: bool,
+    nvidia_api_key: Optional[str],
+    image_max_pages: int,
 ) -> int:
     if PdfReader is None:
         print("ERROR: pypdf is not installed. Run: pip install pypdf", file=sys.stderr)
@@ -596,6 +614,8 @@ def build_semantic_index(
     chapter_to_sources: Dict[str, List[str]] = {}
     chapter_to_chunk_ids: Dict[str, List[str]] = {}
     skipped: List[str] = []
+    image_manifest_entries: List[dict] = []
+    image_output_root = OUT_DIR / "images"
 
     total_pdf = 0
     language_counts: Dict[str, int] = {"en": 0, "hi": 0, "mixed": 0}
@@ -615,7 +635,7 @@ def build_semantic_index(
         try:
             raw_text = extract_pdf_text(pdf_path)
         except Exception as exc:
-            print(f"[ERR ] {rel} - {exc}", file=sys.stderr)
+            print(f"[ERR ] extract failed: {rel} — {exc}", file=sys.stderr)
             skipped.append(rel)
             continue
 
@@ -636,6 +656,44 @@ def build_semantic_index(
             chapter_code=chapter_code,
             chapter_meta_by_key=chapter_meta_by_key,
         )
+
+        visual_candidates = []
+        if (extract_images or save_images) and FITZ_AVAILABLE:
+            max_pages_for_images = image_max_pages if image_max_pages > 0 else None
+            visual_candidates = detect_visual_pages(pdf_path, max_pages=max_pages_for_images)
+        visual_tags = sorted({tag for candidate in visual_candidates for tag in candidate.tags})
+        saved_image_entries: Dict[int, dict] = {}
+        if save_images and visual_candidates:
+            for candidate in visual_candidates:
+                saved = save_rendered_page_image(
+                    pdf_path=pdf_path,
+                    dataset_kind="textbooks",
+                    dataset_relative_path=rel,
+                    page_num=candidate.page_num,
+                    output_root=image_output_root,
+                )
+                if not saved:
+                    continue
+                manifest_entry = {
+                    "id": f"textbook-image-{class_level}-{chapter_id}-{candidate.page_num + 1}-{len(image_manifest_entries) + 1}",
+                    "datasetKind": "textbook",
+                    "sourcePath": rel,
+                    "classLevel": class_level,
+                    "subject": subject_normalized,
+                    "chapterId": chapter_id,
+                    "chapterTitle": chapter_title,
+                    "medium": medium,
+                    "language": detected_lang,
+                    "page": candidate.page_num,
+                    "imagePath": Path(saved["imagePath"]).relative_to(OUT_DIR).as_posix(),
+                    "width": saved["width"],
+                    "height": saved["height"],
+                    "dpi": saved["dpi"],
+                    "reasons": candidate.reasons,
+                    "tags": candidate.tags,
+                }
+                image_manifest_entries.append(manifest_entry)
+                saved_image_entries[candidate.page_num] = manifest_entry
 
         semantic_chunks = semantic_chunk(
             text=raw_text,
@@ -672,6 +730,8 @@ def build_semantic_index(
                 chunkIndex=idx,
                 wordCount=word_count,
                 text=piece,
+                hasImages=bool(visual_candidates),
+                visualTags=visual_tags or None,
             )
             chunks.append(chunk)
             chapter_to_chunk_ids.setdefault(chapter_id, []).append(chunk_id)
@@ -679,6 +739,47 @@ def build_semantic_index(
             if rel not in sources:
                 sources.append(rel)
             created += 1
+
+        if extract_images and visual_candidates and nvidia_api_key:
+            ocr_min_words = max(18, min_words // 4)
+            for candidate in visual_candidates:
+                b64 = render_page_as_base64(pdf_path, candidate.page_num)
+                if not b64:
+                    continue
+                ocr_text = ocr_page_via_nvidia(b64, nvidia_api_key).strip()
+                if not ocr_text or len(ocr_text.split()) < ocr_min_words:
+                    continue
+                ocr_text = re.sub(r"\s+", " ", ocr_text).strip()
+                ocr_tags = sorted(set(candidate.tags + infer_visual_tags(ocr_text)))
+                digest = hashlib.sha1(f"{rel}|ocr|{candidate.page_num}|{ocr_text[:240]}".encode("utf-8")).hexdigest()[:10]
+                chunk_id = f"{chapter_id}::img{candidate.page_num + 1:03d}::{digest}"
+                chunk = TextbookChunk(
+                    id=chunk_id,
+                    sourceType="image-ocr",
+                    chapterId=chapter_id,
+                    classLevel=class_level,
+                    subject=subject_normalized,
+                    chapterNumber=resolved_number,
+                    chapterTitle=chapter_title,
+                    medium=medium,
+                    language=detected_lang,
+                    sourcePath=rel,
+                    chunkIndex=created,
+                    wordCount=len(ocr_text.split()),
+                    text=ocr_text,
+                    page=candidate.page_num,
+                    hasImages=True,
+                    visualTags=ocr_tags or candidate.tags or None,
+                )
+                chunks.append(chunk)
+                chapter_to_chunk_ids.setdefault(chapter_id, []).append(chunk_id)
+                manifest_entry = saved_image_entries.get(candidate.page_num)
+                if manifest_entry is not None:
+                    manifest_entry["ocrChunkId"] = chunk_id
+                    manifest_entry["ocrWordCount"] = len(ocr_text.split())
+                    if ocr_tags:
+                        manifest_entry["tags"] = sorted(set(manifest_entry.get("tags", []) + ocr_tags))
+                created += 1
 
         print(f"[OK  ] {rel} -> {created} semantic chunks")
 
@@ -703,6 +804,10 @@ def build_semantic_index(
         "minWords": min_words,
         "totalPdfsScanned": total_pdf,
         "totalChunks": len(chunks),
+        "fitzAvailable": FITZ_AVAILABLE,
+        "saveImagesEnabled": save_images,
+        "ocrEnabled": bool(nvidia_api_key),
+        "imageAssets": len(image_manifest_entries),
         "languageCounts": language_counts,
         "chapters": chapter_to_sources,
         "chunksByChapter": chapter_to_chunk_ids,
@@ -710,6 +815,26 @@ def build_semantic_index(
         "skipped": skipped,
     }
     OUT_INDEX.write_text(json.dumps(index_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if save_images or image_manifest_entries:
+        textbook_image_manifest = OUT_DIR / "textbook_image_manifest.json"
+        textbook_image_manifest.write_text(
+            json.dumps(
+                {
+                    "version": "1",
+                    "generatedAt": utc_now_iso(),
+                    "datasetKind": "textbook",
+                    "fitzAvailable": FITZ_AVAILABLE,
+                    "saveImagesEnabled": save_images,
+                    "ocrEnabled": bool(nvidia_api_key),
+                    "totalImages": len(image_manifest_entries),
+                    "images": image_manifest_entries,
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
 
     if merge_main_index:
         merge_into_main_index(chunks, chapter_to_sources)
@@ -738,6 +863,27 @@ def main() -> int:
     parser.add_argument("--max-words", type=int, default=DEFAULT_MAX_WORDS)
     parser.add_argument("--min-words", type=int, default=DEFAULT_MIN_WORDS)
     parser.add_argument(
+        "--extract-images",
+        action="store_true",
+        help="Detect visually relevant textbook pages and OCR them with NVIDIA when NVIDIA_API_KEY is set",
+    )
+    parser.add_argument(
+        "--save-images",
+        action="store_true",
+        help="Render and save textbook visual pages into lib/context/images and emit a textbook image manifest",
+    )
+    parser.add_argument(
+        "--nvidia-api-key",
+        default=None,
+        help="NVIDIA API key for textbook page OCR (falls back to NVIDIA_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--image-max-pages",
+        type=int,
+        default=0,
+        help="Maximum pages per textbook PDF to inspect for visual extraction (0 = all pages)",
+    )
+    parser.add_argument(
         "--merge-main-index",
         action="store_true",
         help="Also merge textbook chunks into lib/context/chunks.jsonl + chapter_index.json",
@@ -753,6 +899,11 @@ def main() -> int:
     if args.max_words < args.target_words:
         print("ERROR: --max-words must be >= --target-words", file=sys.stderr)
         return 1
+    nvidia_key = args.nvidia_api_key or os.environ.get("NVIDIA_API_KEY") or ""
+    if (args.extract_images or args.save_images) and not FITZ_AVAILABLE:
+        print("WARNING: visual extraction requires PyMuPDF. Install with: pip install pymupdf", file=sys.stderr)
+    if args.extract_images and not nvidia_key:
+        print("WARNING: --extract-images without NVIDIA_API_KEY — image assets will be saved but OCR chunks will be skipped.", file=sys.stderr)
 
     return build_semantic_index(
         class_filter=args.class_filter,
@@ -763,6 +914,10 @@ def main() -> int:
         max_words=args.max_words,
         min_words=args.min_words,
         merge_main_index=args.merge_main_index,
+        extract_images=args.extract_images,
+        save_images=args.save_images,
+        nvidia_api_key=nvidia_key if nvidia_key else None,
+        image_max_pages=args.image_max_pages,
     )
 
 

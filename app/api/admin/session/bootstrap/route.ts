@@ -11,7 +11,7 @@ import {
 } from '@/lib/auth/supabase-auth';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { adminBootstrapSchema } from '@/lib/schemas/auth';
-import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId, hasResolvedClientIp } from '@/lib/http/api-response';
 import { logServerEvent } from '@/lib/observability';
 import { resolveRoleContextByAuthUserId } from '@/lib/platform-rbac-db';
 import { recordAuditEvent } from '@/lib/security/audit';
@@ -29,20 +29,23 @@ export async function POST(req: Request) {
   }
 
   const ip = getClientIp(req);
-  const ipRateLimit = await checkRateLimit({
-    key: buildRateLimitKey('auth:admin', [ip]),
-    windowSeconds: 60,
-    maxRequests: 12,
-    blockSeconds: 120,
-  });
-  if (!ipRateLimit.allowed) {
-    return errorJson({
-      requestId,
-      errorCode: 'rate-limit-exceeded',
-      message: 'Too many login attempts. Try again later.',
-      hint: `Retry after ${ipRateLimit.retryAfterSeconds}s`,
-      status: 429,
+  if (hasResolvedClientIp(ip)) {
+    const ipRateLimit = await checkRateLimit({
+      key: buildRateLimitKey('auth:admin', [ip]),
+      windowSeconds: 60,
+      maxRequests: 12,
+      blockSeconds: 120,
+      failOpen: true,
     });
+    if (!ipRateLimit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many login attempts. Try again later.',
+        hint: `Retry after ${ipRateLimit.retryAfterSeconds}s`,
+        status: 429,
+      });
+    }
   }
 
   const bodyResult = await parseAndValidateJsonBody(req, 12 * 1024, adminBootstrapSchema);
@@ -81,6 +84,7 @@ export async function POST(req: Request) {
     windowSeconds: 60,
     maxRequests: 8,
     blockSeconds: 180,
+    failOpen: true,
   });
   if (!identityRateLimit.allowed) {
     return errorJson({
@@ -158,4 +162,3 @@ export async function POST(req: Request) {
     });
   }
 }
-

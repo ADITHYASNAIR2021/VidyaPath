@@ -26,6 +26,7 @@ interface RateLimitInput {
   maxRequests: number;
   blockSeconds?: number;
   metadata?: Record<string, unknown>;
+  failOpen?: boolean;
 }
 
 interface RateLimitDecision {
@@ -73,8 +74,8 @@ function shouldFailOpen(): boolean {
   return true;
 }
 
-function fallbackDecision(limit: number): RateLimitDecision {
-  if (shouldFailOpen()) {
+function fallbackDecision(limit: number, forceFailOpen = false): RateLimitDecision {
+  if (forceFailOpen || shouldFailOpen()) {
     return {
       allowed: true,
       retryAfterSeconds: 0,
@@ -219,10 +220,11 @@ export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDe
   const limit = Math.max(1, Math.min(5000, Math.floor(input.maxRequests)));
   const windowSeconds = Math.max(5, Math.min(86400, Math.floor(input.windowSeconds)));
   const blockSeconds = Math.max(5, Math.min(86400, Math.floor(input.blockSeconds || windowSeconds)));
+  const failOpen = input.failOpen === true;
 
   const key = normalizeKey(input.key);
   if (!key) {
-    return fallbackDecision(limit);
+    return fallbackDecision(limit, failOpen);
   }
 
   // ── Fast path: Redis/Upstash ────────────────────────────────────────────
@@ -239,7 +241,7 @@ export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDe
 
   // ── Slow path: Supabase DB ──────────────────────────────────────────────
   if (!isSupabaseServiceConfigured()) {
-    return fallbackDecision(limit);
+    return fallbackDecision(limit, failOpen);
   }
 
   const rpcInput = {
@@ -257,6 +259,6 @@ export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDe
   try {
     return await checkRateLimitLegacy(rpcInput);
   } catch {
-    return fallbackDecision(limit);
+    return fallbackDecision(limit, failOpen);
   }
 }

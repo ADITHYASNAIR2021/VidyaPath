@@ -110,6 +110,24 @@ interface AdminInterventionItem {
   updatedAt: string;
 }
 
+interface AdminAiInsightsResponse {
+  schoolId: string;
+  quality: {
+    avgGroundednessScore: number;
+    avgCitationCoverageScore: number;
+    avgRetrievalConfidence: number;
+    retrievalMissRatePercent: number;
+    lowQualityGenerationRatePercent: number;
+    chapterCoverageGaps: Array<{ chapterId: string; subject: string; reason: string }>;
+    routingRecommendations: Array<{ task: string; recommendedProvider: string; recommendedModel: string }>;
+  };
+  usage: {
+    events: number;
+    totalTokens: number;
+    topEndpoints: Array<{ endpoint: string; totalTokens: number; events: number }>;
+  };
+}
+
 function unwrap<T>(payload: unknown): T {
   if (payload && typeof payload === 'object' && 'data' in (payload as Record<string, unknown>)) {
     return (payload as { data: T }).data;
@@ -192,6 +210,7 @@ export default function AdminOverviewPage() {
   const [interventionsWarning, setInterventionsWarning] = useState('');
   const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState('');
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
+  const [aiInsights, setAiInsights] = useState<AdminAiInsightsResponse | null>(null);
 
   async function patchIntervention(
     id: string,
@@ -240,9 +259,10 @@ export default function AdminOverviewPage() {
       setError('');
       setInterventionsWarning('');
       try {
-        const [sessionRes, overviewRes] = await Promise.all([
+        const [sessionRes, overviewRes, aiInsightsRes] = await Promise.all([
           fetch('/api/admin/session/me', { cache: 'no-store' }),
           fetch('/api/admin/overview', { cache: 'no-store' }),
+          fetch('/api/admin/ai-insights?hours=168', { cache: 'no-store' }),
         ]);
         if (!sessionRes.ok) {
           setError('Session expired. Please sign in again.');
@@ -265,6 +285,13 @@ export default function AdminOverviewPage() {
         if (!ov) return;
         setOverview(ov);
         setLastSuccessfulRefresh(new Date().toISOString());
+
+        const aiBody = await aiInsightsRes.json().catch(() => null);
+        if (aiInsightsRes.ok) {
+          setAiInsights(unwrap<AdminAiInsightsResponse | null>(aiBody));
+        } else {
+          setAiInsights(null);
+        }
 
         const queue = ov.needActionQueue ?? [];
         const syncRes = await fetch('/api/admin/interventions', {
@@ -640,6 +667,59 @@ export default function AdminOverviewPage() {
             <p>Teacher activity: <span className="font-semibold">{formatRelativeTimestamp(overview?.dataFreshness?.latestTeacherActivityAt)}</span></p>
             <p>Submissions: <span className="font-semibold">{formatRelativeTimestamp(overview?.dataFreshness?.latestSubmissionAt)}</span></p>
             <p>Parent login: <span className="font-semibold">{formatRelativeTimestamp(overview?.dataFreshness?.latestParentLoginAt)}</span></p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-6 rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm">
+        <p className="text-sm font-semibold text-gray-800">AI Classroom Health</p>
+        <p className="mt-1 text-xs text-gray-500">School-scoped grounded-answer quality, token usage, and chapter coverage signals.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs">
+            <p className="text-gray-500">Groundedness</p>
+            <p className="font-semibold text-gray-900">{aiInsights?.quality.avgGroundednessScore ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs">
+            <p className="text-gray-500">Citation Coverage</p>
+            <p className="font-semibold text-gray-900">{aiInsights?.quality.avgCitationCoverageScore ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs">
+            <p className="text-gray-500">Retrieval Confidence</p>
+            <p className="font-semibold text-gray-900">{aiInsights?.quality.avgRetrievalConfidence ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs">
+            <p className="text-gray-500">Low-quality Rate</p>
+            <p className="font-semibold text-gray-900">{aiInsights?.quality.lowQualityGenerationRatePercent ?? 0}%</p>
+          </div>
+          <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs">
+            <p className="text-gray-500">AI Token Events</p>
+            <p className="font-semibold text-gray-900">{aiInsights?.usage.events ?? 0}</p>
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-gray-700">Top AI endpoints</p>
+            {(aiInsights?.usage.topEndpoints ?? []).slice(0, 5).map((item) => (
+              <p key={item.endpoint} className="text-xs text-gray-600">
+                {item.endpoint}: {item.events} events, {item.totalTokens.toLocaleString()} tokens
+              </p>
+            ))}
+            {(aiInsights?.usage.topEndpoints ?? []).length === 0 ? (
+              <p className="text-xs text-gray-400">No school-scoped AI usage yet.</p>
+            ) : null}
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-gray-700">Coverage gaps and routing picks</p>
+            {(aiInsights?.quality.chapterCoverageGaps ?? []).slice(0, 3).map((item) => (
+              <p key={`${item.chapterId}-${item.subject}`} className="text-xs text-gray-600">
+                {item.subject} / {item.chapterId}: {item.reason}
+              </p>
+            ))}
+            {(aiInsights?.quality.routingRecommendations ?? []).slice(0, 3).map((item) => (
+              <p key={`${item.task}-${item.recommendedProvider}`} className="text-xs text-gray-600">
+                {item.task}: {item.recommendedProvider}/{item.recommendedModel}
+              </p>
+            ))}
           </div>
         </div>
       </div>

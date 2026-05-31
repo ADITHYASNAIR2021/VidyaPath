@@ -180,30 +180,87 @@ interface DeveloperControlTowerPayload {
     repairRatePercent: number;
     rejectionRatePercent: number;
     retrievalMissRatePercent: number;
+    lowQualityGenerationRatePercent: number;
     avgGroundednessScore: number;
     avgCitationCoverageScore: number;
+    avgRetrievalConfidence: number;
     hallucinationFlags: number;
     providerStats: Array<{
       task: string;
       provider: string;
       model: string;
       events: number;
+      successes: number;
       failures: number;
+      lowQualityEvents: number;
+      failureRatePercent: number;
+      lowQualityRatePercent: number;
       avgLatencyMs: number;
+      avgGroundednessScore: number;
+      avgRetrievalConfidence: number;
       totalTokens: number;
+    }>;
+    modelStats: Array<{
+      provider: string;
+      model: string;
+      events: number;
+      failureRatePercent: number;
+      lowQualityRatePercent: number;
+      avgGroundednessScore: number;
     }>;
     taskStats: Array<{
       task: string;
       events: number;
       failureRatePercent: number;
+      lowQualityRatePercent: number;
+      avgGroundednessScore: number;
+      avgLatencyMs: number;
+    }>;
+    chapterStats: Array<{
+      chapterId: string;
+      subject: string;
+      events: number;
+      lowQualityEvents: number;
+      retrievalMisses: number;
       avgGroundednessScore: number;
     }>;
+    chapterCoverageGaps: Array<{
+      chapterId: string;
+      subject: string;
+      events: number;
+      lowQualityEvents: number;
+      reason: string;
+    }>;
+    providerTrends: Array<{
+      bucket: string;
+      provider: string;
+      events: number;
+      failureRatePercent: number;
+      lowQualityRatePercent: number;
+      avgGroundednessScore: number;
+      avgRetrievalConfidence: number;
+    }>;
+    routingRecommendations: Array<{
+      task: string;
+      recommendedProvider: string;
+      recommendedModel: string;
+      reason: string;
+    }>;
+    issueStats: {
+      lowQualityEvents: number;
+      retrievalMisses: number;
+      hallucinationSignals: number;
+      rejected: number;
+      repaired: number;
+    };
     recentFlags: Array<{
       id: string;
       createdAt: string;
       task: string;
       provider?: string;
       model?: string;
+      chapterId?: string;
+      subject?: string;
       issue: string;
     }>;
     feedback: {
@@ -214,6 +271,11 @@ interface DeveloperControlTowerPayload {
       hallucinationFlag: number;
       other: number;
     };
+  };
+  aiUsageBreakdown: {
+    tokenUsageByTask: Array<{ task: string; events: number; totalTokens: number }>;
+    tokenUsageByRole: Array<{ role: string; events: number; totalTokens: number }>;
+    tokenUsageBySchool: Array<{ schoolId: string; events: number; totalTokens: number }>;
   };
   observabilityCounters: {
     authFailures: number;
@@ -1327,7 +1389,7 @@ export default function DeveloperOverviewPage() {
 
       <div className="mt-6 rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <p className="text-sm font-semibold text-[#1C1C2E] dark:text-slate-100">AI Quality Board</p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
           <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-800">
             <p className="text-gray-500 dark:text-slate-300">Groundedness</p>
             <p className="font-semibold text-[#1C1C2E] dark:text-slate-100">{controlTower?.aiQuality.avgGroundednessScore ?? 0}</p>
@@ -1337,12 +1399,16 @@ export default function DeveloperOverviewPage() {
             <p className="font-semibold text-[#1C1C2E] dark:text-slate-100">{controlTower?.aiQuality.avgCitationCoverageScore ?? 0}</p>
           </div>
           <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-800">
+            <p className="text-gray-500 dark:text-slate-300">Retrieval Confidence</p>
+            <p className="font-semibold text-[#1C1C2E] dark:text-slate-100">{controlTower?.aiQuality.avgRetrievalConfidence ?? 0}</p>
+          </div>
+          <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-800">
             <p className="text-gray-500 dark:text-slate-300">Retrieval Miss Rate</p>
             <p className="font-semibold text-[#1C1C2E] dark:text-slate-100">{controlTower?.aiQuality.retrievalMissRatePercent ?? 0}%</p>
           </div>
           <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-800">
-            <p className="text-gray-500 dark:text-slate-300">Repair Rate</p>
-            <p className="font-semibold text-[#1C1C2E] dark:text-slate-100">{controlTower?.aiQuality.repairRatePercent ?? 0}%</p>
+            <p className="text-gray-500 dark:text-slate-300">Low-quality Rate</p>
+            <p className="font-semibold text-[#1C1C2E] dark:text-slate-100">{controlTower?.aiQuality.lowQualityGenerationRatePercent ?? 0}%</p>
           </div>
           <div className="rounded-lg border border-[#E8E4DC] bg-[#FCFBF8] px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-800">
             <p className="text-gray-500 dark:text-slate-300">Hallucination Flags</p>
@@ -1351,10 +1417,10 @@ export default function DeveloperOverviewPage() {
         </div>
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <div className="space-y-1">
-            <p className="text-xs font-semibold text-gray-700 dark:text-slate-200">Provider latency/error/cost proxy</p>
+            <p className="text-xs font-semibold text-gray-700 dark:text-slate-200">Provider quality and latency</p>
             {(controlTower?.aiQuality.providerStats ?? []).slice(0, 8).map((item) => (
               <p key={`${item.task}-${item.provider}-${item.model}`} className="text-xs text-gray-600 dark:text-slate-300">
-                {item.task} | {item.provider}/{item.model}: {item.events} events, {item.failures} failures, {item.avgLatencyMs}ms, tokens {item.totalTokens}
+                {item.task} | {item.provider}/{item.model}: success {item.events > 0 ? Math.round((item.successes / item.events) * 100) : 0}% | low-quality {item.lowQualityRatePercent}% | {item.avgLatencyMs}ms
               </p>
             ))}
           </div>
@@ -1362,12 +1428,40 @@ export default function DeveloperOverviewPage() {
             <p className="text-xs font-semibold text-gray-700 dark:text-slate-200">Recent weak-grounding and failures</p>
             {(controlTower?.aiQuality.recentFlags ?? []).slice(0, 8).map((flag) => (
               <p key={flag.id} className="text-xs text-gray-600 dark:text-slate-300">
-                {flag.task}: {flag.issue} ({formatRelative(flag.createdAt)})
+                {flag.task}: {flag.issue}{flag.chapterId ? ` - ${flag.chapterId}` : ''} ({formatRelative(flag.createdAt)})
               </p>
             ))}
             {(controlTower?.aiQuality.recentFlags ?? []).length === 0 ? (
               <p className="text-xs text-gray-500 dark:text-slate-300">No recent AI quality flags.</p>
             ) : null}
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-gray-700 dark:text-slate-200">Token usage by task and role</p>
+            {(controlTower?.aiUsageBreakdown.tokenUsageByTask ?? []).slice(0, 6).map((item) => (
+              <p key={item.task} className="text-xs text-gray-600 dark:text-slate-300">
+                Task {item.task}: {formatCompact(item.totalTokens)} tokens across {item.events} events
+              </p>
+            ))}
+            {(controlTower?.aiUsageBreakdown.tokenUsageByRole ?? []).slice(0, 4).map((item) => (
+              <p key={item.role} className="text-xs text-gray-600 dark:text-slate-300">
+                Role {item.role}: {formatCompact(item.totalTokens)} tokens across {item.events} events
+              </p>
+            ))}
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-gray-700 dark:text-slate-200">Coverage gaps and routing picks</p>
+            {(controlTower?.aiQuality.chapterCoverageGaps ?? []).slice(0, 4).map((item) => (
+              <p key={`${item.chapterId}-${item.subject}`} className="text-xs text-gray-600 dark:text-slate-300">
+                {item.subject} / {item.chapterId}: {item.reason}
+              </p>
+            ))}
+            {(controlTower?.aiQuality.routingRecommendations ?? []).slice(0, 4).map((item) => (
+              <p key={`${item.task}-${item.recommendedProvider}-${item.recommendedModel}`} className="text-xs text-gray-600 dark:text-slate-300">
+                Route {item.task}: prefer {item.recommendedProvider}/{item.recommendedModel}
+              </p>
+            ))}
           </div>
         </div>
       </div>

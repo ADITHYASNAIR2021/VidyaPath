@@ -94,31 +94,65 @@ export async function runContextReindex(): Promise<{
   stdout: string;
   stderr: string;
 }> {
-  return new Promise((resolve) => {
-    const child = spawn('node', ['scripts/build_context_index.mjs'], {
-      cwd: process.cwd(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += String(chunk || ''); });
-    child.stderr.on('data', (chunk) => { stderr += String(chunk || ''); });
-    child.on('close', (code) => {
-      resolve({
-        ok: code === 0,
-        exitCode: Number(code || 0),
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
+  const commands = [
+    ['scripts/build_context_index.mjs'],
+    ['scripts/build_vector_index.mjs'],
+    ['scripts/build_retrieval_index.mjs'],
+  ];
+
+  let combinedStdout = '';
+  let combinedStderr = '';
+
+  for (const args of commands) {
+    const result = await new Promise<{
+      ok: boolean;
+      exitCode: number;
+      stdout: string;
+      stderr: string;
+    }>((resolve) => {
+      const child = spawn('node', args, {
+        cwd: process.cwd(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => { stdout += String(chunk || ''); });
+      child.stderr.on('data', (chunk) => { stderr += String(chunk || ''); });
+      child.on('close', (code) => {
+        resolve({
+          ok: code === 0,
+          exitCode: Number(code || 0),
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+        });
+      });
+      child.on('error', (error) => {
+        resolve({
+          ok: false,
+          exitCode: 1,
+          stdout: stdout.trim(),
+          stderr: `${stderr}\n${String(error)}`.trim(),
+        });
       });
     });
-    child.on('error', (error) => {
-      resolve({
+
+    combinedStdout = `${combinedStdout}\n${result.stdout}`.trim();
+    combinedStderr = `${combinedStderr}\n${result.stderr}`.trim();
+    if (!result.ok) {
+      return {
         ok: false,
-        exitCode: 1,
-        stdout: stdout.trim(),
-        stderr: `${stderr}\n${String(error)}`.trim(),
-      });
-    });
-  });
+        exitCode: result.exitCode,
+        stdout: combinedStdout,
+        stderr: combinedStderr,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    exitCode: 0,
+    stdout: combinedStdout,
+    stderr: combinedStderr,
+  };
 }

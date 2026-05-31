@@ -2,9 +2,10 @@ import { getContextPack, type ContextTask } from '@/lib/ai/context-retriever';
 import { getChapterById } from '@/lib/data';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { contextPackRequestSchema } from '@/lib/schemas/ai';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { logger } from '@/lib/logger';
 
 const ALLOWED_TASKS: ContextTask[] = [
@@ -25,6 +26,22 @@ export async function POST(req: Request) {
   try {
     const { context, response: authResponse } = await requireInteractiveAuth(req);
     if (authResponse) return authResponse;
+
+    const limit = await checkRateLimit({
+      key: buildRateLimitKey('ai:context-pack', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      windowSeconds: 60,
+      maxRequests: 40,
+      blockSeconds: 120,
+    });
+    if (!limit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many context retrieval requests. Please wait and retry.',
+        status: 429,
+        hint: `Retry after ${limit.retryAfterSeconds}s`,
+      });
+    }
 
     const bodyResult = await parseAndValidateJsonBody(req, 32 * 1024, contextPackRequestSchema);
     if (!bodyResult.ok) {
@@ -90,10 +107,14 @@ export async function POST(req: Request) {
         sourcePath: snippet.sourcePath,
         year: snippet.year ?? null,
         relevanceScore: snippet.relevanceScore,
+        sourceType: snippet.sourceType ?? 'paper',
+        modalityHints: snippet.modalityHints ?? [],
+        topicHints: snippet.topicHints ?? [],
       })),
       contextHash: contextPack.contextHash,
       usedOnDemandFallback: contextPack.usedOnDemandFallback,
       usedPgvector: contextPack.usedPgvector,
+      retrieval: contextPack.retrievalMeta ?? null,
     };
     await logAiUsage({
       context,

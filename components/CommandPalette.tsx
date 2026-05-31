@@ -12,18 +12,10 @@ const searchData = [
   {
     type: 'page',
     id: 'formulas',
-    title: 'Formula Database',
-    subtitle: 'Search all formulas with SI units and chapter mapping',
-    topics: 'formula katex equations',
+    title: 'Formula and Equation Hub',
+    subtitle: 'Merged revision cards plus chapter-wise equation map',
+    topics: 'formula equation revision cards chapter wise subject wise source trace',
     url: '/formulas',
-  },
-  {
-    type: 'page',
-    id: 'equations',
-    title: 'Equations Library',
-    subtitle: 'Subject-wise and chapter-wise equation map',
-    topics: 'equations chapter wise subject wise formula handbook',
-    url: '/equations',
   },
   {
     type: 'page',

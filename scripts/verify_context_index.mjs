@@ -16,6 +16,9 @@ const chunksPath = path.join(root, 'lib', 'context', 'chunks.jsonl');
 const textbookChunksPath = path.join(root, 'lib', 'context', 'textbook_chunks.jsonl');
 const indexPath = path.join(root, 'lib', 'context', 'chapter_index.json');
 const textbookIndexPath = path.join(root, 'lib', 'context', 'textbook_chapter_index.json');
+const retrievalIndexPath = path.join(root, 'lib', 'context', 'retrieval_index.json');
+const paperImageManifestPath = path.join(root, 'lib', 'context', 'paper_image_manifest.json');
+const textbookImageManifestPath = path.join(root, 'lib', 'context', 'textbook_image_manifest.json');
 const hfIndexPath = path.join(root, 'lib', 'hfPaperIndex.json');
 
 function readJson(filePath, fallback = null) {
@@ -62,10 +65,15 @@ function main() {
   const index = readJson(indexPath, {});
   const textbookIndex = fs.existsSync(textbookIndexPath) ? readJson(textbookIndexPath, {}) : {};
   const hfIndex = readJson(hfIndexPath, {});
+  const retrievalIndex = fs.existsSync(retrievalIndexPath) ? readJson(retrievalIndexPath, {}) : {};
+  const paperImageManifest = fs.existsSync(paperImageManifestPath) ? readJson(paperImageManifestPath, {}) : {};
+  const textbookImageManifest = fs.existsSync(textbookImageManifestPath) ? readJson(textbookImageManifestPath, {}) : {};
   const total = parsed.length;
   const mapped = parsed.filter((item) => typeof item.chapterId === 'string' && item.chapterId.trim()).length;
   const unmapped = total - mapped;
   const textbookChunks = parsed.filter((item) => item.sourceType === 'textbook').length;
+  const imageOcrChunks = parsed.filter((item) => item.sourceType === 'image-ocr').length;
+  const visualTaggedChunks = parsed.filter((item) => Array.isArray(item.visualTags) && item.visualTags.length > 0).length;
   const years = parsed.map((item) => Number(item.year)).filter((year) => Number.isFinite(year));
   const pre2019 = years.filter((year) => year < 2019).length;
   const minYear = years.length ? Math.min(...years) : null;
@@ -93,6 +101,18 @@ function main() {
   console.log(
     `[verify:context] textbook.chunks=${textbookChunks}, textbook.indexChapters=${textbookIndexChapters}`
   );
+  console.log(
+    `[verify:context] retrievalIndex.docs=${Array.isArray(retrievalIndex?.docs) ? retrievalIndex.docs.length : 0}, retrievalIndex.chapters=${retrievalIndex?.chapters ? Object.keys(retrievalIndex.chapters).length : 0}`
+  );
+  const paperImages = Array.isArray(paperImageManifest?.images) ? paperImageManifest.images : [];
+  const textbookImages = Array.isArray(textbookImageManifest?.images) ? textbookImageManifest.images : [];
+  const visualDocs = Array.isArray(retrievalIndex?.docs)
+    ? retrievalIndex.docs.filter((doc) => doc?.kind === 'visual').length
+    : 0;
+  console.log(`[verify:context] imageOcrChunks=${imageOcrChunks}, visualTaggedChunks=${visualTaggedChunks}`);
+  console.log(
+    `[verify:context] visualAssets.paper=${paperImages.length}, visualAssets.textbook=${textbookImages.length}, retrievalIndex.visualDocs=${visualDocs}`
+  );
   console.log(`[verify:context] hfIndex.keys=${hfKeys.length}, commerceKeys=${commerceKeys}, englishCoreKeys=${englishCoreKeys}`);
   if (pre2019 === 0) {
     console.warn('[verify:context] WARN: No pre-2019 chunks detected in current artifact.');
@@ -113,6 +133,23 @@ function main() {
   }
   if (commerceKeys === 0) {
     console.error('[verify:context] FAIL: hfPaperIndex has 0 commerce keys (Accountancy/Business Studies/Economics).');
+    process.exitCode = 1;
+    return;
+  }
+  for (const manifest of [paperImageManifest, textbookImageManifest]) {
+    const images = Array.isArray(manifest?.images) ? manifest.images : [];
+    const broken = images.filter((entry) => {
+      if (!entry?.imagePath) return true;
+      return !fs.existsSync(path.join(root, 'lib', 'context', String(entry.imagePath).replace(/\//g, path.sep)));
+    }).length;
+    if (broken > 0) {
+      console.error(`[verify:context] FAIL: ${broken} visual asset(s) referenced in manifests are missing on disk.`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+  if ((paperImageManifest?.saveImagesEnabled && paperImages.length === 0) || (textbookImageManifest?.saveImagesEnabled && textbookImages.length === 0)) {
+    console.error('[verify:context] FAIL: image saving was enabled but no visual assets were emitted.');
     process.exitCode = 1;
     return;
   }

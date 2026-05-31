@@ -5,6 +5,7 @@ import { POST as teacherLoginPOST } from '@/app/api/teacher/session/login/route'
 import { errorJson, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { unifiedLoginSchema } from '@/lib/schemas/auth';
+import { isDeveloperLoginIdentifier } from '@/lib/auth/developer-login';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,9 +45,10 @@ function buildCandidateRoles(identifier: string, portalHint?: LoginRole): LoginR
   // unrelated buckets and lets the lowest-limit handler (developer: 8/min) block
   // all users on a shared IP after very few attempts.
   if (portalHint) return [portalHint];
+  if (isDeveloperLoginIdentifier(identifier)) return ['developer'];
 
   // Generic login page: auto-detect role, never include developer
-  // (developer portal always provides portalHint explicitly from /developer/login)
+  // unless the identifier matches the configured developer account exactly.
   if (isEmailIdentifier(identifier)) return ['admin', 'teacher'];
   if (isStudentLikeIdentifier(identifier)) return ['student'];
   if (isMostlyNumeric(identifier)) return ['teacher', 'student'];
@@ -74,10 +76,21 @@ function buildForwardHeaders(req: Request, requestId: string): Headers {
   const headers = new Headers();
   headers.set('content-type', 'application/json');
   headers.set('x-request-id', requestId);
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  if (forwardedFor) headers.set('x-forwarded-for', forwardedFor);
-  const realIp = req.headers.get('x-real-ip');
-  if (realIp) headers.set('x-real-ip', realIp);
+  const passthroughHeaders = [
+    'x-forwarded-for',
+    'x-real-ip',
+    'x-vercel-forwarded-for',
+    'cf-connecting-ip',
+    'true-client-ip',
+    'x-client-ip',
+    'fastly-client-ip',
+    'fly-client-ip',
+    'forwarded',
+  ];
+  for (const headerName of passthroughHeaders) {
+    const value = req.headers.get(headerName);
+    if (value) headers.set(headerName, value);
+  }
   const userAgent = req.headers.get('user-agent');
   if (userAgent) headers.set('user-agent', userAgent);
   return headers;
@@ -110,8 +123,9 @@ export async function POST(req: Request) {
 
   const candidates = buildCandidateRoles(rawIdentifier, portalHint);
   const forwardHeaders = buildForwardHeaders(req, requestId);
+  let deferredErrorResponse: Response | null = null;
 
-  for (const role of candidates) {
+  for (const [index, role] of candidates.entries()) {
     const payload = buildRolePayload(role, rawIdentifier, password);
     const internalRequest = new Request(new URL(req.url), {
       method: 'POST',
@@ -122,9 +136,19 @@ export async function POST(req: Request) {
     if (response.ok) {
       return response;
     }
-    if (response.status === 429 || response.status >= 500 || response.status === 409) {
+    const hasMoreCandidates = index < candidates.length - 1;
+    const isRetryableCrossRoleFailure = response.status === 429 || response.status === 409 || response.status >= 500;
+    if (isRetryableCrossRoleFailure) {
+      if (!deferredErrorResponse) deferredErrorResponse = response;
+      if (hasMoreCandidates && !portalHint) {
+        continue;
+      }
       return response;
     }
+  }
+
+  if (deferredErrorResponse) {
+    return deferredErrorResponse;
   }
 
   return errorJson({

@@ -2,7 +2,7 @@
   "id": "/",
   "name": "VidyaPath Learning Platform",
   "short_name": "VidyaPath",
-  "description": "Free NCERT resources, AI tutoring, and study tools for Class 10, 11, and 12.",
+  "description": "Free NCERT resources, AI tutoring, and study tools for Class 10 and 12 with a merged formula and equation hub.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
@@ -23,9 +23,17 @@
       ]
     },
     {
-      "name": "Formula Database",
-      "short_name": "Formulas",
+      "name": "Formula and Equation Hub",
+      "short_name": "Formula Hub",
       "url": "/formulas",
+      "icons": [
+        { "src": "/icon.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Chapter Formula Map",
+      "short_name": "Formula Map",
+      "url": "/formulas?view=chapters",
       "icons": [
         { "src": "/icon.png", "sizes": "192x192", "type": "image/png" }
       ]

@@ -1,5 +1,6 @@
 import { getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
-import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { editQuestionsSchema } from '@/lib/schemas/teacher-pack';
 import { getAssignmentPack, canTeacherAccessAssignmentPack, upsertAssignmentPack } from '@/lib/teacher-admin-db';
 import { getChapterById } from '@/lib/data';
@@ -25,6 +26,22 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
   const canAccess = await canTeacherAccessAssignmentPack(session.teacher.id, packId);
   if (!canAccess) {
     return errorJson({ requestId, errorCode: 'forbidden', message: 'You do not own this pack.', status: 403 });
+  }
+
+  const rateLimit = await checkRateLimit({
+    key: buildRateLimitKey('ai:edit-questions', [session.teacher.id || getClientIp(req)]),
+    windowSeconds: 60,
+    maxRequests: 20,
+    blockSeconds: 120,
+  });
+  if (!rateLimit.allowed) {
+    return errorJson({
+      requestId,
+      errorCode: 'rate-limit-exceeded',
+      message: 'Too many question-edit requests. Please wait and retry.',
+      status: 429,
+      hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
+    });
   }
 
   const rawBody = await req.json().catch(() => null);

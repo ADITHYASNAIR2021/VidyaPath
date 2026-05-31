@@ -5,6 +5,22 @@ import { promises as fs } from 'node:fs';
 import { getPYQData } from '@/lib/pyq';
 import { getChapterById } from '@/lib/data';
 import { isUsableNvidiaApiKey, rerankWithNvidia } from '@/lib/ai/nvidia-client';
+import { compressSnippetText, expandRetrievalQuery } from '@/lib/ai/retrieval-enhancements';
+import { buildHyDEPassage, compressRetrievedSnippet } from '@/lib/ai/retrieval-llm';
+import {
+  buildRetrievalIndex,
+  evaluateRetrievalConfidence,
+  findTopicFocus,
+  inferModalityHints,
+  inferTopicHints,
+  needsVisualRetrieval,
+  reciprocalRankFusion,
+  searchBm25Documents,
+  tokenizeRetrievalText,
+  type RetrievalDocument,
+  type RetrievalIndex,
+  type RetrievalSourceType,
+} from '@/lib/ai/retrieval-index';
 import { logger } from '@/lib/logger';
 
 export type ContextTask =
@@ -37,6 +53,7 @@ interface ContextChunk {
   year?: number;
   paperType?: PaperType;
   page?: number;
+  chunkIndex?: number;
 }
 
 interface RerankIndexCandidate {
@@ -65,6 +82,10 @@ export interface ContextSnippet {
   chapterId?: string;
   year?: number;
   paperType?: PaperType;
+  page?: number;
+  chunkIndex?: number;
+  modalityHints?: string[];
+  topicHints?: string[];
   relevanceScore: number;
 }
 
@@ -88,6 +109,13 @@ export interface ContextPack {
     averageRelevance: number;
     sourceMix: Array<'paper' | 'textbook' | 'image-ocr'>;
     chapterMatchCount: number;
+    confidence: number;
+    confidenceLevel: 'low' | 'medium' | 'high';
+    confidenceReasons: string[];
+    correctiveActions: string[];
+    topicFocus: string[];
+    visualSnippetCount: number;
+    strategies: string[];
   };
 }
 
@@ -102,17 +130,25 @@ const INDEX_PATHS = [
 ];
 const DATASET_ROOT = path.join(process.cwd(), 'dataset', 'cbse_papers');
 const INDEX_SCRIPT = path.join(process.cwd(), 'scripts', 'build_context_index.py');
-const CACHE_TTL_MS = 45_000;
+const CACHE_TTL_MS = 10 * 60 * 1000;
 const EMBEDDING_DIM = 192;
+const DEFAULT_NVIDIA_EMBED_MODEL = 'nvidia/nv-embedqa-e5-v5';
 const DEFAULT_NVIDIA_RERANK_MODEL = 'nvidia/llama-nemotron-rerank-1b-v2';
 const VECTOR_INDEX_PATH = path.join(CONTEXT_DIR, 'chunk_vectors.jsonl');
+const RETRIEVAL_INDEX_PATH = path.join(CONTEXT_DIR, 'retrieval_index.json');
 const PGVECTOR_UNAVAILABLE_COOLDOWN_MS = 5 * 60 * 1000;
+const DEFAULT_LOCAL_CANDIDATE_POOL = 48;
+const DEFAULT_PGVECTOR_CANDIDATE_POOL = 36;
 
 let cacheLoadedAt = 0;
 let cachedChunks: ContextChunk[] = [];
 let cachedIndex: ChapterIndexPayload = {};
+let cachedRetrievalIndex: RetrievalIndex | null = null;
 const chunkEmbeddingCache = new Map<string, Float32Array>();
 const persistedEmbeddingCache = new Map<string, Float32Array>();
+let persistedEmbeddingDim = EMBEDDING_DIM;
+let persistedEmbeddingKind: 'hashed-bow' | 'nvidia-e5' | 'onnx-minilm' = 'hashed-bow';
+let persistedEmbeddingModel = 'local-hashed-bow';
 let pgvectorUnavailableUntilMs = 0;
 let pgvectorMissingHintLogged = false;
 
@@ -133,8 +169,19 @@ function normalizeSubject(classLevel: number, subject: string): string {
   return subject;
 }
 
+function normalizeChemNotation(text: string): string {
+  return text
+    .replace(/[\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089]/g, (ch) => String('\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'.indexOf(ch)))
+    .replace(/[\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207a\u207b]/g, (ch) => {
+      const idx = '\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207a\u207b'.indexOf(ch);
+      return idx >= 0 ? (idx < 10 ? String(idx) : idx === 10 ? '+' : '-') : ch;
+    })
+    .replace(/\u00b2/g, '2').replace(/\u00b3/g, '3');
+}
+
 function tokenize(text: string): string[] {
-  return (text.toLowerCase().match(/[a-z]{3,}|[\u0900-\u097f]{2,}/g) ?? []).filter((token) => {
+  const normalized = normalizeChemNotation(text);
+  return (normalized.toLowerCase().match(/[a-z0-9]{2,}|[\u0900-\u097f]{2,}/g) ?? []).filter((token) => {
     if (/^[a-z]{3,}$/.test(token)) {
       return !['the', 'and', 'for', 'with', 'that', 'this', 'from', 'board', 'class', 'paper'].includes(token);
     }
@@ -142,7 +189,7 @@ function tokenize(text: string): string[] {
   });
 }
 
-function buildHyDEQuery(
+function buildHeuristicHyDEQuery(
   query: string,
   subject: string,
   classLevel: number,
@@ -157,6 +204,51 @@ function buildHyDEQuery(
     `Key concepts: definitions laws formulae reactions processes applications of ${topicStr}. ` +
     `Board exam questions on ${allTopics.slice(0, 3).join(' ')} test conceptual understanding numerical application.`;
   return `${query} ${hypothetical}`.trim();
+}
+
+async function buildHyDEQuery(
+  query: string,
+  subject: string,
+  classLevel: number,
+  chapterTopics: string[],
+  pyqTopics: string[],
+  chapterTitle?: string
+): Promise<string> {
+  const heuristic = buildHeuristicHyDEQuery(query, subject, classLevel, chapterTopics, pyqTopics);
+  const generated = await buildHyDEPassage({
+    query,
+    subject,
+    classLevel,
+    chapterTitle,
+    chapterTopics,
+    pyqTopics,
+  }).catch(() => null);
+  return generated ? `${query} ${generated}`.trim() : heuristic;
+}
+
+async function compressContextSnippets(
+  snippets: ContextSnippet[],
+  focusText: string,
+  query: ContextQuery
+): Promise<ContextSnippet[]> {
+  return Promise.all(
+    snippets.map(async (snippet, index) => {
+      const compressed =
+        index < 4
+          ? await compressRetrievedSnippet({
+              query: focusText,
+              subject: query.subject,
+              classLevel: query.classLevel,
+              chapterTitle: query.chapterId ? getChapterById(query.chapterId)?.title : undefined,
+              snippetText: snippet.text,
+            }).catch(() => compressSnippetText(snippet.text, focusText))
+          : compressSnippetText(snippet.text, focusText);
+      return {
+        ...snippet,
+        text: compressed,
+      };
+    })
+  );
 }
 
 function canonicalizeSourcePath(sourcePath: string): string {
@@ -212,6 +304,77 @@ function buildLocalEmbedding(text: string): Float32Array {
   return vec;
 }
 
+function supportsRemoteSemanticEmbeddings(): boolean {
+  return persistedEmbeddingKind === 'nvidia-e5' && persistedEmbeddingDim > 0;
+}
+
+function supportsOnnxSemanticEmbeddings(): boolean {
+  return persistedEmbeddingKind === 'onnx-minilm' && persistedEmbeddingDim > 0;
+}
+
+let onnxEmbedPipeline: unknown = null;
+let onnxEmbedPipelineLoading = false;
+
+async function tryLoadOnnxPipeline(): Promise<unknown> {
+  if (onnxEmbedPipeline) return onnxEmbedPipeline;
+  if (onnxEmbedPipelineLoading) return null;
+  onnxEmbedPipelineLoading = true;
+  try {
+    const { pipeline, env } = await import('@xenova/transformers' as string as any);
+    (env as any).allowLocalModels = false;
+    onnxEmbedPipeline = await (pipeline as Function)('feature-extraction', persistedEmbeddingModel || 'Xenova/all-MiniLM-L6-v2');
+    return onnxEmbedPipeline;
+  } catch {
+    return null;
+  } finally {
+    onnxEmbedPipelineLoading = false;
+  }
+}
+
+async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
+  if (supportsRemoteSemanticEmbeddings()) {
+    const nvidiaKey = process.env.NVIDIA_API_KEY?.trim();
+    if (isUsableNvidiaApiKey(nvidiaKey)) {
+      try {
+        const { createNvidiaEmbeddings } = await import('@/lib/ai/nvidia-client');
+        const [embedding] = await createNvidiaEmbeddings({
+          apiKey: nvidiaKey,
+          model: persistedEmbeddingModel || DEFAULT_NVIDIA_EMBED_MODEL,
+          input: [text],
+          inputType: 'query',
+        });
+        if (Array.isArray(embedding) && embedding.length === persistedEmbeddingDim) {
+          return Float32Array.from(embedding);
+        }
+        logger.warn('[context-retriever] NVIDIA embedding returned unexpected shape; falling back');
+      } catch (error) {
+        logger.warn(
+          { err: error },
+          '[context-retriever] NVIDIA embedding failed — degrading to lexical hashed-BoW (quality reduced)'
+        );
+      }
+    }
+  }
+  if (supportsOnnxSemanticEmbeddings()) {
+    try {
+      const pipe = await tryLoadOnnxPipeline();
+      if (pipe) {
+        const output = await (pipe as Function)(text.slice(0, 512), { pooling: 'mean', normalize: true });
+        const embedding = Array.from((output as any).data) as number[];
+        if (embedding.length === persistedEmbeddingDim) {
+          return Float32Array.from(embedding);
+        }
+      }
+    } catch (error) {
+      logger.warn({ err: error }, '[context-retriever] ONNX query embedding failed; falling back to BM25-only retrieval');
+    }
+    // ONNX index present but runtime unavailable — BM25 handles retrieval
+    return null;
+  }
+  // Hashed BoW fallback — lexical similarity only, no semantic understanding
+  return buildLocalEmbedding(text);
+}
+
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   let dot = 0;
   const len = Math.min(a.length, b.length);
@@ -221,14 +384,15 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 
 function sanitizeChunkText(text: string): string {
   return text
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/Use this for board-style question framing[^.]*\./gi, '')
     .replace(/Use this for[^.]*\./gi, '')
-    .replace(/(?:general instructions|time allowed|max(?:imum)? marks|question paper code)[^.!?]{0,220}/gi, ' ')
-    .replace(/section\s+[a-e]\s+questions?\s+no\.\s*\d+\s+to\s+\d+[^.!?]{0,220}/gi, ' ')
-    .replace(/there is no overall choice[^.!?]{0,220}/gi, ' ')
-    .replace(/use of calculators? is not allowed[^.!?]{0,80}/gi, ' ')
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]+/g, ' ')
+    // Cap removal at 300 chars to avoid eating legitimate question content
+    .replace(/(?:general instructions|time allowed|max(?:imum)? marks|question paper code)[^.!?\n]{0,300}/gi, ' ')
+    .replace(/section\s+[a-e]\s+questions?\s+no\.\s*\d+\s+to\s+\d+[^.!?\n]{0,120}/gi, ' ')
+    .replace(/there is no overall choice[^.!?\n]{0,220}/gi, ' ')
+    .replace(/use of calculators? is not allowed[^.!?\n]{0,80}/gi, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -271,10 +435,12 @@ function looksLikeInstructionChunk(text: string): boolean {
 }
 
 function isHighQualityChunk(text: string): boolean {
-  if (!text || text.length < 220) return false;
+  if (!text || text.length < 180) return false;
   const englishRatio = getEnglishRatio(text);
   const devanagariRatio = getDevanagariRatio(text);
-  if (englishRatio < 0.55 && devanagariRatio < 0.45) return false;
+  // Aligned with Python extractor (MIN_ENGLISH_RATIO=0.52).
+  // Devanagari content (Hindi medium) accepted at ≥0.40 ratio.
+  if (englishRatio < 0.50 && devanagariRatio < 0.40) return false;
   if (looksLikeInstructionChunk(text)) return false;
   return true;
 }
@@ -362,10 +528,11 @@ async function loadContextArtifacts(force = false): Promise<void> {
   cacheLoadedAt = now;
 
   try {
-    const [chunkPayloads, indexPayloads, vectorPayload] = await Promise.all([
+    const [chunkPayloads, indexPayloads, vectorPayload, retrievalIndexPayload] = await Promise.all([
       Promise.all(CHUNK_PATHS.map((chunkPath) => fs.readFile(chunkPath, 'utf-8').catch(() => ''))),
       Promise.all(INDEX_PATHS.map((indexPath) => fs.readFile(indexPath, 'utf-8').catch(() => '{}'))),
       fs.readFile(VECTOR_INDEX_PATH, 'utf-8').catch(() => ''),
+      fs.readFile(RETRIEVAL_INDEX_PATH, 'utf-8').catch(() => ''),
     ]);
 
     const seen = new Set<string>();
@@ -413,16 +580,29 @@ async function loadContextArtifacts(force = false): Promise<void> {
       });
     chunkEmbeddingCache.clear();
     persistedEmbeddingCache.clear();
+    persistedEmbeddingDim = EMBEDDING_DIM;
+    persistedEmbeddingKind = 'hashed-bow';
+    persistedEmbeddingModel = 'local-hashed-bow';
     if (vectorPayload.trim().length > 0) {
       for (const rawLine of vectorPayload.split('\n')) {
         const line = rawLine.trim();
         if (!line) continue;
         try {
-          const parsed = JSON.parse(line) as { id?: string; embedding?: number[] };
+          const parsed = JSON.parse(line) as {
+            id?: string;
+            embedding?: number[];
+            embeddingKind?: 'hashed-bow' | 'nvidia-e5' | 'onnx-minilm';
+            embeddingModel?: string;
+          };
           if (!parsed.id || !Array.isArray(parsed.embedding)) continue;
-          if (parsed.embedding.length !== EMBEDDING_DIM) continue;
+          if (parsed.embedding.length === 0) continue;
           const vec = new Float32Array(parsed.embedding);
           persistedEmbeddingCache.set(parsed.id, vec);
+          if (persistedEmbeddingCache.size === 1) {
+            persistedEmbeddingDim = vec.length;
+            persistedEmbeddingKind = parsed.embeddingKind === 'nvidia-e5' ? 'nvidia-e5' : parsed.embeddingKind === 'onnx-minilm' ? 'onnx-minilm' : 'hashed-bow';
+            persistedEmbeddingModel = parsed.embeddingModel?.trim() || (persistedEmbeddingKind === 'nvidia-e5' ? DEFAULT_NVIDIA_EMBED_MODEL : persistedEmbeddingKind === 'onnx-minilm' ? 'Xenova/all-MiniLM-L6-v2' : 'local-hashed-bow');
+          }
         } catch {
           continue;
         }
@@ -437,14 +617,30 @@ async function loadContextArtifacts(force = false): Promise<void> {
         return acc;
       }
     }, {});
+
+    cachedRetrievalIndex = null;
+    if (retrievalIndexPayload.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(retrievalIndexPayload.replace(/^\uFEFF/, '')) as RetrievalIndex;
+        if (Array.isArray(parsed.docs) && parsed.docs.length > 0) {
+          cachedRetrievalIndex = parsed;
+        }
+      } catch {
+        cachedRetrievalIndex = null;
+      }
+    }
+    if (!cachedRetrievalIndex) {
+      cachedRetrievalIndex = buildRetrievalIndex(cachedChunks, (chapterId) => getChapterById(chapterId));
+    }
   } catch (error) {
     logger.error({ err: error }, '[context-retriever] Failed to load context artifacts');
     cachedChunks = [];
     cachedIndex = {};
+    cachedRetrievalIndex = null;
   }
 }
 
-function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: Float32Array): number {
+function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: Float32Array | null): number {
   let score = 0;
   const normalizedSubject = normalizeSubject(query.classLevel, query.subject);
   const chapter = query.chapterId ? getChapterById(query.chapterId) : undefined;
@@ -474,13 +670,20 @@ function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: 
     score += Math.min(12, pyqTokenHits);
   }
 
-  let chunkEmbedding = chunkEmbeddingCache.get(chunk.id);
-  if (!chunkEmbedding) {
-    chunkEmbedding = persistedEmbeddingCache.get(chunk.id) ?? buildLocalEmbedding(chunk.text);
-    chunkEmbeddingCache.set(chunk.id, chunkEmbedding);
+  if (queryEmbedding !== null) {
+    let chunkEmbedding = chunkEmbeddingCache.get(chunk.id);
+    if (!chunkEmbedding) {
+      chunkEmbedding = persistedEmbeddingCache.get(chunk.id) ?? buildLocalEmbedding(chunk.text);
+      chunkEmbeddingCache.set(chunk.id, chunkEmbedding);
+    }
+    if (chunkEmbedding.length !== queryEmbedding.length) {
+      chunkEmbedding = buildLocalEmbedding(chunk.text);
+      chunkEmbeddingCache.set(chunk.id, chunkEmbedding);
+    }
+    const semantic = cosineSimilarity(chunkEmbedding, queryEmbedding);
+    const semanticWeight = persistedEmbeddingKind === 'nvidia-e5' ? 24 : persistedEmbeddingKind === 'onnx-minilm' ? 20 : 12;
+    score += Math.max(0, semantic) * semanticWeight;
   }
-  const semantic = cosineSimilarity(chunkEmbedding, queryEmbedding);
-  score += Math.max(0, semantic) * 24;
 
   if (chunk.sourceType === 'textbook') {
     score += 2;
@@ -524,7 +727,13 @@ function applyMMR(
           chunkEmbeddingCache.set(remaining[i].chunk.id, candEmb);
         }
         for (const sel of selected) {
-          const selEmb = chunkEmbeddingCache.get(sel.chunk.id) ?? persistedEmbeddingCache.get(sel.chunk.id) ?? buildLocalEmbedding(sel.chunk.text);
+          let selEmb = chunkEmbeddingCache.get(sel.chunk.id) ?? persistedEmbeddingCache.get(sel.chunk.id) ?? buildLocalEmbedding(sel.chunk.text);
+          if (candEmb.length !== selEmb.length) {
+            candEmb = buildLocalEmbedding(remaining[i].chunk.text);
+            selEmb = buildLocalEmbedding(sel.chunk.text);
+            chunkEmbeddingCache.set(remaining[i].chunk.id, candEmb);
+            chunkEmbeddingCache.set(sel.chunk.id, selEmb);
+          }
           const sim = cosineSimilarity(candEmb, selEmb);
           if (sim > maxSim) maxSim = sim;
         }
@@ -539,7 +748,7 @@ function applyMMR(
 }
 
 function shouldUseNvidiaRerank(query: ContextQuery): boolean {
-  if (process.env.AI_ENABLE_NVIDIA_RERANK !== '1') return false;
+  if (process.env.AI_ENABLE_NVIDIA_RERANK === '0') return false;
   if (!query.query || !query.query.trim()) return false;
   return isUsableNvidiaApiKey(process.env.NVIDIA_API_KEY);
 }
@@ -652,29 +861,128 @@ function buildContextHash(snippets: ContextSnippet[]): string {
   return digest.digest('hex');
 }
 
+function normalizeSnippetSourceType(sourceType?: RetrievalSourceType): 'paper' | 'textbook' | 'image-ocr' {
+  if (sourceType === 'textbook') return 'textbook';
+  if (sourceType === 'image-ocr') return 'image-ocr';
+  return 'paper';
+}
+
+function getRetrievalIndex(): RetrievalIndex {
+  if (cachedRetrievalIndex) return cachedRetrievalIndex;
+  cachedRetrievalIndex = buildRetrievalIndex(cachedChunks, (chapterId) => getChapterById(chapterId));
+  return cachedRetrievalIndex;
+}
+
+function resolveCandidatePoolSize(topK: number, ceiling = 72): number {
+  return Math.max(topK * 4, Math.min(ceiling, Math.max(DEFAULT_LOCAL_CANDIDATE_POOL, topK * 6)));
+}
+
+function normalizeSnippetFingerprintText(text: string): string {
+  return (text.toLowerCase().match(/[a-z0-9\u0900-\u097f]{2,}/g) ?? []).join(' ');
+}
+
+function buildSnippetDedupeKey(snippet: ContextSnippet): string {
+  const normalized = normalizeSnippetFingerprintText(snippet.text);
+  const digest = createHash('sha1').update(normalized).digest('hex').slice(0, 16);
+  return `${canonicalizeSourcePath(snippet.sourcePath)}|${digest}`;
+}
+
+function getChunkById(chunkId: string): ContextChunk | undefined {
+  return cachedChunks.find((chunk) => chunk.id === chunkId);
+}
+
+function retrievalDocumentToSnippet(doc: RetrievalDocument): ContextSnippet {
+  const sourceType = normalizeSnippetSourceType(doc.sourceType);
+  if (doc.chunkId) {
+    const chunk = getChunkById(doc.chunkId);
+    if (chunk) {
+      return {
+        ...chunk,
+        sourcePath: canonicalizeSourcePath(chunk.sourcePath),
+        text: sanitizeChunkText(chunk.text).slice(0, 1600),
+        sourceType,
+        chapterId: chunk.chapterId ?? undefined,
+        page: chunk.page,
+        chunkIndex: chunk.chunkIndex,
+        modalityHints: inferModalityHints(chunk.text, sourceType, chunk.hasImages),
+        topicHints: doc.topicHints,
+        relevanceScore: 0,
+      };
+    }
+  }
+  return {
+    id: doc.id,
+    text: sanitizeChunkText(doc.text).slice(0, 1600),
+    sourcePath: doc.sourcePath,
+    classLevel: doc.classLevel,
+    subject: doc.subject,
+    sourceType,
+    chapterId: doc.chapterId ?? undefined,
+    year: doc.year,
+    page: doc.page,
+    chunkIndex: doc.chunkIndex,
+    modalityHints: doc.modalityHints,
+    topicHints: doc.topicHints,
+    relevanceScore: 0,
+  };
+}
+
 function buildRetrievalMeta(
   snippets: ContextSnippet[],
-  chapterId?: string
+  chapterId?: string,
+  options?: {
+    correctiveActions?: string[];
+    topicFocus?: string[];
+    strategies?: string[];
+    queryText?: string;
+  }
 ): ContextPack['retrievalMeta'] {
   const snippetCount = snippets.length;
   const averageRelevance = snippetCount > 0
     ? Number((snippets.reduce((sum, snippet) => sum + Number(snippet.relevanceScore || 0), 0) / snippetCount).toFixed(2))
     : 0;
   const sourceMix = Array.from(
-    new Set(snippets.map((snippet) =>
-      snippet.sourceType === 'textbook' ? 'textbook' :
-      snippet.sourceType === 'image-ocr' ? 'image-ocr' : 'paper'
-    ))
+    new Set(snippets.map((snippet) => normalizeSnippetSourceType(snippet.sourceType)))
   ) as Array<'paper' | 'textbook' | 'image-ocr'>;
   const chapterMatchCount = chapterId
     ? snippets.filter((snippet) => snippet.chapterId === chapterId).length
     : 0;
+  const topicFocus = unique((options?.topicFocus ?? []).filter(Boolean)).slice(0, 6);
+  const confidenceResult = evaluateRetrievalConfidence({
+    queryText: options?.queryText ?? topicFocus.join(' '),
+    chapterId,
+    topicFocus,
+    ranked: snippets.map((snippet) => ({
+      relevanceScore: Number(snippet.relevanceScore || 0),
+      sourceType: normalizeSnippetSourceType(snippet.sourceType),
+      chapterId: snippet.chapterId,
+    })),
+  });
   return {
     snippetCount,
     averageRelevance,
     sourceMix,
     chapterMatchCount,
+    confidence: confidenceResult.confidence,
+    confidenceLevel: confidenceResult.level,
+    confidenceReasons: confidenceResult.reasons,
+    correctiveActions: unique(options?.correctiveActions ?? []),
+    topicFocus,
+    visualSnippetCount: snippets.filter((snippet) => (snippet.modalityHints ?? []).includes('diagram') || snippet.sourceType === 'image-ocr').length,
+    strategies: unique(options?.strategies ?? []),
   };
+}
+
+function buildCorrectiveQueries(query: ContextQuery, expandedQuery: string, topicFocus: string[]): string[] {
+  const chapter = query.chapterId ? getChapterById(query.chapterId) : undefined;
+  const chapterTitle = chapter?.title ?? '';
+  const chapterTopics = chapter?.topics ?? query.chapterTopics ?? [];
+  return unique([
+    expandedQuery,
+    [query.query ?? '', chapterTitle, ...topicFocus].filter(Boolean).join(' '),
+    [query.query ?? '', ...chapterTopics.slice(0, 6)].filter(Boolean).join(' '),
+    [expandedQuery, ...chapterTopics.slice(0, 4)].filter(Boolean).join(' '),
+  ]).filter((item) => item.trim().length > 0);
 }
 
 function selectFallbackSource(query: ContextQuery): string | null {
@@ -736,6 +1044,11 @@ async function appendChunkToCache(chunk: ContextChunk): Promise<void> {
 }
 
 async function runOnDemandExtraction(relativePath: string): Promise<string> {
+  // Subprocess spawning fails in serverless/edge runtimes and when Python is not on PATH.
+  // Disabled by default — set ENABLE_ON_DEMAND_PDF_EXTRACTION=1 in a long-running Node server only.
+  if (process.env.ENABLE_ON_DEMAND_PDF_EXTRACTION !== '1') return '';
+  if (process.env.NEXT_RUNTIME === 'edge') return '';
+
   const baseArgs = [
     INDEX_SCRIPT,
     '--single-file',
@@ -743,7 +1056,7 @@ async function runOnDemandExtraction(relativePath: string): Promise<string> {
     '--dataset-root',
     DATASET_ROOT,
     '--max-pages',
-    '2',
+    '4',
     '--json-stdout',
   ];
 
@@ -852,12 +1165,23 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
     if (!isSupabaseServiceConfigured()) return null;
 
     const pyqForHyDE = query.chapterId ? getPYQData(query.chapterId) : null;
-    const queryText = buildHyDEQuery(
-      query.query ?? '',
-      query.subject,
-      query.classLevel,
-      query.chapterTopics ?? [],
-      pyqForHyDE?.importantTopics ?? []
+    const expandedQuery = expandRetrievalQuery({
+      query: query.query ?? '',
+      subject: query.subject,
+      classLevel: query.classLevel,
+      chapterTitle: query.chapterId ? getChapterById(query.chapterId)?.title : undefined,
+      chapterTopics: query.chapterTopics ?? [],
+      pyqTopics: pyqForHyDE?.importantTopics ?? [],
+    });
+    const queryText = (
+      await buildHyDEQuery(
+        expandedQuery,
+        query.subject,
+        query.classLevel,
+        query.chapterTopics ?? [],
+        pyqForHyDE?.importantTopics ?? [],
+        query.chapterId ? getChapterById(query.chapterId)?.title : undefined
+      )
     ).slice(0, 2048);
 
     const [embedding] = await createNvidiaEmbeddings({
@@ -868,10 +1192,11 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
     });
     if (!embedding || embedding.length === 0) return null;
 
-    const topK = Math.max(1, Math.min(8, query.topK ?? 4));
+    const topK = Math.max(1, Math.min(14, query.topK ?? 4));
+    const candidatePoolSize = resolveCandidatePoolSize(topK, 64);
     const rows = await supabaseRpc<PgvectorRow[]>('match_document_embeddings', {
       query_embedding: `[${embedding.join(',')}]`,
-      match_count: topK * 3,
+      match_count: candidatePoolSize,
       filter_class: query.classLevel,
       filter_subject: normalizeSubject(query.classLevel, query.subject),
       filter_chapter: query.chapterId ?? null,
@@ -879,32 +1204,85 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
 
     if (!Array.isArray(rows) || rows.length === 0) return null;
 
-    const dedupeSet = new Set<string>();
-    const snippets: ContextSnippet[] = [];
+    const pgSnippets: ContextSnippet[] = [];
+    const seenKeys = new Set<string>();
     for (const row of rows) {
       const text = sanitizeChunkText(row.text).slice(0, 1600);
       if (!isHighQualityChunk(text)) continue;
       const dedupeKey = `${row.source_path}|${text.slice(0, 260).toLowerCase()}`;
-      if (dedupeSet.has(dedupeKey)) continue;
-      dedupeSet.add(dedupeKey);
-      snippets.push({
+      if (seenKeys.has(dedupeKey)) continue;
+      seenKeys.add(dedupeKey);
+      pgSnippets.push({
         id: row.id,
         text,
         sourcePath: canonicalizeSourcePath(row.source_path),
         classLevel: row.class_level,
         subject: row.subject,
-        sourceType: row.source_type === 'textbook' ? 'textbook' : row.source_type === 'image-ocr' ? 'image-ocr' : 'paper',
+        sourceType: normalizeSnippetSourceType(row.source_type as RetrievalSourceType),
         chapterId: row.chapter_id ?? undefined,
         year: row.year ?? undefined,
         paperType: row.paper_type as PaperType | undefined,
+        modalityHints: inferModalityHints(text, normalizeSnippetSourceType(row.source_type as RetrievalSourceType)),
         relevanceScore: Number((row.similarity * 100).toFixed(2)),
       });
-      if (snippets.length >= topK) break;
     }
-    if (snippets.length > 0) {
+    if (pgSnippets.length > 0) {
+      await loadContextArtifacts();
+      const retrievalIndex = getRetrievalIndex();
+      const topicFocus = findTopicFocus(retrievalIndex, {
+        classLevel: query.classLevel,
+        subject: normalizeSubject(query.classLevel, query.subject),
+        chapterId: query.chapterId,
+        queryText,
+        maxTopics: 4,
+      }).map((entry) => entry.topic);
+      const sparseDocs = searchBm25Documents(retrievalIndex, `${queryText} ${topicFocus.join(' ')}`.trim(), {
+        classLevel: query.classLevel,
+        subject: normalizeSubject(query.classLevel, query.subject),
+        chapterId: query.chapterId,
+        includeKinds: ['chunk'],
+        maxResults: candidatePoolSize,
+      });
+      const wantsVisual = needsVisualRetrieval(query.query ?? queryText, query.task, query.chapterTopics ?? []);
+      const visualDocs = wantsVisual
+        ? searchBm25Documents(retrievalIndex, `${queryText} ${topicFocus.join(' ')}`.trim(), {
+            classLevel: query.classLevel,
+            subject: normalizeSubject(query.classLevel, query.subject),
+            chapterId: query.chapterId,
+            includeKinds: ['visual', 'chunk'],
+            maxResults: Math.max(6, topK * 2),
+          }).filter((entry) => entry.doc.kind === 'visual' || entry.doc.modalityHints.includes('diagram'))
+        : [];
+
+      const fused = reciprocalRankFusion<ContextSnippet>([
+        pgSnippets.map((snippet) => ({ item: snippet, score: snippet.relevanceScore })),
+        sparseDocs.map((entry) => ({
+          item: retrievalDocumentToSnippet(entry.doc),
+          score: entry.score * 10,
+        })),
+        visualDocs.map((entry) => ({
+          item: retrievalDocumentToSnippet(entry.doc),
+          score: entry.score * 12,
+        })),
+      ]);
+
+      const fusedSnippets: ContextSnippet[] = [];
+      const fusedSeen = new Set<string>();
+      for (const entry of fused) {
+        const snippet = {
+          ...entry.item,
+          relevanceScore: Number((Math.max(entry.item.relevanceScore || 0, entry.score * 1000)).toFixed(2)),
+        };
+        const dedupeKey = buildSnippetDedupeKey(snippet);
+        if (fusedSeen.has(dedupeKey)) continue;
+        fusedSeen.add(dedupeKey);
+        fusedSnippets.push(snippet);
+        if (fusedSnippets.length >= Math.max(topK * 2, 12)) break;
+      }
+
       pgvectorUnavailableUntilMs = 0;
       pgvectorMissingHintLogged = false;
-      return snippets;
+      return fusedSnippets;
     }
     return null;
   } catch (error) {
@@ -918,27 +1296,18 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getContextPack(query: ContextQuery): Promise<ContextPack> {
-  // Try semantic pgvector retrieval first (requires document_embeddings populated)
-  const pgSnippets = await getPgvectorSnippets(query);
-  if (pgSnippets && pgSnippets.length > 0) {
-    const reranked = shouldUseNvidiaRerank(query)
-      ? await rerankContextSnippets(query, pgSnippets).catch(() => pgSnippets)
-      : pgSnippets;
-    return {
-      snippets: reranked,
-      contextHash: buildContextHash(reranked),
-      usedOnDemandFallback: false,
-      usedPgvector: true,
-      retrievalMeta: buildRetrievalMeta(reranked, query.chapterId),
-    };
-  }
-
   await loadContextArtifacts();
 
-  // Question-generation tasks benefit from source diversity (textbook + paper)
-  const QUESTION_TASKS = new Set<ContextTask>(['mcq', 'adaptive-test', 'chapter-drill', 'flashcards', 'chapter-diagnose', 'chapter-remediate', 'chapter-pack']);
+  const QUESTION_TASKS = new Set<ContextTask>([
+    'mcq',
+    'adaptive-test',
+    'chapter-drill',
+    'flashcards',
+    'chapter-diagnose',
+    'chapter-remediate',
+    'chapter-pack',
+  ]);
   const needsDiversity = QUESTION_TASKS.has(query.task);
-  // For question tasks use a wider pool; cap at 14 to stay within LLM context budget
   const topK = needsDiversity
     ? Math.max(8, Math.min(14, query.topK ?? 10))
     : Math.max(1, Math.min(8, query.topK ?? 4));
@@ -946,85 +1315,253 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
   const normalizedSubject = normalizeSubject(query.classLevel, query.subject);
   const chapter = query.chapterId ? getChapterById(query.chapterId) : undefined;
   const localPyq = query.chapterId ? getPYQData(query.chapterId) : null;
-  const hydeQuery = buildHyDEQuery(
-    query.query ?? '',
+  const chapterTopics = unique([...(query.chapterTopics ?? []), ...(chapter?.topics ?? [])]);
+  const retrievalIndex = getRetrievalIndex();
+  const expandedQuery = expandRetrievalQuery({
+    query: query.query ?? '',
+    subject: query.subject,
+    classLevel: query.classLevel,
+    chapterTitle: chapter?.title,
+    chapterTopics,
+    pyqTopics: localPyq?.importantTopics ?? [],
+  });
+  const hydeQuery = await buildHyDEQuery(
+    expandedQuery,
     query.subject,
     query.classLevel,
-    [...(query.chapterTopics ?? []), ...(chapter?.topics ?? [])],
-    localPyq?.importantTopics ?? []
+    chapterTopics,
+    localPyq?.importantTopics ?? [],
+    chapter?.title
   );
-  const queryEmbedding = buildLocalEmbedding(hydeQuery);
+  const topicFocusResults = findTopicFocus(retrievalIndex, {
+    classLevel: query.classLevel,
+    subject: normalizedSubject,
+    chapterId: query.chapterId,
+    queryText: `${expandedQuery} ${hydeQuery}`.trim(),
+    maxTopics: 4,
+  });
+  const topicFocus = topicFocusResults.map((entry) => entry.topic);
+  const topicChunkIds = new Set(topicFocusResults.flatMap((entry) => entry.chunkIds));
+  const wantsVisual = needsVisualRetrieval(query.query ?? expandedQuery, query.task, chapterTopics);
+  const focusText = unique([expandedQuery, hydeQuery, ...topicFocus]).join(' ').trim();
 
-  const subjectScoped = cachedChunks
-    .filter((chunk) => {
+  const selectDiversifiedSnippets = (rankedCandidates: Array<{ snippet: ContextSnippet; score: number }>): ContextSnippet[] => {
+    const uniqueCandidates: Array<{ snippet: ContextSnippet; score: number }> = [];
+    const seen = new Set<string>();
+    for (const entry of rankedCandidates.sort((a, b) => b.score - a.score)) {
+      const key = buildSnippetDedupeKey(entry.snippet);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueCandidates.push(entry);
+    }
+    if (!needsDiversity) return uniqueCandidates.slice(0, topK).map((entry) => entry.snippet);
+
+    const selected: ContextSnippet[] = [];
+    const used = new Set<string>();
+    const textbookQuota = Math.min(Math.max(3, Math.floor(topK * 0.35)), uniqueCandidates.filter((item) => item.snippet.sourceType === 'textbook').length);
+    const visualQuota = wantsVisual ? Math.min(2, uniqueCandidates.filter((item) => item.snippet.sourceType === 'image-ocr' || (item.snippet.modalityHints ?? []).includes('diagram')).length) : 0;
+
+    const pull = (predicate: (entry: { snippet: ContextSnippet; score: number }) => boolean, quota: number) => {
+      for (const entry of uniqueCandidates) {
+        if (selected.length >= topK || quota <= 0) break;
+        const key = buildSnippetDedupeKey(entry.snippet);
+        if (used.has(key) || !predicate(entry)) continue;
+        used.add(key);
+        selected.push(entry.snippet);
+        quota--;
+      }
+    };
+
+    pull((entry) => entry.snippet.sourceType === 'textbook', textbookQuota);
+    pull((entry) => entry.snippet.sourceType === 'image-ocr' || (entry.snippet.modalityHints ?? []).includes('diagram'), visualQuota);
+    pull(() => true, topK - selected.length);
+    return selected.slice(0, topK);
+  };
+
+  const buildLocalHybridPack = async (
+    queryVariants: string[],
+    broadenSubjectScope: boolean,
+    correctiveActions: string[] = []
+  ): Promise<ContextPack> => {
+    const localDenseStrategy = supportsRemoteSemanticEmbeddings() ? 'local-dense-nvidia' : 'local-lexical-hash';
+    const subjectScoped = cachedChunks.filter((chunk) => {
       if (chunk.classLevel !== query.classLevel) return false;
       if (normalizeSubject(chunk.classLevel, chunk.subject) !== normalizedSubject) return false;
       return isHighQualityChunk(chunk.text);
     });
+    const chapterScoped = query.chapterId ? subjectScoped.filter((chunk) => chunk.chapterId === query.chapterId) : subjectScoped;
+    const densePool = !broadenSubjectScope && chapterScoped.length >= Math.min(topK, 2) ? chapterScoped : subjectScoped;
+    const candidatePoolSize = resolveCandidatePoolSize(topK, broadenSubjectScope ? 96 : 72);
 
-  const chapterScoped = query.chapterId
-    ? subjectScoped.filter((chunk) => chunk.chapterId === query.chapterId)
-    : subjectScoped;
-  const candidatePool = chapterScoped.length >= Math.min(topK, 2) ? chapterScoped : subjectScoped;
+    const denseLists: Array<Array<{ item: ContextSnippet; score: number }>> = [];
+    for (const variant of unique(queryVariants).slice(0, 4)) {
+      const queryEmbedding = await buildQueryEmbedding(variant);
+      const denseRanked = densePool
+        .map((chunk) => ({ chunk, score: computeScore(chunk, query, queryEmbedding) }))
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, candidatePoolSize);
+      denseLists.push(
+        denseRanked.map((entry) => ({
+          item: {
+            ...entry.chunk,
+            sourcePath: canonicalizeSourcePath(entry.chunk.sourcePath),
+            text: sanitizeChunkText(entry.chunk.text).slice(0, 1600),
+            sourceType: normalizeSnippetSourceType(entry.chunk.sourceType),
+            chapterId: entry.chunk.chapterId ?? undefined,
+            page: entry.chunk.page,
+            chunkIndex: entry.chunk.chunkIndex,
+            modalityHints: inferModalityHints(entry.chunk.text, normalizeSnippetSourceType(entry.chunk.sourceType), entry.chunk.hasImages),
+            topicHints: inferTopicHints(entry.chunk.text, chapter),
+            relevanceScore: Number(entry.score.toFixed(2)),
+          },
+          score: entry.score,
+        }))
+      );
+    }
 
-  // Score all candidates without pre-slicing so diversity selection has the full pool
-  const allScored = candidatePool
-    .map((chunk) => ({ chunk, score: computeScore(chunk, query, queryEmbedding) }))
-    .sort((a, b) => b.score - a.score)
-    .filter((entry) => entry.score > 0);
+    const sparseLists = unique(queryVariants).slice(0, 4).map((variant) =>
+      searchBm25Documents(retrievalIndex, `${variant} ${topicFocus.join(' ')}`.trim(), {
+        classLevel: query.classLevel,
+        subject: normalizedSubject,
+        chapterId: broadenSubjectScope ? undefined : query.chapterId,
+        includeKinds: ['chunk', 'topic'],
+        maxResults: candidatePoolSize,
+      }).map((entry) => ({
+        item: retrievalDocumentToSnippet(entry.doc),
+        score: entry.score * 10,
+      }))
+    );
 
-  let ranked: typeof allScored;
-  if (needsDiversity && allScored.length > topK) {
-    // Guarantee textbook chunks for NCERT grounding; apply MMR to paper/ocr pool for content diversity.
-    const textbookPool = allScored.filter((e) => e.chunk.sourceType === 'textbook');
-    const otherPool = allScored.filter((e) => e.chunk.sourceType !== 'textbook');
-    const textbookQuota = Math.min(Math.max(3, Math.floor(topK * 0.35)), textbookPool.length);
-    const textbookPicked = textbookPool.slice(0, textbookQuota);
-    const otherMMR = applyMMR(otherPool, topK - textbookPicked.length);
-    ranked = [...textbookPicked, ...otherMMR].sort((a, b) => b.score - a.score);
-  } else {
-    ranked = applyMMR(allScored, topK);
-  }
+    const visualList = wantsVisual
+      ? searchBm25Documents(retrievalIndex, `${focusText} ${topicFocus.join(' ')}`.trim(), {
+          classLevel: query.classLevel,
+          subject: normalizedSubject,
+          chapterId: broadenSubjectScope ? undefined : query.chapterId,
+          includeKinds: ['visual', 'chunk'],
+          maxResults: Math.max(8, topK * 2),
+        })
+          .filter((entry) => entry.doc.kind === 'visual' || entry.doc.modalityHints.includes('diagram'))
+          .map((entry) => ({
+            item: retrievalDocumentToSnippet(entry.doc),
+            score: entry.score * 12,
+          }))
+      : [];
 
-  const dedupeSet = new Set<string>();
-  const snippets: ContextSnippet[] = [];
-  for (const entry of ranked) {
-    const sourcePath = canonicalizeSourcePath(entry.chunk.sourcePath);
-    const text = sanitizeChunkText(entry.chunk.text).slice(0, 1600);
-    if (!isHighQualityChunk(text)) continue;
-    const dedupeKey = `${sourcePath}|${text.slice(0, 260).toLowerCase()}`;
-    if (dedupeSet.has(dedupeKey)) continue;
-    dedupeSet.add(dedupeKey);
-    snippets.push({
-      ...entry.chunk,
-      sourcePath,
-      text,
-      chapterId: entry.chunk.chapterId ?? undefined,
-      relevanceScore: Number(entry.score.toFixed(2)),
-    });
-    if (snippets.length >= topK) break;
-  }
+    const fused = reciprocalRankFusion<ContextSnippet>([...denseLists, ...sparseLists, visualList]);
+    const rankedCandidates: Array<{ snippet: ContextSnippet; score: number }> = [];
+    for (const entry of fused) {
+      const snippet = {
+        ...entry.item,
+        sourcePath: canonicalizeSourcePath(entry.item.sourcePath),
+        modalityHints: entry.item.modalityHints ?? inferModalityHints(entry.item.text, normalizeSnippetSourceType(entry.item.sourceType)),
+        topicHints: entry.item.topicHints ?? [],
+      };
+      let score = Math.max(entry.item.relevanceScore || 0, entry.score * 1000);
+      if (topicChunkIds.has(snippet.id)) score += 8;
+      if (wantsVisual && (snippet.sourceType === 'image-ocr' || (snippet.modalityHints ?? []).includes('diagram'))) score += 6;
+      rankedCandidates.push({
+        snippet: {
+          ...snippet,
+          relevanceScore: Number(score.toFixed(2)),
+        },
+        score,
+      });
+    }
 
-  let usedOnDemandFallback = false;
-  if (snippets.length === 0 || snippets.every((s) => s.relevanceScore < 8)) {
-    const onDemand = await getOnDemandSnippet(query);
-    if (onDemand) {
-      onDemand.relevanceScore = Math.max(10, onDemand.relevanceScore);
-      snippets.unshift(onDemand);
-      usedOnDemandFallback = true;
+    let selected = selectDiversifiedSnippets(rankedCandidates);
+    let usedOnDemandFallback = false;
+    let meta = buildRetrievalMeta(selected, query.chapterId, {
+      queryText: focusText,
+        topicFocus,
+        correctiveActions,
+        strategies: unique([
+          localDenseStrategy,
+          'contextual-bm25',
+          'rank-fusion',
+        'topic-hierarchy',
+        wantsVisual ? 'visual-retrieval' : '',
+        broadenSubjectScope ? 'corrective-retrieval' : '',
+      ]).filter(Boolean),
+    })!;
+    if (selected.length === 0 || meta.confidenceLevel === 'low') {
+      const onDemand = await getOnDemandSnippet(query);
+      if (onDemand) {
+        onDemand.relevanceScore = Math.max(12, onDemand.relevanceScore);
+        selected = [onDemand, ...selected].slice(0, topK);
+        usedOnDemandFallback = true;
+        meta = buildRetrievalMeta(selected, query.chapterId, {
+          queryText: focusText,
+          topicFocus,
+          correctiveActions: unique([...correctiveActions, 'on-demand-extraction']),
+          strategies: unique([...(meta?.strategies ?? []), 'on-demand-extraction']),
+        })!;
+      }
+    }
+
+    const rerankPool = selected.slice(0, Math.max(topK * 2, topK));
+    const reranked = shouldUseNvidiaRerank(query)
+      ? await rerankContextSnippets(query, rerankPool).catch(() => rerankPool)
+      : rerankPool;
+    const finalSnippets = reranked.slice(0, topK);
+    const compressed = await compressContextSnippets(finalSnippets, focusText, query);
+    return {
+      snippets: compressed,
+      contextHash: buildContextHash(compressed),
+      usedOnDemandFallback,
+      usedPgvector: false,
+      retrievalMeta: buildRetrievalMeta(compressed, query.chapterId, {
+        queryText: focusText,
+        topicFocus,
+        correctiveActions: meta?.correctiveActions ?? correctiveActions,
+        strategies: meta?.strategies ?? [localDenseStrategy, 'contextual-bm25', 'rank-fusion', 'topic-hierarchy'],
+      }),
+    };
+  };
+
+  const localPrimary = await buildLocalHybridPack([focusText], false);
+  const localCorrective =
+    localPrimary.retrievalMeta?.confidenceLevel === 'low'
+      ? await buildLocalHybridPack(buildCorrectiveQueries(query, expandedQuery, topicFocus), true, [
+          'alternate-query-expansion',
+          'broadened-subject-scope',
+        ])
+      : null;
+  const bestLocal =
+    localCorrective && (localCorrective.retrievalMeta?.confidence ?? 0) > (localPrimary.retrievalMeta?.confidence ?? 0)
+      ? localCorrective
+      : localPrimary;
+
+  const pgSnippets = await getPgvectorSnippets({ ...query, topK });
+  if (pgSnippets && pgSnippets.length > 0) {
+    const rerankPool = pgSnippets.slice(0, Math.max(topK * 2, 12));
+    const reranked = shouldUseNvidiaRerank(query)
+      ? await rerankContextSnippets(query, rerankPool).catch(() => rerankPool)
+      : rerankPool;
+    const selected = reranked.slice(0, topK);
+    const compressed = await compressContextSnippets(selected, focusText, query);
+    const pgPack: ContextPack = {
+      snippets: compressed,
+      contextHash: buildContextHash(compressed),
+      usedOnDemandFallback: false,
+      usedPgvector: true,
+      retrievalMeta: buildRetrievalMeta(compressed, query.chapterId, {
+        queryText: focusText,
+        topicFocus,
+        correctiveActions: [],
+        strategies: unique([
+          'pgvector-dense',
+          'contextual-bm25',
+          'rank-fusion',
+          'topic-hierarchy',
+          wantsVisual ? 'visual-retrieval' : '',
+        ]).filter(Boolean),
+      }),
+    };
+    if ((pgPack.retrievalMeta?.confidence ?? 0) >= (bestLocal.retrievalMeta?.confidence ?? 0)) {
+      return pgPack;
     }
   }
 
-  const clipped = snippets.slice(0, topK);
-  const reranked = shouldUseNvidiaRerank(query)
-    ? await rerankContextSnippets(query, clipped).catch(() => clipped)
-    : clipped;
-
-  return {
-    snippets: reranked,
-    contextHash: buildContextHash(reranked),
-    usedOnDemandFallback,
-    usedPgvector: false,
-    retrievalMeta: buildRetrievalMeta(reranked, query.chapterId),
-  };
+  return bestLocal;
 }

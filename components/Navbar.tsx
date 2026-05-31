@@ -22,7 +22,6 @@ import {
   Zap,
   Upload,
   BarChart2,
-  FlaskConical,
 } from 'lucide-react';
 import clsx from 'clsx';
 import CommandPalette from '@/components/CommandPalette';
@@ -79,8 +78,7 @@ function getNavLinks(role: ActiveRole) {
         { href: '/chapters',   label: 'Chapters',   icon: BookOpen   },
         { href: '/dashboard',  label: 'Dashboard',  icon: Target     },
         { href: '/papers',     label: 'Papers',     icon: FileText   },
-        { href: '/formulas',   label: 'Formulas',   icon: Calculator },
-        { href: '/equations',  label: 'Equations',  icon: FlaskConical },
+        { href: '/formulas',   label: 'Formula Hub', icon: Calculator },
         { href: '/bookmarks',  label: 'Bookmarks',  icon: Bookmark   },
       ];
 
@@ -89,8 +87,7 @@ function getNavLinks(role: ActiveRole) {
         { href: '/',           label: 'Home',           icon: Home     },
         { href: '/teacher',    label: 'Teacher Desk',   icon: Users    },
         { href: '/chapters',   label: 'Chapters',       icon: BookOpen },
-        { href: '/formulas',   label: 'Formulas',       icon: Calculator },
-        { href: '/equations',  label: 'Equations',      icon: FlaskConical },
+        { href: '/formulas',   label: 'Formula Hub',    icon: Calculator },
         { href: '/papers',     label: 'Papers',         icon: FileText },
       ];
 
@@ -100,7 +97,7 @@ function getNavLinks(role: ActiveRole) {
         { href: '/admin',               label: 'Admin Console',  icon: ShieldCheck },
         { href: '/admin/roster-import', label: 'Roster Import',  icon: Upload     },
         { href: '/chapters',            label: 'Chapters',       icon: BookOpen   },
-        { href: '/formulas',            label: 'Formulas',       icon: Calculator },
+        { href: '/formulas',            label: 'Formula Hub',    icon: Calculator },
       ];
 
     case 'developer':
@@ -118,8 +115,7 @@ function getNavLinks(role: ActiveRole) {
       return [
         { href: '/',          label: 'Home',      icon: Home        },
         { href: '/chapters',  label: 'Chapters',  icon: BookOpen    },
-        { href: '/formulas',  label: 'Formulas',  icon: Calculator  },
-        { href: '/equations', label: 'Equations', icon: FlaskConical },
+        { href: '/formulas',  label: 'Formula Hub', icon: Calculator  },
         { href: '/papers',    label: 'Papers',    icon: FileText    },
         { href: '/career',    label: 'Career',    icon: Compass     },
       ];

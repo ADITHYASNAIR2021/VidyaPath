@@ -59,12 +59,70 @@ export function getRequestId(req: Request): string {
   return randomUUID();
 }
 
+const CLIENT_IP_HEADER_NAMES = [
+  'x-forwarded-for',
+  'x-real-ip',
+  'x-vercel-forwarded-for',
+  'cf-connecting-ip',
+  'true-client-ip',
+  'x-client-ip',
+  'fastly-client-ip',
+  'fly-client-ip',
+] as const;
+
+function normalizeIpCandidate(value: string | null | undefined): string | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  let normalized = raw.replace(/^for=/i, '').trim().replace(/^"+|"+$/g, '');
+  if (normalized.startsWith('[') && normalized.endsWith(']')) {
+    normalized = normalized.slice(1, -1);
+  }
+  if (normalized.startsWith('::ffff:')) {
+    normalized = normalized.slice('::ffff:'.length);
+  }
+  if (!normalized || normalized.toLowerCase() === 'unknown') return null;
+  return normalized.slice(0, 120);
+}
+
+function parseForwardedForHeader(value: string | null | undefined): string | null {
+  const first = String(value || '')
+    .split(',')
+    .map((item) => normalizeIpCandidate(item))
+    .find((item): item is string => !!item);
+  return first || null;
+}
+
+function parseForwardedHeader(value: string | null | undefined): string | null {
+  const entries = String(value || '').split(',');
+  for (const entry of entries) {
+    const parts = entry.split(';');
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!/^for=/i.test(trimmed)) continue;
+      const candidate = normalizeIpCandidate(trimmed.slice(4));
+      if (candidate) return candidate;
+    }
+  }
+  return null;
+}
+
 export function getClientIp(req: Request): string {
-  const forwarded = req.headers.get('x-forwarded-for')?.trim();
-  if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown';
-  const realIp = req.headers.get('x-real-ip')?.trim();
-  if (realIp) return realIp;
+  for (const headerName of CLIENT_IP_HEADER_NAMES) {
+    const raw = req.headers.get(headerName);
+    const parsed =
+      headerName === 'x-forwarded-for'
+        ? parseForwardedForHeader(raw)
+        : normalizeIpCandidate(raw);
+    if (parsed) return parsed;
+  }
+  const forwardedHeader = parseForwardedHeader(req.headers.get('forwarded'));
+  if (forwardedHeader) return forwardedHeader;
   return 'unknown';
+}
+
+export function hasResolvedClientIp(ip: string | null | undefined): boolean {
+  const normalized = normalizeIpCandidate(ip);
+  return !!normalized;
 }
 
 export function withRequestIdHeader<T extends Response>(response: T, requestId: string): T {

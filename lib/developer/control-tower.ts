@@ -47,6 +47,35 @@ function asNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function isAiEndpoint(endpoint: string): boolean {
+  return [
+    '/api/ai-tutor',
+    '/api/teacher/ai',
+    '/api/generate-quiz',
+    '/api/generate-flashcards',
+    '/api/chapter-drill',
+    '/api/adaptive-test',
+    '/api/revision-plan',
+    '/api/chapter-diagnose',
+    '/api/chapter-remediate',
+    '/api/paper-evaluate',
+  ].some((prefix) => endpoint.startsWith(prefix));
+}
+
+function labelTaskFromEndpoint(endpoint: string): string {
+  if (endpoint.startsWith('/api/ai-tutor')) return 'chat';
+  if (endpoint.startsWith('/api/teacher/ai')) return 'teacher-copilot';
+  if (endpoint.startsWith('/api/generate-quiz')) return 'quiz-generation';
+  if (endpoint.startsWith('/api/generate-flashcards')) return 'flashcards';
+  if (endpoint.startsWith('/api/chapter-drill')) return 'chapter-drill';
+  if (endpoint.startsWith('/api/adaptive-test')) return 'adaptive-test';
+  if (endpoint.startsWith('/api/revision-plan')) return 'revision-plan';
+  if (endpoint.startsWith('/api/chapter-diagnose')) return 'chapter-diagnose';
+  if (endpoint.startsWith('/api/chapter-remediate')) return 'chapter-remediate';
+  if (endpoint.startsWith('/api/paper-evaluate')) return 'paper-evaluate';
+  return endpoint;
+}
+
 function getTaskList(): Array<
   'chat' | 'flashcards' | 'mcq' | 'adaptive-test' | 'revision-plan' | 'paper-evaluate' | 'chapter-pack' | 'chapter-drill' | 'chapter-diagnose' | 'chapter-remediate'
 > {
@@ -161,6 +190,30 @@ export async function getDeveloperControlTower(windowHours = 24) {
     usageByModel.set(key, bucket);
   }
 
+  const aiUsageRecords = usage.records.filter((record) => isAiEndpoint(record.endpoint));
+  const tokenUsageByTaskMap = new Map<string, { task: string; events: number; totalTokens: number }>();
+  const tokenUsageByRoleMap = new Map<string, { role: string; events: number; totalTokens: number }>();
+  const tokenUsageBySchoolMap = new Map<string, { schoolId: string; events: number; totalTokens: number }>();
+  for (const record of aiUsageRecords) {
+    const task = labelTaskFromEndpoint(record.endpoint);
+    const taskBucket = tokenUsageByTaskMap.get(task) ?? { task, events: 0, totalTokens: 0 };
+    taskBucket.events += 1;
+    taskBucket.totalTokens += Math.max(0, Number(record.totalTokens) || 0);
+    tokenUsageByTaskMap.set(task, taskBucket);
+
+    const roleKey = sanitizeText(record.role || 'unknown', 80) || 'unknown';
+    const roleBucket = tokenUsageByRoleMap.get(roleKey) ?? { role: roleKey, events: 0, totalTokens: 0 };
+    roleBucket.events += 1;
+    roleBucket.totalTokens += Math.max(0, Number(record.totalTokens) || 0);
+    tokenUsageByRoleMap.set(roleKey, roleBucket);
+
+    const schoolKey = sanitizeText(record.schoolId || 'unknown', 90) || 'unknown';
+    const schoolBucket = tokenUsageBySchoolMap.get(schoolKey) ?? { schoolId: schoolKey, events: 0, totalTokens: 0 };
+    schoolBucket.events += 1;
+    schoolBucket.totalTokens += Math.max(0, Number(record.totalTokens) || 0);
+    tokenUsageBySchoolMap.set(schoolKey, schoolBucket);
+  }
+
   const taskAssignments = getTaskList().map((task) => ({
     task,
     aliases: getTaskModelAliases(task),
@@ -263,11 +316,25 @@ export async function getDeveloperControlTower(windowHours = 24) {
       repairRatePercent: 0,
       rejectionRatePercent: 0,
       retrievalMissRatePercent: 0,
+      lowQualityGenerationRatePercent: 0,
       avgGroundednessScore: 0,
       avgCitationCoverageScore: 0,
+      avgRetrievalConfidence: 0,
       hallucinationFlags: 0,
       providerStats: [],
+      modelStats: [],
       taskStats: [],
+      chapterStats: [],
+      chapterCoverageGaps: [],
+      providerTrends: [],
+      routingRecommendations: [],
+      issueStats: {
+        lowQualityEvents: 0,
+        retrievalMisses: 0,
+        hallucinationSignals: 0,
+        rejected: 0,
+        repaired: 0,
+      },
       recentFlags: [],
       feedback: {
         total: 0,
@@ -277,6 +344,11 @@ export async function getDeveloperControlTower(windowHours = 24) {
         hallucinationFlag: 0,
         other: 0,
       },
+    },
+    aiUsageBreakdown: {
+      tokenUsageByTask: [...tokenUsageByTaskMap.values()].sort((a, b) => b.totalTokens - a.totalTokens).slice(0, 12),
+      tokenUsageByRole: [...tokenUsageByRoleMap.values()].sort((a, b) => b.totalTokens - a.totalTokens).slice(0, 8),
+      tokenUsageBySchool: [...tokenUsageBySchoolMap.values()].sort((a, b) => b.totalTokens - a.totalTokens).slice(0, 12),
     },
     observabilityCounters: observability?.counters ?? null,
   };

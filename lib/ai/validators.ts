@@ -347,9 +347,11 @@ function normalizeQuestionRagMeta(value: unknown): MCQRagMeta | undefined {
     ? Array.from(
         new Set(
           record.sourceMix
-            .filter((entry): entry is 'paper' | 'textbook' => entry === 'paper' || entry === 'textbook')
+            .filter((entry): entry is 'paper' | 'textbook' | 'image-ocr' =>
+              entry === 'paper' || entry === 'textbook' || entry === 'image-ocr'
+            )
         )
-      ).slice(0, 2)
+      ).slice(0, 3)
     : [];
   const qualityScoreValue = Number(record.qualityScore);
   const qualityScore = Number.isFinite(qualityScoreValue)

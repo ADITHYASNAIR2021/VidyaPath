@@ -4,9 +4,12 @@ import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getChapterById } from '@/lib/data';
 import { getContextPack } from '@/lib/ai/context-retriever';
+import { computeWeightedTemperature } from '@/lib/ai/generation-controls';
 import { generateTaskJson } from '@/lib/ai/generator';
+import { getRecentQuestionHistory, prioritizeUnseenQuestions, recordGeneratedQuestions } from '@/lib/ai/question-history';
+import { computeRecommendedTopK } from '@/lib/ai/retrieval-enhancements';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
-import { isMCQArray, normalizeMCQs, type MCQItem } from '@/lib/ai/validators';
+import { isMCQArray, normalizeChapterCitations, normalizeMCQs, type MCQItem } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
 import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
@@ -165,9 +168,15 @@ export async function POST(req: Request) {
     const subject = chapter?.subject ?? incomingSubject;
     const chapterTitle = chapter?.title ?? incomingChapterTitle;
     const classLevel = chapter?.classLevel ?? (typeof body.classLevel === 'number' ? body.classLevel : 12);
+    const questionCount = Math.min(30, Math.max(3, Number(body.questionCount) || 10));
     const pyq = chapterId
       ? (await getGroundedPYQData(chapterId)) ?? getPYQData(chapterId)
       : null;
+    const recentHistory = await getRecentQuestionHistory({
+      authUserId: context?.authUserId,
+      chapterId: chapter?.id ?? (chapterId || undefined),
+      limit: 10,
+    });
 
     const contextPack = await getContextPack({
       task: 'mcq',
@@ -176,14 +185,13 @@ export async function POST(req: Request) {
       chapterId: chapter?.id ?? (chapterId || undefined),
       chapterTopics: chapter?.topics ?? [],
       query: `${chapterTitle} ${subject} ${pyq?.importantTopics.join(' ') ?? ''}`.trim(),
-      topK: 8,
+      topK: computeRecommendedTopK(questionCount),
     });
 
     const pyqContext = pyq
       ? `PYQ signal: avg marks ${pyq.avgMarks}, years ${[...pyq.yearsAsked].sort((a, b) => b - a).slice(0, 8).join(', ')}, top topics ${pyq.importantTopics.join(', ')}.`
       : 'No PYQ signal available.';
 
-    const questionCount = Math.min(30, Math.max(3, Number(body.questionCount) || 10));
     const variation = buildVariationProfile({
       task: 'mcq',
       contextHash: contextPack.contextHash,
@@ -201,13 +209,21 @@ export async function POST(req: Request) {
 }]
 Where "answer" is the 0-based index of the correct option.`;
 
-    const chapterTopicList = chapter?.topics?.slice(0, 12).join(', ') ?? '';
+    const chapterTopicList = chapter?.topics?.join(', ') ?? '';
     const ctxTextbook = contextPack.snippets.filter((s) => s.sourceType === 'textbook').length;
     const ctxPaper = contextPack.snippets.filter((s) => s.sourceType !== 'textbook').length;
+    const recentlyTestedBlock = recentHistory.recentQuestions.length > 0
+      ? `Recently tested stems to avoid repeating too closely: ${recentHistory.recentQuestions.slice(0, 6).join(' | ')}`
+      : '';
+    const performanceBlock = recentHistory.accuracyRate !== null
+      ? `Student history for this chapter: ${Math.round(recentHistory.accuracyRate * 100)}% accuracy.${recentHistory.weakQuestions.length > 0 ? ` Prior weak stems: ${recentHistory.weakQuestions.join(' | ')}` : ''}`
+      : '';
     const userPrompt = `Generate ${questionCount} CBSE board-style MCQs for Class ${classLevel} ${subject}, chapter "${chapterTitle}".
 Difficulty: ${difficulty}.
 ${chapterTopicList ? `Chapter topics: ${chapterTopicList}` : ''}
 ${pyqContext}
+${performanceBlock}
+${recentlyTestedBlock}
 Context available: ${ctxTextbook} NCERT textbook + ${ctxPaper} board-paper snippets in system message.
 ${nccontext ? `Additional context notes:\n"""\n${nccontext}\n"""` : ''}
 
@@ -246,9 +262,14 @@ QUALITY RULES:
 - Cover ALL major topics of the chapter across the question set
 - For PYQ-heavy topics, frame questions similar to how they appear in board exams
 
-${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY a valid JSON array. No markdown fences, no commentary, no citation tokens like [S1].`,
-      userPrompt: fewShotBlock ? `${userPrompt}\n\n${fewShotBlock}` : userPrompt,
-      temperature: 0.15,
+${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock}\n` : ''}Output ONLY a valid JSON array. No markdown fences, no commentary, no citation tokens like [S1].`,
+      userPrompt,
+      temperature: computeWeightedTemperature({
+        recall: 30,
+        application: 35,
+        analysis: 20,
+        caseBased: 15,
+      }),
       maxOutputTokens: 4000,
       validate: isMCQArray,
     });
@@ -261,7 +282,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY a valid JSON array. 
     }));
 
     const exactQuestions = ensureExactQuizCount(
-      data,
+      prioritizeUnseenQuestions(data, recentHistory.recentHashes),
       chapterFallbackQuizzes,
       questionCount,
       subject,
@@ -294,11 +315,18 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY a valid JSON array. 
       chapterTitle,
       chapter?.topics ?? []
     );
-    const annotated = annotateQuestionsWithRagMeta(hardenedQuestions, {
+    const orderedQuestions = prioritizeUnseenQuestions(hardenedQuestions, recentHistory.recentHashes).slice(0, questionCount);
+    const annotated = annotateQuestionsWithRagMeta(orderedQuestions, {
       chapterTitle,
       chapterTopics: chapter?.topics ?? [],
       pyqTopics: pyq?.importantTopics ?? [],
       contextSnippets: contextPack.snippets,
+    });
+    await recordGeneratedQuestions({
+      authUserId: context?.authUserId,
+      chapterId: chapter?.id ?? (chapterId || undefined),
+      subject,
+      questions: annotated,
     });
     await logAiUsage({
       context,
@@ -324,6 +352,9 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY a valid JSON array. 
           usedOnDemandFallback: contextPack.usedOnDemandFallback,
           retrieval: contextPack.retrievalMeta,
           strongGroundedCount: annotated.filter(isQuestionStronglyGrounded).length,
+          sourceCitations: normalizeChapterCitations(
+            contextPack.snippets.map((snippet) => ({ sourcePath: snippet.sourcePath, year: snippet.year }))
+          ),
         },
       },
     });

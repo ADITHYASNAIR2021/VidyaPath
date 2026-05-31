@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generatedAt": "2026-04-17T19:11:45.515227Z",
+  "generatedAt": "2026-05-11T17:45:13.247389Z",
   "datasetRoot": "D:/VidyaPath/dataset/ncert_textbooks",
   "chunkStrategy": "semantic-structural",
   "targetWords": 240,
@@ -8,6 +8,10 @@
   "minWords": 70,
   "totalPdfsScanned": 506,
   "totalChunks": 7593,
+  "fitzAvailable": true,
+  "saveImagesEnabled": false,
+  "ocrEnabled": false,
+  "imageAssets": 0,
   "languageCounts": {
     "en": 441,
     "hi": 3,

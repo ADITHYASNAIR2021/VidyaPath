@@ -10,7 +10,7 @@ import {
   clearSupabaseSessionCookies,
   signInWithPassword,
 } from '@/lib/auth/supabase-auth';
-import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId, hasResolvedClientIp } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { studentLoginSchema } from '@/lib/schemas/auth';
 import {
@@ -75,20 +75,23 @@ export async function POST(req: Request) {
     });
   }
 
-  const ipLimit = await checkRateLimit({
-    key: buildRateLimitKey('auth:student:ip', [ip]),
-    windowSeconds: 60,
-    maxRequests: 20,
-    blockSeconds: 180,
-  });
-  if (!ipLimit.allowed) {
-    return errorJson({
-      requestId,
-      errorCode: 'rate-limit-exceeded',
-      message: 'Too many login attempts. Please wait before trying again.',
-      status: 429,
-      hint: `Retry after ${ipLimit.retryAfterSeconds}s`,
+  if (hasResolvedClientIp(ip)) {
+    const ipLimit = await checkRateLimit({
+      key: buildRateLimitKey('auth:student:ip', [ip]),
+      windowSeconds: 60,
+      maxRequests: 20,
+      blockSeconds: 180,
+      failOpen: true,
     });
+    if (!ipLimit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many login attempts. Please wait before trying again.',
+        status: 429,
+        hint: `Retry after ${ipLimit.retryAfterSeconds}s`,
+      });
+    }
   }
 
   const body = bodyResult.value;
@@ -117,6 +120,7 @@ export async function POST(req: Request) {
     windowSeconds: 60,
     maxRequests: 8,
     blockSeconds: 300,
+    failOpen: true,
   });
   if (!identityLimit.allowed) {
     return errorJson({

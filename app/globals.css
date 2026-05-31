@@ -432,9 +432,10 @@ h1, h2, h3 {
 
 .katex-display {
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 0.2rem;
+  padding-top: 0.15rem;
+  padding-bottom: 0.35rem;
   max-width: 100%;
 }
 
@@ -444,16 +445,17 @@ h1, h2, h3 {
 
 .equation-scroll {
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
   touch-action: auto;
   max-width: 100%;
 }
 
 .equation-scroll .katex-display {
-  margin: 0.2rem 0;
+  margin: 0;
   min-width: max-content;
-  padding-bottom: 0.2rem;
+  padding-top: 0.2rem;
+  padding-bottom: 0.35rem;
 }
 
 .equation-scroll .katex-display > .katex {
@@ -462,7 +464,7 @@ h1, h2, h3 {
 
 .equation-mobile-wrap {
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
   touch-action: auto;
   max-width: 100%;
@@ -470,6 +472,28 @@ h1, h2, h3 {
 
 .equation-mobile-wrap > * {
   min-width: max-content;
+}
+
+.equation-mobile-wrap .katex-display {
+  margin: 0;
+  padding-top: 0.2rem;
+  padding-bottom: 0.35rem;
+}
+
+@media (max-width: 640px) {
+  .katex-display {
+    margin: 0.15rem 0;
+  }
+
+  .equation-scroll .katex-display > .katex,
+  .equation-mobile-wrap .katex-display > .katex {
+    font-size: 0.98em;
+  }
+
+  .equation-scroll,
+  .equation-mobile-wrap {
+    scrollbar-width: thin;
+  }
 }
 
 :focus-visible {

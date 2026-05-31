@@ -8,6 +8,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
+  attachActiveRoleCookie,
   attachDeveloperSessionCookie,
   clearAllRoleSessionCookies,
   createDeveloperSessionToken,
@@ -18,12 +19,13 @@ import {
   clearSupabaseSessionCookies,
   signInWithPassword,
 } from '@/lib/auth/supabase-auth';
-import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
+import { dataJson, errorJson, getClientIp, getRequestId, hasResolvedClientIp } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { developerLoginSchema } from '@/lib/schemas/auth';
 import { resolveRoleContextByAuthUserId } from '@/lib/platform-rbac-db';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { recordAuditEvent } from '@/lib/security/audit';
+import { normalizeDeveloperLoginIdentifier } from '@/lib/auth/developer-login';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,20 +78,23 @@ export async function POST(req: Request) {
   }
 
   const ip = getClientIp(req);
-  const rateLimit = await checkRateLimit({
-    key: buildRateLimitKey('auth:developer-login', [ip]),
-    windowSeconds: 60,
-    maxRequests: 8,
-    blockSeconds: 180,
-  });
-  if (!rateLimit.allowed) {
-    return errorJson({
-      requestId,
-      errorCode: 'rate-limit-exceeded',
-      message: 'Too many login attempts. Try again later.',
-      hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
-      status: 429,
+  if (hasResolvedClientIp(ip)) {
+    const rateLimit = await checkRateLimit({
+      key: buildRateLimitKey('auth:developer-login', [ip]),
+      windowSeconds: 60,
+      maxRequests: 8,
+      blockSeconds: 180,
+      failOpen: true,
     });
+    if (!rateLimit.allowed) {
+      return errorJson({
+        requestId,
+        errorCode: 'rate-limit-exceeded',
+        message: 'Too many login attempts. Try again later.',
+        hint: `Retry after ${rateLimit.retryAfterSeconds}s`,
+        status: 429,
+      });
+    }
   }
 
   const bodyResult = await parseAndValidateJsonBody(req, 4 * 1024, developerLoginSchema);
@@ -105,7 +110,7 @@ export async function POST(req: Request) {
   const body = bodyResult.value;
   const username = typeof body.username === 'string' ? body.username.trim() : '';
   const password = typeof body.password === 'string' ? body.password.trim() : '';
-  const normalizedUsername = username.toLowerCase();
+  const normalizedUsername = normalizeDeveloperLoginIdentifier(username);
 
   if (!username || !password) {
     return errorJson({
@@ -151,6 +156,7 @@ export async function POST(req: Request) {
         clearSupabaseSessionCookies(response);
         attachSupabaseSessionCookies(response, authSession, 'developer');
         attachDeveloperSessionCookie(response, token);
+        attachActiveRoleCookie(response, 'developer');
         await recordAuditEvent({
           requestId,
           endpoint: '/api/developer/session/login',
@@ -168,7 +174,10 @@ export async function POST(req: Request) {
     }
   }
 
-  const usernameMatch = safeEqual(username, credentials.username);
+  const usernameMatch = safeEqual(
+    normalizedUsername,
+    normalizeDeveloperLoginIdentifier(credentials.username)
+  );
   const passwordMatch = safeEqual(password, credentials.password);
 
   if (!usernameMatch || !passwordMatch) {
@@ -200,6 +209,7 @@ export async function POST(req: Request) {
   clearAllRoleSessionCookies(response);
   clearSupabaseSessionCookies(response);
   attachDeveloperSessionCookie(response, token);
+  attachActiveRoleCookie(response, 'developer');
 
   await recordAuditEvent({
     requestId,

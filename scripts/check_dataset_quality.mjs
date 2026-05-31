@@ -8,6 +8,8 @@ const textbookRoot = path.join(root, 'dataset', 'ncert_textbooks');
 const hfIndexPath = path.join(root, 'lib', 'hfPaperIndex.json');
 const chapterIndexPath = path.join(root, 'lib', 'context', 'chapter_index.json');
 const textbookChunksPath = path.join(root, 'lib', 'context', 'textbook_chunks.jsonl');
+const paperImageManifestPath = path.join(root, 'lib', 'context', 'paper_image_manifest.json');
+const textbookImageManifestPath = path.join(root, 'lib', 'context', 'textbook_image_manifest.json');
 
 function walkFiles(dir, out = []) {
   if (!fs.existsSync(dir)) return out;
@@ -61,6 +63,14 @@ function main() {
   const textbookChunkLines = fs.existsSync(textbookChunksPath)
     ? fs.readFileSync(textbookChunksPath, 'utf8').split('\n').map((line) => line.trim()).filter(Boolean).length
     : 0;
+  const paperImageManifest = fs.existsSync(paperImageManifestPath)
+    ? JSON.parse(fs.readFileSync(paperImageManifestPath, 'utf8'))
+    : {};
+  const textbookImageManifest = fs.existsSync(textbookImageManifestPath)
+    ? JSON.parse(fs.readFileSync(textbookImageManifestPath, 'utf8'))
+    : {};
+  const paperImages = Array.isArray(paperImageManifest?.images) ? paperImageManifest.images.length : 0;
+  const textbookImages = Array.isArray(textbookImageManifest?.images) ? textbookImageManifest.images.length : 0;
 
   console.log(`[quality] metadata.total=${metadata.length}`);
   console.log(`[quality] metadata.unknown=${unknownMetadata} (${pct(unknownMetadata, metadata.length)}%)`);
@@ -70,6 +80,8 @@ function main() {
   console.log(`[quality] chapterCoverage=${chapterCoveragePct}%`);
   console.log(`[quality] ncertTextbooks.pdf=${textbookFiles.length}`);
   console.log(`[quality] ncertTextbooks.chunks=${textbookChunkLines}`);
+  console.log(`[quality] visualAssets.paper=${paperImages}`);
+  console.log(`[quality] visualAssets.textbook=${textbookImages}`);
 
   let fail = false;
   if (commerceKeys === 0) {
@@ -90,6 +102,14 @@ function main() {
   }
   if (textbookFiles.length > 0 && textbookChunkLines === 0) {
     console.error('[quality] FAIL: NCERT textbook PDFs exist but textbook_chunks.jsonl is empty/missing.');
+    fail = true;
+  }
+  if (paperImageManifest?.saveImagesEnabled && paperImages === 0) {
+    console.error('[quality] FAIL: paper image extraction was enabled but produced 0 saved assets.');
+    fail = true;
+  }
+  if (textbookImageManifest?.saveImagesEnabled && textbookImages === 0) {
+    console.error('[quality] FAIL: textbook image extraction was enabled but produced 0 saved assets.');
     fail = true;
   }
 

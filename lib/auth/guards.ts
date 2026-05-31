@@ -259,6 +259,7 @@ export async function getStudentSessionFromRequestCookies() {
 
 export async function getDeveloperSessionFromRequestCookies(): Promise<{
   authUserId?: string;
+  username?: string;
   issuedAt?: number;
   expiresAt?: number;
 } | null> {
@@ -279,6 +280,15 @@ export async function getDeveloperSessionFromRequestCookies(): Promise<{
         expiresAt: adminContext.expiresAt,
       };
     }
+  }
+  const developerToken = (await cookies()).get(DEVELOPER_SESSION_COOKIE)?.value;
+  const developer = parseDeveloperSession(developerToken);
+  if (developer) {
+    return {
+      username: developer.username,
+      issuedAt: developer.issuedAt,
+      expiresAt: developer.expiresAt,
+    };
   }
   return null;
 }

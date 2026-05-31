@@ -13,6 +13,7 @@ export async function GET(req: Request) {
       data: {
         role: 'developer',
         authUserId: session.authUserId,
+        username: session.username,
         issuedAt: session.issuedAt,
         expiresAt: session.expiresAt,
       },

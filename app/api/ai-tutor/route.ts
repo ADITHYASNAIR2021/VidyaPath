@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
-import { getContextPack } from '@/lib/ai/context-retriever';
-import { generateTaskText, type ChatMessage } from '@/lib/ai/generator';
+import { getContextPack, type ContextPack } from '@/lib/ai/context-retriever';
+import { buildEvidenceBundle, buildStudentPracticeSignal } from '@/lib/ai/evidence-ux';
+import { generateTaskJson, type ChatMessage } from '@/lib/ai/generator';
+import { getRecentQuestionHistory } from '@/lib/ai/question-history';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { trackAiQuestion } from '@/lib/analytics-store';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
@@ -22,21 +25,35 @@ interface ChapterContext {
   topics: string[];
 }
 
+const tutorResponseSchema = z.object({
+  offTopic: z.boolean().default(false),
+  offTopicMessage: z.string().trim().max(320).default(''),
+  answer: z.string().trim().min(1).max(8000),
+  whyThisAnswer: z.array(z.string().trim().min(1).max(260)).min(1).max(4),
+  diagnoseMistake: z.string().trim().min(1).max(500),
+  explanation: z.string().trim().min(1).max(2000),
+  easierQuestion: z.string().trim().min(1).max(500),
+  similarQuestion: z.string().trim().min(1).max(500),
+  examQuestion: z.string().trim().min(1).max(700),
+  revisitPlan: z.string().trim().min(1).max(400),
+});
+
+type TutorResponse = z.infer<typeof tutorResponseSchema>;
+
 function buildCurriculum(): string {
   const lines: string[] = [];
-
   for (const cls of [10, 12] as const) {
     const chapters = ALL_CHAPTERS.filter((chapter) => chapter.classLevel === cls);
-    lines.push(`\nCLASS ${cls} (${chapters.length} chapters):`);
+    lines.push(`CLASS ${cls} (${chapters.length} chapters):`);
     for (const chapter of chapters) {
       const relevance = chapter.examRelevance?.join('/') ?? 'Board';
       lines.push(
         `  Ch${chapter.chapterNumber} [${chapter.subject}] ${chapter.title} - ${chapter.marks}M [${relevance}] | Topics: ${chapter.topics.slice(0, 5).join(', ')}`
       );
     }
+    lines.push('');
   }
-
-  return lines.join('\n');
+  return lines.join('\n').trim();
 }
 
 const CURRICULUM = buildCurriculum();
@@ -50,26 +67,29 @@ You only answer:
 - CBSE board prep, marking schemes, PYQ trends, study plans
 - JEE/NEET foundational relevance for these same topics
 
-If the user asks anything outside scope, reply in this exact format:
-OFFTOPIC: <one warm sentence saying what you can help with>
-
 CBSE CURRICULUM CONTEXT
 ${CURRICULUM}
 
-HOW TO ANSWER
-- Keep responses concise, structured, and exam-focused.
-- Mention chapter/topic mapping when relevant.
-- For numericals: formula, givens, substitution, steps, final answer with unit.
-- For theory: one-line definition, key points, and a board-tip line.
-- For MCQs: include 4 options and a short explanation.
-- For Class 12 topics, mention JEE/NEET relevance briefly when useful.
-- If you use retrieved paper context, include source tags like [S1], [S2].
+HOW TO TEACH
+- Stay concise, exam-focused, and supportive.
+- If the answer is a numerical, show formula, substitution, and final answer with unit.
+- If the answer is theory, define the key idea and highlight the board-writing points.
+- Use source tags like [S1], [S2] inside answer text and explanation text when grounded context is used.
+- "whyThisAnswer" must explain the evidence used or the chapter cue used.
+- "diagnoseMistake" should infer the student's likely confusion, not blame them.
+- "easierQuestion" must be easier than the user ask.
+- "similarQuestion" must stay on the same concept.
+- "examQuestion" must feel board-style or 3-5 mark ready.
+- "revisitPlan" must say when or why the student should return if they are still weak.
 
-STYLE
-- Warm, clear, never condescending.
-- Use bold for key terms/formulas.
-- Prefer short sections over long paragraphs.
-- End with one helpful next-practice suggestion when useful.`;
+OFF-TOPIC HANDLING
+- If the user is outside scope, set offTopic=true.
+- In that case: offTopicMessage should be one warm sentence, answer should still be a short redirect to what you can help with, and the teaching fields should stay useful but brief.
+
+OUTPUT
+- Return only valid JSON.
+- No markdown fences.
+- No prose before or after the JSON object.`;
 
 function normalizeMessages(input: unknown): ChatMessage[] {
   if (!Array.isArray(input)) return [];
@@ -126,6 +146,16 @@ function fallbackError(error: unknown, requestId?: string): NextResponse {
   });
 }
 
+function buildChapterPin(chapterContext: ChapterContext | undefined, pyq: Awaited<ReturnType<typeof getGroundedPYQData>> | ReturnType<typeof getPYQData>) {
+  if (!chapterContext) return '';
+  return `CURRENT CHAPTER
+Chapter: ${chapterContext.title}
+Subject: ${chapterContext.subject} | Class: ${chapterContext.classLevel}
+Topics: ${chapterContext.topics.join(', ')}
+${pyq ? `PYQ signal: asked in ${pyq.yearsAsked.length} years (${[...pyq.yearsAsked].sort((a, b) => b - a).slice(0, 6).join(', ')}), avg marks ${pyq.avgMarks}, high-yield topics: ${pyq.importantTopics.join(', ')}.` : ''}
+Prioritize this chapter when the question is aligned with it.`;
+}
+
 export async function POST(req: NextRequest) {
   const requestId = getRequestId(req);
   try {
@@ -158,12 +188,13 @@ export async function POST(req: NextRequest) {
         issues: bodyResult.issues,
       });
     }
+
     const payload = bodyResult.value as Record<string, unknown>;
     const tokenBudget = await checkAiTokenBudget({
       context,
       endpoint: '/api/ai-tutor',
       projectedInputText: JSON.stringify(payload),
-      projectedOutputTokens: 2048,
+      projectedOutputTokens: 2600,
     });
     if (!tokenBudget.allowed) {
       return errorJson({
@@ -174,9 +205,9 @@ export async function POST(req: NextRequest) {
         hint: `Retry after ${tokenBudget.retryAfterSeconds ?? 300}s`,
       });
     }
+
     const messages = normalizeMessages(payload.messages);
     const chapterContext = normalizeChapterContext(payload.chapterContext);
-
     if (messages.length === 0) {
       return errorJson({
         requestId,
@@ -190,7 +221,7 @@ export async function POST(req: NextRequest) {
     const pyq = chapterContext?.chapterId
       ? (await getGroundedPYQData(chapterContext.chapterId)) ?? getPYQData(chapterContext.chapterId)
       : null;
-    const contextPack = chapterContext
+    const contextPack: ContextPack = chapterContext
       ? await getContextPack({
           task: 'chat',
           classLevel: chapterContext.classLevel,
@@ -200,19 +231,37 @@ export async function POST(req: NextRequest) {
           query: lastUserMessage,
           topK: 4,
         })
-      : { snippets: [], contextHash: 'no-context', usedOnDemandFallback: false };
+      : {
+          snippets: [],
+          contextHash: 'no-context',
+          usedOnDemandFallback: false,
+          usedPgvector: false,
+        };
 
-    const chapterPin = chapterContext
-      ? `\n==============================================\nCURRENT CHAPTER (student is studying this now)\n==============================================\nChapter: ${chapterContext.title}\nSubject: ${chapterContext.subject} | Class: ${chapterContext.classLevel}\nTopics: ${chapterContext.topics.join(', ')}\n${
-          pyq
-            ? `PYQ signal: asked in ${pyq.yearsAsked.length} years (${[...pyq.yearsAsked].sort((a, b) => b - a).slice(0, 6).join(', ')}), avg marks ${pyq.avgMarks}, high-yield topics: ${pyq.importantTopics.join(', ')}.`
-            : ''
-        }\nPrioritize this chapter when the question is aligned with it.`
-      : '';
+    const recentHistory =
+      context?.role === 'student' && chapterContext?.chapterId
+        ? await getRecentQuestionHistory({
+            authUserId: context.authUserId,
+            chapterId: chapterContext.chapterId,
+            limit: 8,
+          })
+        : { recentHashes: [], recentQuestions: [], attempted: 0, accuracyRate: null, weakQuestions: [] };
+    const practiceSignal = buildStudentPracticeSignal({
+      attempted: recentHistory.attempted,
+      accuracyRate: recentHistory.accuracyRate,
+      weakQuestions: recentHistory.weakQuestions,
+    });
+    const chapterPin = buildChapterPin(chapterContext, pyq);
+    const fullSystemPrompt = `${SYSTEM_PROMPT}
 
-    const fullSystemPrompt = `${SYSTEM_PROMPT}${chapterPin}`;
+${chapterPin ? `${chapterPin}\n` : ''}STUDENT PRACTICE SIGNAL
+${practiceSignal.summary}
+Performance band: ${practiceSignal.performanceBand}
+Review urgency: ${practiceSignal.reviewUrgency}
+Recent weak questions: ${recentHistory.weakQuestions.slice(0, 3).join(' | ') || 'none'}
+Recent asked questions: ${recentHistory.recentQuestions.slice(0, 3).join(' | ') || 'none'}`;
 
-    const generated = await generateTaskText({
+    const generated = await generateTaskJson<TutorResponse>({
       task: 'chat',
       contextHash: contextPack.contextHash,
       contextSnippets: contextPack.snippets,
@@ -221,29 +270,49 @@ export async function POST(req: NextRequest) {
       systemPrompt: fullSystemPrompt,
       userPrompt: lastUserMessage,
       messages,
-      temperature: 0.4,
-      maxOutputTokens: 2048,
+      temperature: 0.3,
+      maxOutputTokens: 2600,
+      validate: (value): value is TutorResponse => tutorResponseSchema.safeParse(value).success,
+      qualityMeta: {
+        schoolId: context?.schoolId,
+        authUserId: context?.authUserId,
+        role: context?.role,
+        subject: chapterContext?.subject,
+        chapterId: chapterContext?.chapterId,
+        endpoint: '/api/ai-tutor',
+        requestId,
+        responseId: `chat-${requestId}`,
+        promptVersion: 'vidyai-answer-v2',
+        routingKey: 'chat-evidence-first',
+        retrievalConfidence: contextPack.retrievalMeta?.confidence,
+        retrievalConfidenceLevel: contextPack.retrievalMeta?.confidenceLevel,
+        retrievalAvgRelevance: contextPack.retrievalMeta?.averageRelevance,
+      },
     });
 
-    const rawMessage = generated.text.trim();
-    const isOffTopic = rawMessage.startsWith('OFFTOPIC:');
-    const message = isOffTopic ? rawMessage.replace(/^OFFTOPIC:\s*/i, '').trim() : rawMessage;
+    const evidence = buildEvidenceBundle({ contextPack, chapterContext });
+    const tutor = generated.data;
+    const isOffTopic = tutor.offTopic === true;
+    const message = isOffTopic ? tutor.offTopicMessage || tutor.answer : tutor.answer;
+
     if (chapterContext?.chapterId) {
       trackAiQuestion(chapterContext.chapterId).catch(() => {
         // best-effort analytics only
       });
     }
+
     await logAiUsage({
       context,
       endpoint: '/api/ai-tutor',
-      provider: generated.provider,
-      model: generated.model,
-      promptTokens: generated.usage?.promptTokens,
-      completionTokens: generated.usage?.completionTokens,
-      totalTokens: generated.usage?.totalTokens,
+      provider: generated.result.provider,
+      model: generated.result.model,
+      promptTokens: generated.result.usage?.promptTokens,
+      completionTokens: generated.result.usage?.completionTokens,
+      totalTokens: generated.result.usage?.totalTokens,
       requestId,
-      estimated: !generated.usage,
+      estimated: !generated.result.usage,
     });
+
     logServerEvent({
       event: 'ai-tutor-response',
       requestId,
@@ -253,18 +322,49 @@ export async function POST(req: NextRequest) {
       statusCode: 200,
     });
 
-    const sources = contextPack.snippets.slice(0, 4).map((s) => ({
-      sourcePath: s.sourcePath,
-      year: s.year,
-      paperType: s.paperType,
-      sourceType: s.sourceType,
-      chapterId: s.chapterId,
-      relevanceScore: s.relevanceScore,
+    const sources = evidence.textbookSnippets.map((source) => ({
+      sourcePath: source.sourcePath,
+      chapterId: source.chapterId,
+      page: source.page,
+      locatorHint: source.locatorHint,
+      sourceType: source.sourceType,
+      relevanceScore: source.relevanceScore,
+      snippet: source.snippet,
+      sourceLabel: source.sourceLabel,
     }));
 
     return dataJson({
       requestId,
-      data: { message, isOffTopic, sources },
+      data: {
+        responseId: `chat-${requestId}`,
+        message,
+        isOffTopic,
+        sources,
+        evidence: {
+          ...evidence,
+          whyThisAnswer: tutor.whyThisAnswer,
+        },
+        teaching: {
+          diagnoseMistake: tutor.diagnoseMistake,
+          explanation: tutor.explanation,
+          easierQuestion: tutor.easierQuestion,
+          similarQuestion: tutor.similarQuestion,
+          examQuestion: tutor.examQuestion,
+          revisitPlan: tutor.revisitPlan,
+          practiceSignal,
+        },
+        quality: {
+          provider: generated.result.provider,
+          model: generated.result.model,
+          latencyMs: generated.result.latencyMs,
+          groundednessScore: generated.quality.groundednessScore,
+          citationCoverageScore: generated.quality.citationCoverageScore,
+          retrievalMiss: generated.quality.retrievalMiss,
+          repaired: generated.quality.repaired,
+          retrievalConfidence: evidence.confidence.score,
+          retrievalConfidenceLevel: evidence.confidence.level,
+        },
+      },
     });
   } catch (error) {
     logServerEvent({

@@ -14,31 +14,31 @@ Also supports single-file extraction mode for on-demand fallback:
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import logging
 import os
 import re
 import sys
 import time
-import urllib.request
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+from pdf_visual_pipeline import (
+    FITZ_AVAILABLE,
+    detect_visual_pages as detect_visual_candidates,
+    infer_visual_tags,
+    ocr_page_via_nvidia as ocr_visual_page,
+    render_page_as_base64 as render_visual_page_as_base64,
+    save_rendered_page_image as save_visual_image,
+)
+
 try:
     from pypdf import PdfReader
 except ImportError:  # pragma: no cover
     PdfReader = None
-
-try:
-    import fitz  # PyMuPDF — optional: pip install pymupdf
-    FITZ_AVAILABLE = True
-except ImportError:
-    fitz = None  # type: ignore[assignment]
-    FITZ_AVAILABLE = False
 
 warnings.filterwarnings("ignore", message=r".*Multiple definitions in dictionary.*")
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -48,8 +48,8 @@ CURRENT_YEAR = 2026
 MIN_CHUNK_WORDS = 80
 DEFAULT_CHUNK_WORDS = 260
 DEFAULT_CHUNK_OVERLAP = 48
-MIN_ENGLISH_WORDS_PER_CHUNK = 28
-MIN_ENGLISH_RATIO = 0.7
+MIN_ENGLISH_WORDS_PER_CHUNK = 20
+MIN_ENGLISH_RATIO = 0.52
 
 CONTROL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]+")
 
@@ -128,20 +128,27 @@ def tokenize(text: str) -> Set[str]:
 def clean_text(text: str) -> str:
     text = CONTROL_RE.sub(" ", text.replace("\x00", " "))
     text = text.replace("Rationalised 2023-24", " ")
-    # Remove common exam-instruction boilerplate that hurts chapter mapping quality
+    text = text.replace("Reprint 2024-25", " ")
+    # Remove exam-instruction boilerplate — cap match at 1800 chars to avoid eating question content
+    # when no Section/Q1 follows (e.g. boilerplate at end of extracted page text).
     text = re.sub(
-        r"\b(?:General Instructions|Time allowed|Maximum Marks)\b.*?(?=(Section\s+[A-E]|Q\.?\s*1|$))",
+        r"\b(?:General Instructions|Time allowed|Maximum Marks)\b.{0,1800}?(?=(Section\s+[A-E]|Q\.?\s*1)|(?=\Z))",
         " ",
         text,
         flags=re.I | re.S,
     )
     text = re.sub(
-        r"\b(?:Read the following instructions carefully)\b.*?(?=(Section\s+[A-E]|Q\.?\s*1|$))",
+        r"\b(?:Read the following instructions carefully)\b.{0,1800}?(?=(Section\s+[A-E]|Q\.?\s*1)|(?=\Z))",
         " ",
         text,
         flags=re.I | re.S,
     )
-    text = re.sub(r"Candidates must write the Q\.P\. Code.*?(?=(Section\s+[A-E]|Q\.?\s*1|$))", " ", text, flags=re.I | re.S)
+    text = re.sub(
+        r"Candidates must write the Q\.P\. Code.{0,600}?(?=(Section\s+[A-E]|Q\.?\s*1)|(?=\Z))",
+        " ",
+        text,
+        flags=re.I | re.S,
+    )
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -376,11 +383,16 @@ def extract_pdf_text(pdf_path: Path, max_pages: int) -> str:
         for idx, page in enumerate(reader.pages):
             if idx >= max_pages:
                 break
-            page_text = page.extract_text() or ""
+            try:
+                page_text = page.extract_text() or ""
+            except Exception as page_exc:
+                print(f"[WARN] {pdf_path.name} page {idx}: {page_exc}", file=sys.stderr)
+                page_text = ""
             if page_text.strip():
                 out.append(page_text)
         return clean_text("\n".join(out))
-    except Exception:
+    except Exception as exc:
+        print(f"[ERR ] extract_pdf_text({pdf_path.name}): {exc}", file=sys.stderr)
         return ""
 
 
@@ -413,6 +425,30 @@ def _split_sentences(text: str) -> List[str]:
         elif part and out:
             out[-1] = out[-1] + " " + part  # merge tiny tail into previous
     return out if out else [text.strip()] if text.strip() else []
+
+
+def _build_overlap_tail_words(text: str, overlap_words: int) -> List[str]:
+    """
+    Prefer sentence-aware overlap tails so follow-on chunks do not begin from a
+    mid-sentence word slice unless no better boundary exists.
+    """
+    if overlap_words <= 0 or not text.strip():
+        return []
+
+    sentences = _split_sentences(text)
+    if not sentences:
+        return []
+
+    selected: List[str] = []
+    word_count = 0
+    for sentence in reversed(sentences):
+        selected.insert(0, sentence.strip())
+        word_count += len(sentence.split())
+        if word_count >= overlap_words:
+            break
+
+    overlap_text = " ".join(part for part in selected if part).strip()
+    return overlap_text.split() if overlap_text else []
 
 
 def _split_question_blocks(text: str) -> List[str]:
@@ -488,8 +524,9 @@ def chunk_semantic(
 
             # flush current before starting this block
             if len(current_words) >= min_words:
-                all_chunks.append(" ".join(current_words))
-                prev_tail_words = current_words[-overlap_words:] if overlap_words > 0 else []
+                current_chunk = " ".join(current_words)
+                all_chunks.append(current_chunk)
+                prev_tail_words = _build_overlap_tail_words(current_chunk, overlap_words)
 
             # block itself is too long → split at sentence boundaries
             if len(block_words) > int(target_words * 1.4):
@@ -501,8 +538,9 @@ def chunk_semantic(
                         current_words.extend(sw)
                     else:
                         if len(current_words) >= min_words:
-                            all_chunks.append(" ".join(current_words))
-                            prev_tail_words = current_words[-overlap_words:] if overlap_words > 0 else []
+                            current_chunk = " ".join(current_words)
+                            all_chunks.append(current_chunk)
+                            prev_tail_words = _build_overlap_tail_words(current_chunk, overlap_words)
                         current_words = list(prev_tail_words) + sw
                 # don't flush here — carry into next block
             else:
@@ -510,8 +548,9 @@ def chunk_semantic(
 
         # flush section remainder
         if len(current_words) >= min_words:
-            all_chunks.append(" ".join(current_words))
-            prev_tail_words = current_words[-overlap_words:] if overlap_words > 0 else []
+            current_chunk = " ".join(current_words)
+            all_chunks.append(current_chunk)
+            prev_tail_words = _build_overlap_tail_words(current_chunk, overlap_words)
         elif current_words and all_chunks:
             # merge tiny tail into last chunk
             all_chunks[-1] = all_chunks[-1] + " " + " ".join(current_words)
@@ -705,6 +744,7 @@ def build_index(
     data_ts: Path,
     pyq_ts: Path,
     extract_images: bool = False,
+    save_images: bool = False,
     nvidia_api_key: Optional[str] = None,
 ) -> Tuple[int, int, int, int, int, int]:
     chapters = parse_data_ts(data_ts)
@@ -733,6 +773,8 @@ def build_index(
     dropped_non_english_chunks = 0
     dropped_instruction_chunks = 0
     kept_unmapped_chunks = 0
+    image_manifest_entries: List[dict] = []
+    image_output_root = output_dir / "images"
 
     chunk_counter = 1
     extract_started = time.time()
@@ -755,11 +797,49 @@ def build_index(
             progress("Extracting chunks", idx, len(selected), extract_started)
             continue
 
-        # Detect which pages have embedded images (requires PyMuPDF)
-        image_pages: Set[int] = set()
-        if extract_images and FITZ_AVAILABLE:
-            image_pages = detect_pages_with_images(record.abs_path)
-        has_images = len(image_pages) > 0
+        visual_candidates = []
+        if (extract_images or save_images) and FITZ_AVAILABLE:
+            visual_candidates = detect_visual_candidates(record.abs_path, max_pages=max_pages)
+        visual_candidate_map = {candidate.page_num: candidate for candidate in visual_candidates}
+        has_images = len(visual_candidates) > 0
+        visual_tags = sorted({tag for candidate in visual_candidates for tag in candidate.tags})
+        saved_image_entries: Dict[int, dict] = {}
+        if save_images and visual_candidates:
+            for candidate in visual_candidates:
+                try:
+                    saved = save_visual_image(
+                        pdf_path=record.abs_path,
+                        dataset_kind="papers",
+                        dataset_relative_path=record.relative_path,
+                        page_num=candidate.page_num,
+                        output_root=image_output_root,
+                    )
+                except Exception as _img_exc:
+                    logging.warning(
+                        "Skipped image save for %s page %d: %s",
+                        record.relative_path, candidate.page_num, _img_exc,
+                    )
+                    saved = None
+                if not saved:
+                    continue
+                manifest_entry = {
+                    "id": f"paper-image-{record.class_level}-{record.year}-{candidate.page_num + 1}-{len(image_manifest_entries) + 1}",
+                    "datasetKind": "paper",
+                    "sourcePath": record.relative_path,
+                    "classLevel": record.class_level,
+                    "subject": record.subject,
+                    "year": record.year,
+                    "paperType": record.paper_type,
+                    "page": candidate.page_num,
+                    "imagePath": Path(saved["imagePath"]).relative_to(output_dir).as_posix(),
+                    "width": saved["width"],
+                    "height": saved["height"],
+                    "dpi": saved["dpi"],
+                    "reasons": candidate.reasons,
+                    "tags": candidate.tags,
+                }
+                image_manifest_entries.append(manifest_entry)
+                saved_image_entries[candidate.page_num] = manifest_entry
 
         chapter_pool = chapter_candidates_for_subject(chapters, record.class_level, record.subject)
         for chunk_text in chunks:
@@ -792,6 +872,8 @@ def build_index(
             }
             if has_images:
                 entry["hasImages"] = True
+            if visual_tags:
+                entry["visualTags"] = visual_tags
             chunk_entries.append(entry)
             chunk_counter += 1
 
@@ -801,14 +883,15 @@ def build_index(
                     current.append(record.relative_path)
 
         # OCR image pages and add them as extra chunks (requires NVIDIA API key)
-        if extract_images and image_pages and nvidia_api_key:
-            for page_num in sorted(image_pages):
+        if extract_images and visual_candidate_map and nvidia_api_key:
+            for page_num in sorted(visual_candidate_map.keys()):
                 if page_num >= max_pages:
                     continue
-                b64 = render_page_as_base64(record.abs_path, page_num)
+                candidate = visual_candidate_map[page_num]
+                b64 = render_visual_page_as_base64(record.abs_path, page_num)
                 if not b64:
                     continue
-                ocr_text = ocr_page_via_nvidia(b64, nvidia_api_key)
+                ocr_text = ocr_visual_page(b64, nvidia_api_key)
                 if not ocr_text or len(ocr_text.split()) < MIN_CHUNK_WORDS:
                     continue
                 ocr_text = clean_text(ocr_text)
@@ -828,7 +911,18 @@ def build_index(
                     "text": ocr_text,
                     "hasImages": True,
                 }
+                ocr_tags = sorted(set(candidate.tags + infer_visual_tags(ocr_text)))
+                if ocr_tags:
+                    ocr_entry["visualTags"] = ocr_tags
                 chunk_entries.append(ocr_entry)
+                manifest_entry = saved_image_entries.get(page_num)
+                if manifest_entry is not None:
+                    manifest_entry["ocrChunkId"] = ocr_entry["id"]
+                    manifest_entry["ocrWordCount"] = len(ocr_text.split())
+                    if chapter_id:
+                        manifest_entry["chapterId"] = chapter_id
+                    if ocr_tags:
+                        manifest_entry["tags"] = sorted(set(manifest_entry.get("tags", []) + ocr_tags))
                 chunk_counter += 1
 
         progress("Extracting chunks", idx, len(selected), extract_started)
@@ -838,9 +932,19 @@ def build_index(
     chunks_path = output_dir / "chunks.jsonl"
     chapter_index_path = output_dir / "chapter_index.json"
 
+    def _clean_surrogates(obj):
+        """Recursively strip lone Unicode surrogates (from broken PDF fonts)."""
+        if isinstance(obj, str):
+            return obj.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
+        if isinstance(obj, dict):
+            return {k: _clean_surrogates(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_clean_surrogates(v) for v in obj]
+        return obj
+
     with chunks_path.open("w", encoding="utf-8") as f:
         for entry in chunk_entries:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.write(json.dumps(_clean_surrogates(entry), ensure_ascii=False) + "\n")
 
     chapter_index_payload = {
         "version": "1",
@@ -865,9 +969,25 @@ def build_index(
         },
     }
     chapter_index_path.write_text(
-        json.dumps(chapter_index_payload, indent=2, ensure_ascii=False),
+        json.dumps(_clean_surrogates(chapter_index_payload), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    if save_images or image_manifest_entries:
+        image_manifest_path = output_dir / "paper_image_manifest.json"
+        image_manifest_payload = {
+            "version": "1",
+            "generatedAt": datetime.utcnow().isoformat() + "Z",
+            "datasetKind": "paper",
+            "fitzAvailable": FITZ_AVAILABLE,
+            "saveImagesEnabled": save_images,
+            "ocrEnabled": bool(nvidia_api_key),
+            "totalImages": len(image_manifest_entries),
+            "images": image_manifest_entries,
+        }
+        image_manifest_path.write_text(
+            json.dumps(image_manifest_payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
     return (
         len(selected),
@@ -889,7 +1009,7 @@ def main() -> None:
         default=0,
         help="Max ranked PDFs to index (0 = all matched PDFs)",
     )
-    parser.add_argument("--max-pages", type=int, default=3, help="Max pages to extract per PDF")
+    parser.add_argument("--max-pages", type=int, default=20, help="Max pages to extract per PDF")
     parser.add_argument("--chunk-words", type=int, default=DEFAULT_CHUNK_WORDS, help="Words per chunk")
     parser.add_argument("--chunk-overlap", type=int, default=DEFAULT_CHUNK_OVERLAP, help="Chunk overlap words")
     parser.add_argument(
@@ -911,6 +1031,11 @@ def main() -> None:
         "--extract-images",
         action="store_true",
         help="Detect image-bearing pages (requires pymupdf) and OCR them via NVIDIA API (requires NVIDIA_API_KEY)",
+    )
+    parser.add_argument(
+        "--save-images",
+        action="store_true",
+        help="Render and save visually relevant pages into lib/context/images and emit a paper image manifest",
     )
     parser.add_argument(
         "--nvidia-api-key",
@@ -946,8 +1071,8 @@ def main() -> None:
     include_non_english = not args.strict_english
     nvidia_key = args.nvidia_api_key or os.environ.get("NVIDIA_API_KEY") or ""
 
-    if args.extract_images and not FITZ_AVAILABLE:
-        print("WARNING: --extract-images requires PyMuPDF. Install with: pip install pymupdf", file=sys.stderr)
+    if (args.extract_images or args.save_images) and not FITZ_AVAILABLE:
+        print("WARNING: visual extraction requires PyMuPDF. Install with: pip install pymupdf", file=sys.stderr)
     if args.extract_images and not nvidia_key:
         print("WARNING: --extract-images without NVIDIA_API_KEY — image detection only, no OCR.", file=sys.stderr)
 
@@ -963,6 +1088,7 @@ def main() -> None:
         data_ts=data_ts,
         pyq_ts=pyq_ts,
         extract_images=args.extract_images,
+        save_images=args.save_images,
         nvidia_api_key=nvidia_key if nvidia_key else None,
     )
     print(

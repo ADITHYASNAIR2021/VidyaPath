@@ -2,7 +2,10 @@ import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
+import { computeWeightedTemperature } from '@/lib/ai/generation-controls';
 import { generateTaskJson } from '@/lib/ai/generator';
+import { getRecentQuestionHistory, prioritizeUnseenQuestions, recordGeneratedQuestions } from '@/lib/ai/question-history';
+import { computeRecommendedTopK } from '@/lib/ai/retrieval-enhancements';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import {
   cleanTextList,
@@ -193,7 +196,7 @@ function buildFallbackDrill(
     shortQuestions,
     longQuestions,
     answerKey: questions.map((item) => item.answer),
-    topicCoverage: chapter.topics.slice(0, 10),
+    topicCoverage: [...chapter.topics],
     sourceCitations: [],
   };
 }
@@ -334,6 +337,19 @@ function isQuestionStronglyGrounded(item: MCQItem): boolean {
   return false;
 }
 
+function getDrillTemperature(questionType: 'mcq' | 'short' | 'long' | 'mixed'): number {
+  if (questionType === 'mcq') {
+    return computeWeightedTemperature({ recall: 30, application: 35, analysis: 20, caseBased: 15 });
+  }
+  if (questionType === 'short') {
+    return computeWeightedTemperature({ recall: 40, application: 35, analysis: 25 });
+  }
+  if (questionType === 'long') {
+    return computeWeightedTemperature({ application: 35, analysis: 30, derivation: 35 });
+  }
+  return computeWeightedTemperature({ recall: 25, application: 35, analysis: 20, caseBased: 10, derivation: 10 });
+}
+
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
   try {
@@ -404,6 +420,11 @@ export async function POST(req: Request) {
     }
 
     const pyq = (await getGroundedPYQData(parsed.chapterId)) ?? getPYQData(parsed.chapterId);
+    const recentHistory = await getRecentQuestionHistory({
+      authUserId: context?.authUserId,
+      chapterId: chapter.id,
+      limit: 10,
+    });
     const contextPack = await getContextPack({
       task: 'chapter-drill',
       classLevel: chapter.classLevel,
@@ -411,7 +432,7 @@ export async function POST(req: Request) {
       chapterId: chapter.id,
       chapterTopics: chapter.topics,
       query: `chapter drill ${chapter.title} ${parsed.difficulty}`,
-      topK: 6,
+      topK: computeRecommendedTopK(parsed.questionCount),
     });
 
     const { mcqCount, shortCount, longCount } = allocateQuestionCounts(parsed.questionCount, parsed.questionType);
@@ -438,7 +459,13 @@ export async function POST(req: Request) {
 
     const textbookCount = contextPack.snippets.filter((s) => s.sourceType === 'textbook').length;
     const paperCount = contextPack.snippets.filter((s) => s.sourceType !== 'textbook').length;
-    const topicList = chapter.topics.slice(0, 12).join(', ');
+    const topicList = chapter.topics.join(', ');
+    const recentlyTestedBlock = recentHistory.recentQuestions.length > 0
+      ? `Avoid repeating these recently tested stems too closely: ${recentHistory.recentQuestions.slice(0, 6).join(' | ')}`
+      : '';
+    const performanceBlock = recentHistory.accuracyRate !== null
+      ? `Student accuracy for this chapter: ${Math.round(recentHistory.accuracyRate * 100)}%.${recentHistory.weakQuestions.length > 0 ? ` Prior weak stems: ${recentHistory.weakQuestions.join(' | ')}` : ''}`
+      : '';
     const prompt = `Create a CBSE board-style drill for:
 Chapter: "${chapter.title}" (${chapter.subject}, Class ${chapter.classLevel})
 Topics to cover: ${topicList}
@@ -446,6 +473,8 @@ Total questions: MCQ ${mcqCount}, Short ${shortCount}, Long ${longCount}
 Difficulty: ${parsed.difficulty}
 PYQ signal: ${pyq ? `avg marks ${pyq.avgMarks} | top topics: ${pyq.importantTopics.slice(0, 6).join(', ')}` : 'No PYQ record'}
 Context available: ${textbookCount} NCERT textbook + ${paperCount} board-paper snippets
+${performanceBlock}
+${recentlyTestedBlock}
 
 GROUNDING REQUIREMENT:
 - MCQ distractors must use NCERT-language errors (not generic options).
@@ -474,7 +503,7 @@ Return ONLY JSON:
     const subjectAddendum = buildSubjectSystemPromptAddendum(chapter.subject, chapter.classLevel);
     const fewShotBlock = getFewShotExamples(chapter.subject, chapter.classLevel);
     const promptWithVariation = `${prompt}
-${buildVariationInstruction(variation)}${fewShotBlock ? `\n\n${fewShotBlock}` : ''}`;
+${buildVariationInstruction(variation)}`;
 
     try {
       const { data, result } = await generateTaskJson<ChapterDrillResponse>({
@@ -504,9 +533,9 @@ FOR SHORT QUESTIONS (2-3 marks): "State/Explain/Differentiate/Write with equatio
 FOR LONG QUESTIONS (5 marks): "Explain with labelled diagram / Derive the expression / Write the mechanism with equation / Compare with examples" — authentic 5-mark board format.
 
 Match the split EXACTLY: MCQ ${mcqCount}, Short ${shortCount}, Long ${longCount}.
-${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON. No markdown fences.`,
+${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock}\n` : ''}Output ONLY valid JSON. No markdown fences.`,
         userPrompt: promptWithVariation,
-        temperature: 0.18,
+        temperature: getDrillTemperature(parsed.questionType),
         maxOutputTokens: projectedOutputTokens,
         validate: isChapterDrillResponse,
       });
@@ -551,8 +580,9 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON. No markd
             mcqCount
           )
         : [];
+      const orderedQuestions = prioritizeUnseenQuestions(hardenedQuestions, recentHistory.recentHashes).slice(0, mcqCount);
       const finalAnnotatedQuestions = hardenedQuestions.length > 0
-        ? annotateQuestionsWithRagMeta(hardenedQuestions, {
+        ? annotateQuestionsWithRagMeta(orderedQuestions, {
             chapterTitle: chapter.title,
             chapterTopics: chapter.topics,
             pyqTopics: pyq?.importantTopics ?? [],
@@ -590,7 +620,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON. No markd
         answerKey: finalAnnotatedQuestions.map((item) => item.answer),
         topicCoverage: cleanTextList(
           Array.isArray(data.topicCoverage) ? data.topicCoverage : fallback.topicCoverage,
-          12
+          Math.max(12, parsed.questionCount)
         ),
         sourceCitations: normalizeChapterCitations([
           ...contextPack.snippets.map((snippet) => ({ sourcePath: snippet.sourcePath, year: snippet.year })),
@@ -603,6 +633,12 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON. No markd
           strongGroundedCount: finalAnnotatedQuestions.filter(isQuestionStronglyGrounded).length,
         },
       };
+      await recordGeneratedQuestions({
+        authUserId: context?.authUserId,
+        chapterId: chapter.id,
+        subject: chapter.subject,
+        questions: finalAnnotatedQuestions,
+      });
 
       await logAiUsage({
         context,

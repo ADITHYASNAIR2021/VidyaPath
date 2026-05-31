@@ -2,11 +2,20 @@ import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
+import { computeWeightedTemperature } from '@/lib/ai/generation-controls';
 import { generateTaskJson } from '@/lib/ai/generator';
+import {
+  getAdaptiveHistoryProfile,
+  hashQuestionStem,
+  prioritizeQuestionsForAdaptiveProfile,
+  recordGeneratedQuestions,
+} from '@/lib/ai/question-history';
+import { computeRecommendedTopK } from '@/lib/ai/retrieval-enhancements';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import {
   cleanTextList,
   isAdaptiveTestResponse,
+  normalizeChapterCitations,
   normalizeMCQs,
   stripSourceTags,
   type AdaptiveTestResponse,
@@ -66,7 +75,15 @@ function buildAdaptiveGenericQuestion(subject: string, chapterTitle: string, top
 
 function ensureAdaptiveQuestionCount(questions: MCQItem[], req: AdaptiveTestRequest): MCQItem[] {
   const target = Math.max(3, Math.min(30, req.questionCount ?? 10));
-  const output = normalizeMCQs(questions).slice(0, target);
+  const output: MCQItem[] = [];
+  const used = new Set<string>();
+  for (const item of normalizeMCQs(questions)) {
+    const key = item.question.trim().toLowerCase();
+    if (!key || used.has(key)) continue;
+    used.add(key);
+    output.push(item);
+    if (output.length >= target) break;
+  }
   const selectedChapters = ALL_CHAPTERS.filter((chapter) => req.chapterIds.includes(chapter.id));
   const topicPool = selectedChapters.flatMap((chapter) =>
     (chapter.topics ?? []).map((topic) => ({ chapterTitle: chapter.title, topic }))
@@ -118,7 +135,7 @@ function buildFallbackQuestions(req: AdaptiveTestRequest): AdaptiveTestResponse 
 
   const questions = ensureAdaptiveQuestionCount(baseQuestions, req);
   const answerKey = questions.map((question) => question.answer);
-  const topicCoverage = chapters.map((chapter) => chapter.title).slice(0, 8);
+  const topicCoverage = chapters.map((chapter) => chapter.title);
   const estimatedPct = Math.min(92, 55 + topicCoverage.length * 4);
 
   return {
@@ -197,6 +214,11 @@ export async function POST(req: Request) {
     ))
       .filter((item): item is NonNullable<ReturnType<typeof getPYQData>> => !!item)
       .slice(0, 6);
+    const adaptiveHistory = await getAdaptiveHistoryProfile({
+      authUserId: context?.authUserId,
+      chapterIds: parsed.chapterIds,
+      recentLimit: 8,
+    });
     const pyqTopics = pyqRows.flatMap((item) => item.importantTopics ?? []);
     const pyqSummary = pyqRows
       .slice(0, 4)
@@ -211,19 +233,30 @@ export async function POST(req: Request) {
       chapterId: chapter?.id,
       chapterTopics: chapter?.topics ?? [],
       query: `${parsed.subject} ${chapter?.title ?? ''} ${chapterTopicsText} ${pyqTopics.slice(0, 6).join(' ')}`.trim(),
-      topK: 10,
+      topK: computeRecommendedTopK(parsed.questionCount ?? 10),
     });
 
     const textbookSnippetCount = contextPack.snippets.filter((s) => s.sourceType === 'textbook').length;
     const paperSnippetCount = contextPack.snippets.filter((s) => s.sourceType !== 'textbook').length;
     const contextSummary = `Context: ${textbookSnippetCount} NCERT textbook + ${paperSnippetCount} board-paper snippets retrieved.`;
+    const resolvedDifficultyMix = parsed.difficultyMix?.trim() || adaptiveHistory.recommendedDifficultyMix;
+    const recentQuestionBlock = adaptiveHistory.recentQuestions.length > 0
+      ? `Avoid repeating these recent stems too closely: ${adaptiveHistory.recentQuestions.join(' | ')}`
+      : '';
+    const accuracyBlock = adaptiveHistory.aggregateAccuracy !== null
+      ? `Student history across selected chapters: ${Math.round(adaptiveHistory.aggregateAccuracy * 100)}% average accuracy.${adaptiveHistory.weakQuestions.length > 0 ? ` Prior weak stems: ${adaptiveHistory.weakQuestions.join(' | ')}` : ''}`
+      : '';
+    const challengeBandBlock = `Target challenge band: ${adaptiveHistory.targetDifficultyBand}.`;
 
     const userPrompt = `Generate ${parsed.questionCount ?? 10} adaptive CBSE MCQs for:
 Subject: ${parsed.subject} | Class: ${parsed.classLevel}
 Chapter(s): ${chapter?.title ?? parsed.chapterIds.join(', ')}
 Chapter topics: ${chapterTopicsText || 'See retrieved context'}
-Difficulty split: ${parsed.difficultyMix ?? '40% easy, 40% medium, 20% hard'}
+Difficulty split: ${resolvedDifficultyMix}
 ${contextSummary}
+${accuracyBlock}
+${recentQuestionBlock}
+${challengeBandBlock}
 
 PYQ signal:
 ${pyqSummary || 'No PYQ data available.'}
@@ -246,12 +279,12 @@ Return ONLY JSON:
       task: 'adaptive-test',
       contextHash: contextPack.contextHash,
       chapterId: chapter?.id,
-      difficulty: parsed.difficultyMix,
+      difficulty: resolvedDifficultyMix,
     });
     const subjectAddendum = buildSubjectSystemPromptAddendum(parsed.subject, parsed.classLevel);
     const fewShotBlock = getFewShotExamples(parsed.subject, parsed.classLevel);
     const userPromptWithVariation = `${userPrompt}
-${buildVariationInstruction(variation)}${fewShotBlock ? `\n\n${fewShotBlock}` : ''}`;
+${buildVariationInstruction(variation)}`;
 
     try {
       const { data, result } = await generateTaskJson<AdaptiveTestResponse>({
@@ -259,7 +292,7 @@ ${buildVariationInstruction(variation)}${fewShotBlock ? `\n\n${fewShotBlock}` : 
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
         chapterId: chapter?.id,
-        difficulty: parsed.difficultyMix,
+        difficulty: resolvedDifficultyMix,
         diversityKey: variation.diversityKey,
         systemPrompt: `You are VidyaAI Adaptive Test Engine — a CBSE board-exam question generator.
 
@@ -279,9 +312,14 @@ DISTRACTOR RULES:
 EXPLANATION: 1–3 sentences citing the specific law/formula/definition from the chapter. Include the correct mechanism if applicable.
 
 Ensure answerKey index exactly matches the correct option index in each question.
-${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON.`,
+${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock}\n` : ''}Output ONLY valid JSON.`,
         userPrompt: userPromptWithVariation,
-        temperature: 0.2,
+        temperature: computeWeightedTemperature({
+          recall: 35,
+          application: 35,
+          analysis: 20,
+          caseBased: 10,
+        }),
         maxOutputTokens: 3500,
         validate: isAdaptiveTestResponse,
       });
@@ -293,7 +331,26 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON.`,
         .slice(0, Math.max(3, parsed.questionCount ?? 10));
       const normalized = await verifySelfCheck(rawNormalized, contextPack.snippets);
       const merged = normalized.length > 0 ? normalized : fallback.questions;
-      const finalQuestions = ensureAdaptiveQuestionCount(merged, parsed);
+      const reviewHashes = new Set(adaptiveHistory.weakHashes);
+      const reviewQuota = Math.min(
+        Math.max(0, Math.round((parsed.questionCount ?? 10) * adaptiveHistory.reviewQuota)),
+        Math.max(0, (parsed.questionCount ?? 10) - 1)
+      );
+      const reviewPool = selectedChapters
+        .flatMap((chapterItem) =>
+          (chapterItem.quizzes ?? []).map((quiz) => ({
+            question: quiz.question,
+            options: quiz.options,
+            answer: quiz.correctAnswerIndex,
+            explanation: quiz.explanation ?? 'Review this chapter concept again.',
+          }))
+        )
+        .filter((item) => reviewHashes.has(hashQuestionStem(item.question)));
+      const prioritized = prioritizeQuestionsForAdaptiveProfile(merged, adaptiveHistory);
+      const finalQuestions = ensureAdaptiveQuestionCount(
+        [...reviewPool.slice(0, reviewQuota), ...prioritized],
+        parsed
+      );
       const topicHints = selectedChapters.flatMap((item) => item.topics ?? []);
       const annotatedQuestions = annotateQuestionsWithRagMeta(finalQuestions, {
         chapterTitle: chapter?.title,
@@ -301,17 +358,38 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}Output ONLY valid JSON.`,
         pyqTopics,
         contextSnippets: contextPack.snippets,
       });
+      await recordGeneratedQuestions({
+        authUserId: context?.authUserId,
+        chapterId: chapter?.id,
+        subject: parsed.subject,
+        questions: annotatedQuestions,
+      });
       const answerKey = annotatedQuestions.map((question) => question.answer);
-      const response: AdaptiveTestResponse = {
+      const response: AdaptiveTestResponse & {
+        sourceCitations: Array<{ sourcePath: string; year?: number }>;
+        grounding: {
+          usedPgvector: boolean;
+          usedOnDemandFallback: boolean;
+          retrieval: typeof contextPack.retrievalMeta;
+        };
+      } = {
         questions: annotatedQuestions,
         answerKey,
         topicCoverage: cleanTextList(
           Array.isArray(data.topicCoverage) ? data.topicCoverage : fallback.topicCoverage,
-          12
+          Math.max(12, parsed.questionCount ?? 10)
         ),
         predictedScoreBand: stripSourceTags(
           typeof data.predictedScoreBand === 'string' ? data.predictedScoreBand : fallback.predictedScoreBand
         ),
+        sourceCitations: normalizeChapterCitations(
+          contextPack.snippets.map((snippet) => ({ sourcePath: snippet.sourcePath, year: snippet.year }))
+        ),
+        grounding: {
+          usedPgvector: contextPack.usedPgvector,
+          usedOnDemandFallback: contextPack.usedOnDemandFallback,
+          retrieval: contextPack.retrievalMeta,
+        },
       };
       await logAiUsage({
         context,

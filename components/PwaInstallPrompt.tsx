@@ -121,7 +121,7 @@ export default function PwaInstallPrompt() {
             <p className="text-sm font-semibold text-navy-700 dark:text-gray-100">{title}</p>
             {installEvent ? (
               <p className="mt-0.5 text-xs text-[#6A6A84] dark:text-gray-300">
-                Faster launch, offline shell caching, and app-like full screen on your phone.
+                Faster phone access, revision shortcuts, offline shell caching, and app-like full screen on your phone.
               </p>
             ) : (
               <p className="mt-0.5 text-xs text-[#6A6A84] dark:text-gray-300">

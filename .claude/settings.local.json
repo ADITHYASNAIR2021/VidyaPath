@@ -78,7 +78,10 @@
       "Bash(Get-ChildItem -Force)",
       "Bash(Select-Object Name, Mode)",
       "Bash(python3)",
-      "Bash(node -e \"const readline = require\\('readline'\\); const rl = readline.createInterface\\({ input: process.stdin }\\); rl.on\\('line', \\(line\\) => { const obj = JSON.parse\\(line\\); console.log\\('JSONL Chunk Fields:'\\); Object.keys\\(obj\\).sort\\(\\).forEach\\(k => console.log\\('  ' + k + ': ' + typeof obj[k]\\)\\); rl.close\\(\\); }\\);\")"
+      "Bash(node -e \"const readline = require\\('readline'\\); const rl = readline.createInterface\\({ input: process.stdin }\\); rl.on\\('line', \\(line\\) => { const obj = JSON.parse\\(line\\); console.log\\('JSONL Chunk Fields:'\\); Object.keys\\(obj\\).sort\\(\\).forEach\\(k => console.log\\('  ' + k + ': ' + typeof obj[k]\\)\\); rl.close\\(\\); }\\);\")",
+      "Bash(python -c \"import json; data=json.load\\(open\\('D:/VidyaPath/lib/context/retrieval_index.json', encoding='utf-8'\\)\\); docs=data.get\\('docs',[]\\); kinds={d['kind']:kinds.setdefault\\(d['kind'],0\\)+1 for kinds in [{}] for d in docs}; print\\('docs:', len\\(docs\\)\\); print\\('chapters:', len\\(data.get\\('chapters',{}\\)\\)\\); print\\('version:', data.get\\('version'\\)\\); k={};[k.__setitem__\\(d['kind'], k.get\\(d['kind'],0\\)+1\\) for d in docs]; print\\('kinds:', k\\)\")",
+      "Bash(node scripts/rag_build.mjs --force --skip-qp --skip-textbooks --skip-clean --skip-vectors --skip-benchmark)",
+      "Bash(node scripts/rag_build.mjs --skip-qp --skip-textbooks --skip-clean --skip-vectors --skip-benchmark)"
     ]
   },
   "enableAllProjectMcpServers": true,

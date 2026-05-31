@@ -41,7 +41,7 @@ function getNavItems(role: Role): NavItem[] {
         { href: '/',          label: 'Home',      icon: Home      },
         { href: '/teacher',   label: 'Desk',      icon: Users     },
         { href: '/chapters',  label: 'Study',     icon: BookOpen  },
-        { href: '/formulas',  label: 'Formulas',  icon: Calculator },
+        { href: '/formulas',  label: 'Formula Hub', icon: Calculator },
         { href: '/papers',    label: 'Papers',    icon: FileText  },
       ];
     case 'admin':
@@ -49,7 +49,7 @@ function getNavItems(role: Role): NavItem[] {
         { href: '/',          label: 'Home',      icon: Home      },
         { href: '/admin',     label: 'Console',   icon: ShieldCheck },
         { href: '/chapters',  label: 'Study',     icon: BookOpen  },
-        { href: '/formulas',  label: 'Formulas',  icon: Calculator },
+        { href: '/formulas',  label: 'Formula Hub', icon: Calculator },
         { href: '/papers',    label: 'Papers',    icon: FileText  },
       ];
     case 'developer':
@@ -64,7 +64,7 @@ function getNavItems(role: Role): NavItem[] {
       return [
         { href: '/',          label: 'Home',      icon: Home      },
         { href: '/chapters',  label: 'Study',     icon: BookOpen  },
-        { href: '/formulas',  label: 'Formulas',  icon: Calculator },
+        { href: '/formulas',  label: 'Formula Hub', icon: Calculator },
         { href: '/dashboard', label: 'Dash',      icon: Target    },
         { href: '/papers',    label: 'Papers',    icon: FileText  },
       ];

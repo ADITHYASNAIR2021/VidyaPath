@@ -49,9 +49,15 @@ function getSnippetYear(snippet: ContextSnippet): number | undefined {
   return inferYearFromSourcePath(snippet.sourcePath || '');
 }
 
+const QUALITY_BAND_HIGH_MIN = 84;
+const QUALITY_BAND_MEDIUM_MIN = 68;
+
 function buildQualityBand(score: number): MCQQualityBand {
-  if (score >= 78) return 'high';
-  if (score >= 58) return 'medium';
+  // Keep the bands intentionally conservative until we have a human-rated
+  // calibration set; retrieval overlap alone should not push weak MCQs into
+  // "high" quality.
+  if (score >= QUALITY_BAND_HIGH_MIN) return 'high';
+  if (score >= QUALITY_BAND_MEDIUM_MIN) return 'medium';
   return 'baseline';
 }
 
@@ -70,6 +76,13 @@ function getSourceType(snippet: ContextSnippet): 'paper' | 'textbook' | 'image-o
   if (snippet.sourceType === 'textbook') return 'textbook';
   if (snippet.sourceType === 'image-ocr') return 'image-ocr';
   return 'paper';
+}
+
+function appendCitationTags(explanation: string, citationTags: string[]): string {
+  if (citationTags.length === 0) return explanation;
+  const suffix = citationTags.join(' ');
+  if (explanation.includes(suffix)) return explanation;
+  return `${explanation.trim()} ${suffix}`.trim();
 }
 
 function buildPyqTag(input: {
@@ -151,6 +164,13 @@ export function annotateQuestionsWithRagMeta(
       const snippetTokens = new Set(tokenize(snippet.text || ''));
       return countOverlap(questionTokens, snippetTokens) >= 2;
     });
+    const citationTags = matchedSnippets
+      .map((snippet) => {
+        const index = snippets.findIndex((item) => item.id === snippet.id);
+        return index >= 0 ? `[S${index + 1}]` : null;
+      })
+      .filter((tag): tag is string => !!tag)
+      .slice(0, 2);
     const paperEvidence = matchedSnippets.filter((snippet) => getSourceType(snippet) === 'paper' || getSourceType(snippet) === 'image-ocr');
     const textbookEvidence = matchedSnippets.filter((snippet) => getSourceType(snippet) === 'textbook');
     const years = unique(
@@ -181,6 +201,7 @@ export function annotateQuestionsWithRagMeta(
 
     return {
       ...item,
+      explanation: appendCitationTags(item.explanation || '', citationTags),
       ragMeta: {
         askedInPastExam: pyqTag === 'asked-before',
         pyqTag,
@@ -192,4 +213,3 @@ export function annotateQuestionsWithRagMeta(
     };
   });
 }
-
