@@ -12,6 +12,11 @@ import {
   BookOpen,
   GraduationCap,
   Star,
+  Briefcase,
+  Globe2,
+  Rocket,
+  Compass,
+  Shield,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -75,6 +80,69 @@ const COMMERCE_RESOURCES = [
   { name: 'ICSI', desc: 'Official CS pathway and CSEET updates', url: 'https://www.icsi.edu/' },
   { name: 'ICMAI', desc: 'Official CMA foundation information', url: 'https://icmai.in/studentswebsite/exam.php' },
   { name: 'National Career Service', desc: 'Government career pathways', url: 'https://www.ncs.gov.in/Pages/about-us.aspx' },
+];
+
+// Career fields & job roles per stream
+const CAREER_FIELDS: Record<CareerStream, Array<{ field: string; roles: string; note: string }>> = {
+  PCM: [
+    { field: 'Engineering & Technology', roles: 'Software, Mechanical, Civil, Electrical, Electronics, Aerospace', note: 'Core of PCM — B.Tech/B.E. via JEE, state CETs, private exams.' },
+    { field: 'Computer Science & AI', roles: 'Software Engineer, Data Scientist, ML Engineer, Cybersecurity', note: 'Highest-demand field; CSE/IT branches & online specialisations.' },
+    { field: 'Pure & Applied Sciences', roles: 'Physicist, Mathematician, Statistician, Researcher', note: 'BS-MS at IISER/IISc/NISER → research & academia.' },
+    { field: 'Architecture & Planning', roles: 'Architect, Urban Planner, Landscape Designer', note: 'B.Arch via NATA / JEE Paper 2; Maths compulsory.' },
+    { field: 'Defence & Merchant Navy', roles: 'Armed Forces Officer, Marine Engineer, Nautical Officer', note: 'NDA, IMU-CET — disciplined, well-paid service careers.' },
+    { field: 'Data & Actuarial', roles: 'Actuary, Quant Analyst, Data Engineer', note: 'Maths-heavy, high-paying; actuarial science via IAI/IFoA.' },
+  ],
+  PCB: [
+    { field: 'Medicine (MBBS) & Surgery', roles: 'Doctor, Surgeon, Specialist (MD/MS)', note: 'NEET-UG → MBBS, then PG specialisation.' },
+    { field: 'Dental & AYUSH', roles: 'Dentist (BDS), BAMS, BHMS, BUMS', note: 'Also via NEET-UG; large network of colleges.' },
+    { field: 'Allied & Paramedical', roles: 'Physiotherapy, Nursing, Radiology, Optometry, Lab Tech', note: 'High-demand healthcare careers without MBBS.' },
+    { field: 'Biotech & Life Sciences', roles: 'Biotechnologist, Microbiologist, Geneticist, Researcher', note: 'B.Sc/B.Tech Biotech, BS-MS — research & pharma industry.' },
+    { field: 'Pharmacy', roles: 'Pharmacist, Drug Inspector, Pharma R&D', note: 'B.Pharm/D.Pharm — via state CETs / GPAT later.' },
+    { field: 'Agriculture & Food Tech', roles: 'Agronomist, Food Technologist, Agri-business', note: 'B.Sc Agriculture via CUET/ICAR — fast-growing sector.' },
+    { field: 'Veterinary Science', roles: 'Veterinarian, Animal Husbandry Officer', note: 'B.V.Sc via NEET-UG; govt and private practice.' },
+  ],
+  Commerce: [
+    { field: 'Chartered Accountancy', roles: 'CA, Auditor, Tax Consultant, CFO track', note: 'CA Foundation → Inter → Final (ICAI).' },
+    { field: 'Company Secretary & Cost Acc.', roles: 'CS, CMA, Compliance & Cost Manager', note: 'CSEET (ICSI) and CMA Foundation (ICMAI) routes.' },
+    { field: 'Management (BBA/IPM/MBA)', roles: 'Manager, Consultant, Entrepreneur', note: 'IPMAT (IIM), NPAT, SET → BBA → MBA.' },
+    { field: 'Finance & Banking', roles: 'Investment Banker, Analyst, Financial Planner', note: 'B.Com (Hons), CFA, FRM, NISM certifications.' },
+    { field: 'Economics & Data', roles: 'Economist, Policy Analyst, Business Analyst', note: 'BA/BSc Economics via CUET → research/policy/analytics.' },
+    { field: 'Law (Corporate/Commercial)', roles: 'Corporate Lawyer, Legal Advisor', note: 'CLAT/AILET → 5-year integrated BBA-LLB / B.Com-LLB.' },
+    { field: 'Digital Business & Startups', roles: 'Digital Marketer, Product Manager, Founder', note: 'Commerce + tech skills — booming startup economy.' },
+  ],
+};
+
+// Future-ready / emerging fields (cross-stream)
+const EMERGING_FIELDS = [
+  { name: 'Artificial Intelligence & Machine Learning', desc: 'Build intelligent systems. Strong for PCM/CS but open to all via online specialisations.' },
+  { name: 'Data Science & Analytics', desc: 'Turn data into decisions. Needed in every industry — finance, health, sport, govt.' },
+  { name: 'Cybersecurity', desc: 'Protect systems & data. Severe global talent shortage; certifications + practice.' },
+  { name: 'Renewable Energy & Sustainability', desc: 'Solar, EV, climate tech. Engineering + policy + business roles expanding fast.' },
+  { name: 'Biotechnology & Genomics', desc: 'Gene editing, vaccines, bio-manufacturing. PCB/research pathway.' },
+  { name: 'Fintech & Blockchain', desc: 'Digital payments, DeFi, risk. Commerce + tech crossover.' },
+  { name: 'UX / Product Design', desc: 'Design digital experiences. Any stream — portfolio matters more than marks.' },
+  { name: 'Drones, Robotics & Space', desc: 'ISRO ecosystem, private space (skyroot), automation. PCM core.' },
+  { name: 'Digital Content & Creator Economy', desc: 'Media, gaming, animation, marketing — skill + consistency driven.' },
+];
+
+// Study-abroad entrance/qualifying tests
+const STUDY_ABROAD = [
+  { name: 'SAT', desc: 'Undergrad admission test for US & many global universities.', url: 'https://satsuite.collegeboard.org' },
+  { name: 'ACT', desc: 'Alternative US undergrad admission test.', url: 'https://www.act.org' },
+  { name: 'IELTS', desc: 'English proficiency for UK, Australia, Canada, etc.', url: 'https://www.ielts.org' },
+  { name: 'TOEFL', desc: 'English proficiency, widely accepted in the US.', url: 'https://www.ets.org/toefl' },
+  { name: 'UCAT / BMAT', desc: 'For medicine abroad (UK & others).', url: 'https://www.ucat.ac.uk' },
+  { name: 'Duolingo English Test', desc: 'Affordable online English test accepted by many universities.', url: 'https://englishtest.duolingo.com' },
+];
+
+// Broader opportunities beyond the three classic streams
+const BROADER_OPPORTUNITIES = [
+  { name: 'Defence & Civil Services', desc: 'NDA, CDS, UPSC, SSB — officer & administrative careers.', icon: Shield },
+  { name: 'Design & Creative', desc: 'UCEED, NID, NIFT — product, fashion, UX, animation.', icon: Compass },
+  { name: 'Law', desc: 'CLAT, AILET — corporate, litigation, judiciary, policy.', icon: Briefcase },
+  { name: 'Hospitality & Aviation', desc: 'NCHM JEE, cabin crew, travel & tourism management.', icon: Globe2 },
+  { name: 'Liberal Arts & Humanities', desc: 'Ashoka, Krea, DU (CUET) — interdisciplinary degrees.', icon: BookOpen },
+  { name: 'Skilling & Vocational', desc: 'Polytechnic, ITI, NSDC skill courses — quick job-ready paths.', icon: Rocket },
 ];
 
 function ExamAccordion({ exam }: { exam: (typeof ENTRANCE_EXAMS)[0] }) {
@@ -385,6 +453,92 @@ export default function CareerPage() {
             </div>
           </div>
         </div>
+
+        {/* === Career Fields & Roles (stream-aware) === */}
+        <section className="mt-10">
+          <h2 className="font-fraunces text-2xl font-bold text-navy-700 mb-1 flex items-center gap-2">
+            <Briefcase className="w-5 h-5 text-purple-600" />
+            Career Fields &amp; Roles — {STREAM_LABEL[stream]}
+          </h2>
+          <p className="text-sm text-[#4A4A6A] mb-4">Where this stream can take you, and the roles you can aim for.</p>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {CAREER_FIELDS[stream].map((f) => (
+              <div key={f.field} className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-4">
+                <div className="font-fraunces font-bold text-navy-700 text-sm mb-1">{f.field}</div>
+                <div className="text-xs text-purple-700 font-medium mb-1.5">{f.roles}</div>
+                <p className="text-xs text-[#4A4A6A] leading-relaxed">{f.note}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* === Beyond the Usual — Broader Opportunities === */}
+        <section className="mt-10">
+          <h2 className="font-fraunces text-2xl font-bold text-navy-700 mb-1 flex items-center gap-2">
+            <Compass className="w-5 h-5 text-sky-600" />
+            Beyond the Usual — More Opportunities
+          </h2>
+          <p className="text-sm text-[#4A4A6A] mb-4">Strong careers open to students of <strong>any</strong> stream.</p>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {BROADER_OPPORTUNITIES.map((o) => {
+              const Icon = o.icon;
+              return (
+                <div key={o.name} className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-4 flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center flex-shrink-0">
+                    <Icon className="w-4 h-4 text-sky-600" />
+                  </div>
+                  <div>
+                    <div className="font-fraunces font-bold text-navy-700 text-sm mb-0.5">{o.name}</div>
+                    <p className="text-xs text-[#4A4A6A] leading-relaxed">{o.desc}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* === Emerging & Future-Ready Fields === */}
+        <section className="mt-10">
+          <h2 className="font-fraunces text-2xl font-bold text-navy-700 mb-1 flex items-center gap-2">
+            <Rocket className="w-5 h-5 text-emerald-600" />
+            Emerging &amp; Future-Ready Fields
+          </h2>
+          <p className="text-sm text-[#4A4A6A] mb-4">High-growth areas worth exploring early — many are open across streams.</p>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {EMERGING_FIELDS.map((e) => (
+              <div key={e.name} className="bg-emerald-50/60 rounded-2xl border border-emerald-100 p-4">
+                <div className="font-fraunces font-bold text-navy-700 text-sm mb-1">{e.name}</div>
+                <p className="text-xs text-[#4A4A6A] leading-relaxed">{e.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* === Study Abroad === */}
+        <section className="mt-10 mb-4">
+          <h2 className="font-fraunces text-2xl font-bold text-navy-700 mb-1 flex items-center gap-2">
+            <Globe2 className="w-5 h-5 text-amber-600" />
+            Planning to Study Abroad?
+          </h2>
+          <p className="text-sm text-[#4A4A6A] mb-4">Qualifying tests for undergraduate admission outside India.</p>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {STUDY_ABROAD.map((s) => (
+              <a
+                key={s.name}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-white rounded-2xl border border-[#E8E4DC] shadow-sm p-4 hover:border-amber-200 transition-colors group"
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-fraunces font-bold text-navy-700 text-sm group-hover:text-amber-700 transition-colors">{s.name}</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-[#8A8AAA]" />
+                </div>
+                <p className="text-xs text-[#4A4A6A] leading-relaxed">{s.desc}</p>
+              </a>
+            ))}
+          </div>
+        </section>
       </div>
     </motion.div>
   );
