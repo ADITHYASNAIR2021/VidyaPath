@@ -1,0 +1,15 @@
+name,email,phone,staffCode,classLevel,subject,section,password
+Arjun Pillai,physics10@adithyatest.school,9800010000,ATS.TC.10.PHYS,10,Physics,,Teacher@2026
+Meena Menon,chemistry10@adithyatest.school,9800010001,ATS.TC.10.CHEM,10,Chemistry,,Teacher@2026
+Rohan Rao,biology10@adithyatest.school,9800010002,ATS.TC.10.BIOL,10,Biology,,Teacher@2026
+Priya Joshi,math10@adithyatest.school,9800010003,ATS.TC.10.MATH,10,Math,,Teacher@2026
+Karan Pillai,englishcore10@adithyatest.school,9800010004,ATS.TC.10.ENGL,10,English Core,,Teacher@2026
+Ananya Menon,socialscience10@adithyatest.school,9800010005,ATS.TC.10.SOCI,10,Social Science,,Teacher@2026
+Vikram Rao,physics12@adithyatest.school,9800010006,ATS.TC.12.PHYS,12,Physics,,Teacher@2026
+Sneha Joshi,chemistry12@adithyatest.school,9800010007,ATS.TC.12.CHEM,12,Chemistry,,Teacher@2026
+Aditya Pillai,biology12@adithyatest.school,9800010008,ATS.TC.12.BIOL,12,Biology,,Teacher@2026
+Divya Menon,math12@adithyatest.school,9800010009,ATS.TC.12.MATH,12,Math,,Teacher@2026
+Rahul Rao,accountancy12@adithyatest.school,9800010010,ATS.TC.12.ACCO,12,Accountancy,,Teacher@2026
+Pooja Joshi,businessstudies12@adithyatest.school,9800010011,ATS.TC.12.BUSI,12,Business Studies,,Teacher@2026
+Nikhil Pillai,economics12@adithyatest.school,9800010012,ATS.TC.12.ECON,12,Economics,,Teacher@2026
+Kavya Menon,englishcore12@adithyatest.school,9800010013,ATS.TC.12.ENGL,12,English Core,,Teacher@2026

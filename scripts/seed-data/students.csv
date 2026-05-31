@@ -1,0 +1,101 @@
+name,rollNo,rollCode,classLevel,stream,section,batch,subjects,password
+Arjun Mehta,001,ATS.STU.10.A.260001,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Meena Patel,002,ATS.STU.10.A.260002,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Rohan Mohan,003,ATS.STU.10.A.260003,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Priya Varma,004,ATS.STU.10.A.260004,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Karan Menon,005,ATS.STU.10.A.260005,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Ananya Sharma,006,ATS.STU.10.A.260006,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Vikram Das,007,ATS.STU.10.A.260007,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Sneha Kapoor,008,ATS.STU.10.A.260008,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Aditya Singh,009,ATS.STU.10.A.260009,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Divya Pillai,010,ATS.STU.10.A.260010,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Rahul Suresh,011,ATS.STU.10.A.260011,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Pooja Iyer,012,ATS.STU.10.A.260012,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Nikhil Gupta,013,ATS.STU.10.A.260013,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Kavya Bose,014,ATS.STU.10.A.260014,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Sanjay Joshi,015,ATS.STU.10.A.260015,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Riya Chandra,016,ATS.STU.10.A.260016,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Manish Krishnan,017,ATS.STU.10.A.260017,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Ishita Nair,018,ATS.STU.10.A.260018,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Varun Reddy,019,ATS.STU.10.A.260019,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Neha Rao,020,ATS.STU.10.A.260020,10,,A,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Arjun Mehta,001,ATS.STU.10.B.260001,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Meena Patel,002,ATS.STU.10.B.260002,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Rohan Mohan,003,ATS.STU.10.B.260003,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Priya Varma,004,ATS.STU.10.B.260004,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Karan Menon,005,ATS.STU.10.B.260005,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Ananya Sharma,006,ATS.STU.10.B.260006,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Vikram Das,007,ATS.STU.10.B.260007,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Sneha Kapoor,008,ATS.STU.10.B.260008,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Aditya Singh,009,ATS.STU.10.B.260009,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Divya Pillai,010,ATS.STU.10.B.260010,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Rahul Suresh,011,ATS.STU.10.B.260011,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Pooja Iyer,012,ATS.STU.10.B.260012,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Nikhil Gupta,013,ATS.STU.10.B.260013,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Kavya Bose,014,ATS.STU.10.B.260014,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Sanjay Joshi,015,ATS.STU.10.B.260015,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Riya Chandra,016,ATS.STU.10.B.260016,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Manish Krishnan,017,ATS.STU.10.B.260017,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Ishita Nair,018,ATS.STU.10.B.260018,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Varun Reddy,019,ATS.STU.10.B.260019,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Neha Rao,020,ATS.STU.10.B.260020,10,,B,2026,Physics|Chemistry|Biology|Math|English Core|Social Science,Student@2026
+Arjun Joshi,001,ATS.STU.12.M.260001,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Meena Chandra,002,ATS.STU.12.M.260002,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Rohan Krishnan,003,ATS.STU.12.M.260003,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Priya Nair,004,ATS.STU.12.M.260004,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Karan Reddy,005,ATS.STU.12.M.260005,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Ananya Rao,006,ATS.STU.12.M.260006,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Vikram Mehta,007,ATS.STU.12.M.260007,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Sneha Patel,008,ATS.STU.12.M.260008,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Aditya Mohan,009,ATS.STU.12.M.260009,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Divya Varma,010,ATS.STU.12.M.260010,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Rahul Menon,011,ATS.STU.12.M.260011,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Pooja Sharma,012,ATS.STU.12.M.260012,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Nikhil Das,013,ATS.STU.12.M.260013,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Kavya Kapoor,014,ATS.STU.12.M.260014,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Sanjay Singh,015,ATS.STU.12.M.260015,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Riya Pillai,016,ATS.STU.12.M.260016,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Manish Suresh,017,ATS.STU.12.M.260017,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Ishita Iyer,018,ATS.STU.12.M.260018,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Varun Gupta,019,ATS.STU.12.M.260019,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Neha Bose,020,ATS.STU.12.M.260020,12,pcm,M,PCM,Physics|Chemistry|Math|English Core,Student@2026
+Arjun Joshi,001,ATS.STU.12.B.260001,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Meena Chandra,002,ATS.STU.12.B.260002,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Rohan Krishnan,003,ATS.STU.12.B.260003,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Priya Nair,004,ATS.STU.12.B.260004,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Karan Reddy,005,ATS.STU.12.B.260005,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Ananya Rao,006,ATS.STU.12.B.260006,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Vikram Mehta,007,ATS.STU.12.B.260007,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Sneha Patel,008,ATS.STU.12.B.260008,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Aditya Mohan,009,ATS.STU.12.B.260009,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Divya Varma,010,ATS.STU.12.B.260010,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Rahul Menon,011,ATS.STU.12.B.260011,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Pooja Sharma,012,ATS.STU.12.B.260012,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Nikhil Das,013,ATS.STU.12.B.260013,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Kavya Kapoor,014,ATS.STU.12.B.260014,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Sanjay Singh,015,ATS.STU.12.B.260015,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Riya Pillai,016,ATS.STU.12.B.260016,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Manish Suresh,017,ATS.STU.12.B.260017,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Ishita Iyer,018,ATS.STU.12.B.260018,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Varun Gupta,019,ATS.STU.12.B.260019,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Neha Bose,020,ATS.STU.12.B.260020,12,pcb,B,PCB,Physics|Chemistry|Biology|English Core,Student@2026
+Arjun Joshi,001,ATS.STU.12.C.260001,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Meena Chandra,002,ATS.STU.12.C.260002,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Rohan Krishnan,003,ATS.STU.12.C.260003,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Priya Nair,004,ATS.STU.12.C.260004,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Karan Reddy,005,ATS.STU.12.C.260005,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Ananya Rao,006,ATS.STU.12.C.260006,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Vikram Mehta,007,ATS.STU.12.C.260007,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Sneha Patel,008,ATS.STU.12.C.260008,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Aditya Mohan,009,ATS.STU.12.C.260009,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Divya Varma,010,ATS.STU.12.C.260010,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Rahul Menon,011,ATS.STU.12.C.260011,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Pooja Sharma,012,ATS.STU.12.C.260012,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Nikhil Das,013,ATS.STU.12.C.260013,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Kavya Kapoor,014,ATS.STU.12.C.260014,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Sanjay Singh,015,ATS.STU.12.C.260015,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Riya Pillai,016,ATS.STU.12.C.260016,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Manish Suresh,017,ATS.STU.12.C.260017,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Ishita Iyer,018,ATS.STU.12.C.260018,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Varun Gupta,019,ATS.STU.12.C.260019,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026
+Neha Bose,020,ATS.STU.12.C.260020,12,commerce,C,COMMERCE,Accountancy|Business Studies|Economics|English Core,Student@2026

@@ -68,6 +68,10 @@ const nextConfig = {
 const withSerwist = require('@serwist/next').default({
   swSrc: 'app/sw.ts',
   swDest: 'public/sw.js',
+  // Disable the PWA service worker in development. A stale SW intercepts
+  // navigations and can break auth (logged-in pages bounce back to /login).
+  // PWA stays fully enabled in production builds.
+  disable: process.env.NODE_ENV === 'development',
 });
 
 module.exports = withSerwist(nextConfig);

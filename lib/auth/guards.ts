@@ -147,9 +147,30 @@ async function resolveLegacyContext(): Promise<RequestAuthContext | null> {
   return null;
 }
 
+async function resolveDeveloperEnvContext(): Promise<RequestAuthContext | null> {
+  // Developer is authenticated via env credentials (DEVELOPER_USERNAME/PASSWORD)
+  // and issued an HMAC-signed session cookie. There is no Supabase developer user,
+  // so this session is always honored — independent of the legacy-session toggle.
+  // Safe because parseDeveloperSession verifies the signature with SESSION_SIGNING_SECRET
+  // (which must be a strong random secret in production).
+  const cookieStore = await cookies();
+  const developer = parseDeveloperSession(cookieStore.get(DEVELOPER_SESSION_COOKIE)?.value);
+  if (!developer) return null;
+  return {
+    role: 'developer',
+    displayName: developer.username,
+    issuedAt: developer.issuedAt,
+    expiresAt: developer.expiresAt,
+    availableRoles: ['developer'],
+  };
+}
+
 export async function getRequestAuthContext(): Promise<RequestAuthContext | null> {
   const supabaseContext = await resolveSupabaseContext();
   if (supabaseContext) return supabaseContext;
+  // Developer env-session works in every environment (general portal login).
+  const developerContext = await resolveDeveloperEnvContext();
+  if (developerContext) return developerContext;
   if (!isLegacySessionAuthEnabled()) return null;
   return resolveLegacyContext();
 }

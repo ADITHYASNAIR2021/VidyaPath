@@ -56,6 +56,15 @@ export function hasCookieHeader(req: Request): boolean {
 
 export function csrfAllowedForMutation(req: Request): boolean {
   if (!isMutationMethod(req.method)) return true;
+
+  // Browsers set Sec-Fetch-Site themselves and attacker scripts on another
+  // origin cannot forge it — a cross-site POST is tagged "cross-site". So a
+  // "same-origin" tag is a trustworthy same-origin signal that works on any
+  // host (localhost / 127.0.0.1 / LAN IP / prod), unlike origin-pinning which
+  // breaks when the dev server reports req.url as localhost.
+  const fetchSite = (req.headers.get('sec-fetch-site') || '').trim().toLowerCase();
+  if (fetchSite === 'same-origin') return true;
+
   if (!hasSafeFetchSite(req)) return false;
   if (isSameOriginRequest(req) || isTrustedReferer(req)) return true;
 
