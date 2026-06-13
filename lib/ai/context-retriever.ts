@@ -638,6 +638,31 @@ async function loadContextArtifacts(force = false): Promise<void> {
     cachedIndex = {};
     cachedRetrievalIndex = null;
   }
+
+  // ── Degraded-mode warning: if no chunks loaded, log it clearly ──
+  if (cachedChunks.length === 0) {
+    logger.warn(
+      '[context-retriever] No context chunks loaded — RAG retrieval is degraded. ' +
+      'Run `npm run build:rag` to rebuild context files. ' +
+      `Checked: ${CHUNK_PATHS.join(', ')}`,
+    );
+  }
+}
+
+// ── Public API for checking retrieval readiness ──
+
+export function getRetrievalStats() {
+  return {
+    chunkCount: cachedChunks.length,
+    chapterCount: Object.keys(cachedIndex).length,
+    hasVectors: persistedEmbeddingCache.size > 0,
+    hasRetrievalIndex: !!cachedRetrievalIndex,
+    embeddingKind: persistedEmbeddingKind,
+    embeddingDim: persistedEmbeddingDim,
+    embeddingModel: persistedEmbeddingModel,
+    degraded: cachedChunks.length === 0,
+    lastLoadedAt: cacheLoadedAt,
+  };
 }
 
 function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: Float32Array | null): number {
@@ -818,20 +843,43 @@ function extractRerankOrder(payload: unknown, passageCount: number): number[] {
 
 async function rerankContextSnippets(query: ContextQuery, snippets: ContextSnippet[]): Promise<ContextSnippet[]> {
   const apiKey = process.env.NVIDIA_API_KEY;
-  if (!isUsableNvidiaApiKey(apiKey)) return snippets;
-  const model = (process.env.AI_RERANK_MODEL || DEFAULT_NVIDIA_RERANK_MODEL).trim() || DEFAULT_NVIDIA_RERANK_MODEL;
   const queryText = query.query?.trim() || '';
   if (!queryText || snippets.length < 2) return snippets;
 
-  const payload = await rerankWithNvidia({
-    apiKey,
-    model,
-    query: queryText,
-    passages: snippets.map((snippet) => snippet.text),
-  });
-  const order = extractRerankOrder(payload, snippets.length);
-  if (order.length === 0) return snippets;
+  if (isUsableNvidiaApiKey(apiKey)) {
+    const model = (process.env.AI_RERANK_MODEL || DEFAULT_NVIDIA_RERANK_MODEL).trim() || DEFAULT_NVIDIA_RERANK_MODEL;
+    try {
+      const payload = await rerankWithNvidia({
+        apiKey,
+        model,
+        query: queryText,
+        passages: snippets.map((snippet) => snippet.text),
+      });
+      const order = extractRerankOrder(payload, snippets.length);
+      if (order.length > 0) {
+        return applyRerankOrder(snippets, order);
+      }
+    } catch (error) {
+      logger.warn({ err: error }, '[context-retriever] NVIDIA reranker failed, falling back to keyword-overlap ordering');
+    }
+  }
 
+  // Fallback: lightweight keyword-overlap reranker — sorts snippets by shared
+  // token count with the query so the best lexical match appears first.
+  const queryTokens = new Set(tokenizeRetrievalText(queryText));
+  return [...snippets].sort((a, b) => {
+    const aTokens = new Set(tokenizeRetrievalText(a.text));
+    const bTokens = new Set(tokenizeRetrievalText(b.text));
+    let aOverlap = 0, bOverlap = 0;
+    for (const t of queryTokens) {
+      if (aTokens.has(t)) aOverlap++;
+      if (bTokens.has(t)) bOverlap++;
+    }
+    return bOverlap - aOverlap;
+  });
+}
+
+function applyRerankOrder(snippets: ContextSnippet[], order: number[]): ContextSnippet[] {
   const used = new Set<number>();
   const reranked: ContextSnippet[] = [];
   for (const idx of order) {

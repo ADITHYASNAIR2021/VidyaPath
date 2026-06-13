@@ -327,7 +327,7 @@ export function attachSupabaseSessionCookies(
   session: Pick<SupabaseAuthSession, 'access_token' | 'refresh_token' | 'expires_in'>,
   roleHint?: string
 ): void {
-  const accessMaxAge = Math.max(60, session.expires_in);
+  const accessMaxAge = Math.max(session.expires_in, 8 * 60 * 60); // at least 8h to match HMAC session
   const refreshMaxAge = 30 * 24 * 60 * 60;
   const expires = new Date(Date.now() + accessMaxAge * 1000);
   response.cookies.set({

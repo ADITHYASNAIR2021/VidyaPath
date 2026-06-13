@@ -80,6 +80,8 @@ export const unifiedLoginSchema = z
     identifier: z.string().trim().min(1).max(256),
     password: z.string().trim().min(1).max(256),
     portal: z.enum(['student', 'teacher', 'admin', 'developer']).optional(),
+    classLevel: z.coerce.number().int().optional(),
+    schoolCode: z.string().trim().max(16).optional(),
   })
   .passthrough();
 

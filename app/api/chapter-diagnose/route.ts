@@ -4,6 +4,7 @@ import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { buildLearningProfile } from '@/lib/learning-profile';
 import {
   cleanTextList,
@@ -240,7 +241,7 @@ Return ONLY JSON:
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
         chapterId: chapter.id,
-        systemPrompt: `You are VidyaAI Diagnosis Engine.
+        systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Diagnosis Engine.
 - Infer weakness from quiz, recall debt, and chapter demand.
 - Keep diagnosis precise and exam-focused.
 - Recommend concrete next actions for marks improvement.

@@ -21,6 +21,7 @@ import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
 import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
 import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
@@ -513,9 +514,16 @@ ${buildVariationInstruction(variation)}`;
         chapterId: chapter.id,
         difficulty: parsed.difficulty,
         diversityKey: variation.diversityKey,
-        systemPrompt: `You are VidyaAI Chapter Drill Engine — generating authentic CBSE board-exam questions.
+        systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Chapter Drill Engine — generating authentic CBSE board-exam questions.
 
 GROUNDING (MANDATORY): Use the "Retrieved Paper Context" snippets as your PRIMARY source. Every question must be directly derived from a concept, law, formula, chemical reaction, diagram label, biological process, or numerical example present in those snippets or the NCERT chapter.
+
+CITATION RULE: Every explanation MUST end with at least one source citation tag indicating where the information came from. Use these exact formats:
+- For NCERT textbook: [NCERT Class 10 Chemistry — "Chapter Name"]
+- For CBSE board paper: [CBSE 2024 Physics Board Paper]
+- For image-extracted PYQ: [CBSE PYQ — Subject]
+
+Never invent facts. If the context does not support an answer, state "This concept requires NCERT verification."
 
 FOR MCQs — CBSE board question taxonomy (use this mix):
 • Type 1 – DIRECT RECALL (30%): "Define / Name / State the law / Write the formula" style stem; tests exact NCERT language

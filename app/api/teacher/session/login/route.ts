@@ -157,11 +157,12 @@ export async function POST(req: Request) {
       attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
       attachActiveRoleCookie(response, 'teacher');
       return response;
-    } catch {
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Invalid teacher credentials.';
       return errorJson({
         requestId,
         errorCode: 'invalid-teacher-credentials',
-        message: 'Invalid teacher credentials.',
+        message: detail,
         status: 401,
       });
     }
@@ -240,11 +241,12 @@ export async function POST(req: Request) {
         statusCode: 200,
       });
       return response;
-    } catch {
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Invalid teacher credentials.';
       return errorJson({
         requestId,
         errorCode: 'invalid-teacher-credentials',
-        message: 'Invalid teacher credentials.',
+        message: detail,
         status: 401,
       });
     }
@@ -279,8 +281,12 @@ export async function POST(req: Request) {
         attachActiveRoleCookie(response, 'teacher');
         return response;
       }
-    } catch {
-      // fall through to legacy auth
+    } catch (error) {
+      // fall through to legacy auth — but log the error for diagnostics
+      const detail = error instanceof Error ? error.message : 'Unknown error';
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[teacher-login] supabase auth failed, falling through to legacy:', detail);
+      }
     }
   }
   if (authCandidates.length > 1) {

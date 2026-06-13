@@ -5,6 +5,7 @@ import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import {
   cleanTextList,
   isPaperEvaluateResponse,
@@ -207,7 +208,7 @@ Return ONLY JSON:
         contextSnippets: contextPack.snippets,
         chapterId: chapterPool[0]?.id,
         userPrompt: prompt,
-        systemPrompt: `You are VidyaAI Paper Evaluator.
+        systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Paper Evaluator.
 - Estimate score conservatively using board standards.
 - Identify concrete mistakes and corrective tasks.
 - Recommend chapter IDs only from supplied hints when possible.

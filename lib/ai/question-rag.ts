@@ -78,11 +78,41 @@ function getSourceType(snippet: ContextSnippet): 'paper' | 'textbook' | 'image-o
   return 'paper';
 }
 
-function appendCitationTags(explanation: string, citationTags: string[]): string {
-  if (citationTags.length === 0) return explanation;
-  const suffix = citationTags.join(' ');
-  if (explanation.includes(suffix)) return explanation;
-  return `${explanation.trim()} ${suffix}`.trim();
+function buildCitationTag(snippet: ContextSnippet, index: number): string {
+  const sourceType = getSourceType(snippet);
+  const year = getSnippetYear(snippet);
+  const subject = snippet.subject || '';
+  const classLevel = snippet.classLevel || '';
+  const chapterId = snippet.chapterId || '';
+
+  // Build a human-readable citation from available snippet metadata
+  if (sourceType === 'textbook' && chapterId) {
+    return `[NCERT Class ${classLevel} ${subject} — Ch.${chapterId.replace(/^c\d+-[a-z]+-/, '')}]`;
+  }
+  if (sourceType === 'textbook') {
+    return `[NCERT Class ${classLevel} ${subject}]`;
+  }
+  if ((sourceType === 'paper' || sourceType === 'image-ocr') && year) {
+    return `[CBSE ${year} ${subject} Board Paper]`;
+  }
+  if (sourceType === 'image-ocr') {
+    return `[CBSE PYQ — ${subject}]`;
+  }
+  // Fallback
+  return `[Source ${index + 1}: ${subject}]`;
+}
+
+function appendCitationTags(explanation: string, snippets: ContextSnippet[], matchedSnippets: ContextSnippet[]): string {
+  if (matchedSnippets.length === 0) return explanation;
+  const tags = matchedSnippets
+    .map((snippet) => {
+      const index = snippets.findIndex((s) => s.id === snippet.id);
+      return buildCitationTag(snippet, index >= 0 ? index : 0);
+    })
+    .filter((tag) => !explanation.includes(tag)) // avoid duplicates
+    .slice(0, 3); // max 3 citation tags
+  if (tags.length === 0) return explanation;
+  return `${explanation.trim()}  ${tags.join(' ')}`.trim();
 }
 
 function buildPyqTag(input: {
@@ -164,13 +194,6 @@ export function annotateQuestionsWithRagMeta(
       const snippetTokens = new Set(tokenize(snippet.text || ''));
       return countOverlap(questionTokens, snippetTokens) >= 2;
     });
-    const citationTags = matchedSnippets
-      .map((snippet) => {
-        const index = snippets.findIndex((item) => item.id === snippet.id);
-        return index >= 0 ? `[S${index + 1}]` : null;
-      })
-      .filter((tag): tag is string => !!tag)
-      .slice(0, 2);
     const paperEvidence = matchedSnippets.filter((snippet) => getSourceType(snippet) === 'paper' || getSourceType(snippet) === 'image-ocr');
     const textbookEvidence = matchedSnippets.filter((snippet) => getSourceType(snippet) === 'textbook');
     const years = unique(
@@ -201,7 +224,7 @@ export function annotateQuestionsWithRagMeta(
 
     return {
       ...item,
-      explanation: appendCitationTags(item.explanation || '', citationTags),
+      explanation: appendCitationTags(item.explanation || '', snippets, matchedSnippets),
       ragMeta: {
         askedInPastExam: pyqTag === 'asked-before',
         pyqTag,

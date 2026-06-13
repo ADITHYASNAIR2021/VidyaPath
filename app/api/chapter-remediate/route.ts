@@ -4,6 +4,7 @@ import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import {
   cleanTextList,
   isChapterRemediateResponse,
@@ -212,7 +213,7 @@ Return ONLY JSON:
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
         chapterId: chapter.id,
-        systemPrompt: `You are VidyaAI Remediation Planner.
+        systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Remediation Planner.
 - Build a realistic day-wise correction plan for weak chapter areas.
 - Keep tasks measurable and time-bounded.
 - Tie plan to exam outcomes.

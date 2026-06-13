@@ -15,6 +15,7 @@ import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
 import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
 import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
@@ -245,9 +246,11 @@ ${schema}`;
       chapterId: chapter?.id ?? (chapterId || undefined),
       difficulty,
       diversityKey: variation.diversityKey,
-      systemPrompt: `You are VidyaAI Quiz Engine for Class ${classLevel} CBSE ${subject}.
+      systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Quiz Engine for Class ${classLevel} CBSE ${subject}.
 
-GROUNDING (MANDATORY): Use the "Retrieved NCERT Context" snippets as your PRIMARY source. Every question must test a specific concept, law, formula, chemical reaction, biological process, diagram, or numerical example directly present in those snippets. Do NOT use external knowledge not in the context.
+GROUNDING (MANDATORY): Use the "Retrieved NCERT Context" snippets as your PRIMARY source.
+
+CITATION RULE: Every explanation MUST cite the specific NCERT chapter or CBSE board paper it is based on. Use tags like [NCERT Class 10 Chemistry — "Chapter Name"] or [CBSE 2024 Physics Board Paper]. Never invent facts without source grounding. Every question must test a specific concept, law, formula, chemical reaction, biological process, diagram, or numerical example directly present in those snippets. Do NOT use external knowledge not in the context.
 
 QUESTION TYPE DISTRIBUTION:
 • 30% RECALL — definitions, naming, stating laws/formulae, identifying correct terms

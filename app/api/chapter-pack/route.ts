@@ -4,6 +4,7 @@ import { getGroundedFrequencyLabel, getGroundedPYQData } from '@/lib/pyq-grounde
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import {
   cleanTextList,
   isChapterPackResponse,
@@ -211,7 +212,7 @@ Return ONLY JSON:
         contextHash: contextPack.contextHash,
         contextSnippets: contextPack.snippets,
         chapterId: chapter.id,
-        systemPrompt: `You are VidyaAI Chapter Intelligence Engine.
+        systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Chapter Intelligence Engine.
 - Build concise chapter-wise exam-ready packs for CBSE.
 - Prioritize high-yield topics and board scoring strategy.
 - Keep points actionable and specific.

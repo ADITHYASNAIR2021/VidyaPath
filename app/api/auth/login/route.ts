@@ -55,9 +55,14 @@ function buildCandidateRoles(identifier: string, portalHint?: LoginRole): LoginR
   return ['teacher', 'student'];
 }
 
-function buildRolePayload(role: LoginRole, identifier: string, password: string): Record<string, unknown> {
+function buildRolePayload(role: LoginRole, identifier: string, password: string, extra?: { classLevel?: number; schoolCode?: string }): Record<string, unknown> {
   if (role === 'student') {
-    return { roll: identifier, password };
+    return {
+      roll: identifier,
+      password,
+      classLevel: extra?.classLevel,
+      schoolCode: extra?.schoolCode,
+    };
   }
   if (role === 'teacher') {
     return { identifier, password };
@@ -112,6 +117,8 @@ export async function POST(req: Request) {
   const rawIdentifier = normalizeIdentifier(bodyResult.value.identifier);
   const password = String(bodyResult.value.password || '').trim();
   const portalHint = bodyResult.value.portal;
+  const extraClassLevel = typeof bodyResult.value.classLevel === 'number' ? bodyResult.value.classLevel : undefined;
+  const extraSchoolCode = typeof bodyResult.value.schoolCode === 'string' ? bodyResult.value.schoolCode.trim() : undefined;
   if (!rawIdentifier || !password) {
     return errorJson({
       requestId,
@@ -126,7 +133,7 @@ export async function POST(req: Request) {
   let deferredErrorResponse: Response | null = null;
 
   for (const [index, role] of candidates.entries()) {
-    const payload = buildRolePayload(role, rawIdentifier, password);
+    const payload = buildRolePayload(role, rawIdentifier, password, { classLevel: extraClassLevel, schoolCode: extraSchoolCode });
     const internalRequest = new Request(new URL(req.url), {
       method: 'POST',
       headers: forwardHeaders,
@@ -137,9 +144,19 @@ export async function POST(req: Request) {
       return response;
     }
     const hasMoreCandidates = index < candidates.length - 1;
-    const isRetryableCrossRoleFailure = response.status === 429 || response.status === 409 || response.status >= 500;
-    if (isRetryableCrossRoleFailure) {
+
+    // Hard-stop: rate-limit (429) or server fault (500+) means retrying another
+    // role would either consume that bucket too or hit the same broken backend.
+    const isHardStop = response.status === 429 || response.status >= 500;
+
+    // 401/403/404/409: wrong role, not wrong credentials. Store the error and
+    // continue to the next candidate — the user's credentials may be valid for
+    // a different role than the one we guessed.
+    if (!response.ok) {
       if (!deferredErrorResponse) deferredErrorResponse = response;
+      if (isHardStop) {
+        return response;
+      }
       if (hasMoreCandidates && !portalHint) {
         continue;
       }

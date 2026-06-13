@@ -247,7 +247,7 @@ export async function POST(req: Request) {
           statusCode: 200,
         });
         return response;
-      } catch {
+      } catch (error) {
         await recordAuditEvent({
           requestId,
           endpoint: '/api/student/session/login',
@@ -256,10 +256,11 @@ export async function POST(req: Request) {
           actorRole: 'system',
           metadata: { schoolCode, rollNo: normalizedRollNo, mode: 'supabase-composite' },
         });
+        const detail = error instanceof Error ? error.message : 'Invalid student credentials.';
         return errorJson({
           requestId,
           errorCode: 'invalid-student-credentials',
-          message: 'Invalid student credentials.',
+          message: detail,
           status: 401,
         });
       }
@@ -318,11 +319,12 @@ export async function POST(req: Request) {
           schoolId: student.schoolId,
         });
         return response;
-      } catch {
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Invalid student credentials.';
         return errorJson({
           requestId,
           errorCode: 'invalid-student-credentials',
-          message: 'Invalid student credentials.',
+          message: detail,
           status: 401,
         });
       }
@@ -415,7 +417,8 @@ export async function POST(req: Request) {
       );
       attachSupabaseSessionCookies(response, authSession, 'student');
       return response;
-    } catch {
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Invalid student credentials.';
       return errorJson({
         requestId,
         errorCode: 'invalid-student-credentials',

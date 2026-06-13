@@ -16,7 +16,10 @@ function isLikelyRealNvidiaKey(value: string): boolean {
 }
 
 function shouldProbePgvector(): boolean {
-  return process.env.AI_ENABLE_PGVECTOR_RAG === '1';
+  // Explicit opt-out with AI_ENABLE_PGVECTOR_RAG=0 disables pgvector.
+  if (process.env.AI_ENABLE_PGVECTOR_RAG === '0') return false;
+  // Enable by default in production; in dev, opt-in with AI_ENABLE_PGVECTOR_RAG=1.
+  return process.env.NODE_ENV === 'production' || process.env.AI_ENABLE_PGVECTOR_RAG === '1';
 }
 
 export async function register() {

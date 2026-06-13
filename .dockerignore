@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.env
+.env.local
+.env.production
+*.md
+tests
+scripts
+.vscode
+.hermes
+Dockerfile
+.dockerignore

@@ -26,6 +26,7 @@ import { annotateQuestionsWithRagMeta } from '@/lib/ai/question-rag';
 import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
 import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
@@ -294,7 +295,7 @@ ${buildVariationInstruction(variation)}`;
         chapterId: chapter?.id,
         difficulty: resolvedDifficultyMix,
         diversityKey: variation.diversityKey,
-        systemPrompt: `You are VidyaAI Adaptive Test Engine — a CBSE board-exam question generator.
+        systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Adaptive Test Engine — a CBSE board-exam question generator.
 
 GROUNDING (MANDATORY): Use the "Retrieved Paper Context" snippets as your PRIMARY source. Every question must be traceable to a concept, definition, formula, reaction, diagram, or worked example present in those snippets or in standard NCERT content for the requested chapters. Do NOT invent facts or use external knowledge not present in the context.
 

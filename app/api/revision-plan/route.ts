@@ -4,6 +4,7 @@ import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import {
   cleanTextList,
   isRevisionPlanResponse,
@@ -216,7 +217,7 @@ Return ONLY JSON in this shape:
         contextSnippets: contextPack.snippets,
         chapterId: weakChapter?.id,
         userPrompt: prompt,
-        systemPrompt: `You are VidyaAI Revision Planner.
+        systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Revision Planner.
 - Prioritize high-yield chapters from PYQ trend.
 - Produce realistic week-by-week plans.
 - Keep output concise and structured.

@@ -10,6 +10,7 @@
     "lint:strict": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "check:all": "npm run typecheck && npm run lint && npm run test",
+    "check:ci": "npm run typecheck && npm run lint:strict && npm run test",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

@@ -4,6 +4,7 @@ import { getChapterById } from '@/lib/data';
 import { getContextPack } from '@/lib/ai/context-retriever';
 import { generateTaskJson } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
+import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { isFlashcardArray, normalizeFlashcards, type FlashcardItem } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { requireInteractiveAuth } from '@/lib/auth/interactive';
@@ -202,7 +203,7 @@ ${schemaNote}`;
       contextSnippets: contextPack.snippets,
       chapterId: chapter?.id ?? (chapterId || undefined),
       diversityKey: variation.diversityKey,
-      systemPrompt: `You are VidyaAI Flashcard Engine for Class ${classLevel} CBSE ${subject}.
+      systemPrompt: `${getContentSafetyBlock()}\n\nYou are VidyaAI Flashcard Engine for Class ${classLevel} CBSE ${subject}.
 Generate flashcards grounded exclusively in the NCERT chapter content provided in the "Retrieved NCERT Context" section.
 Rules:
 - Every flashcard must contain actual ${subject} facts from the chapter: definitions, formulas, laws, reactions, named examples, or key processes.
