@@ -23,7 +23,13 @@ function shouldProbePgvector(): boolean {
 }
 
 export async function register() {
+  if (process.env.NEXT_RUNTIME === 'edge') {
+    await import('./sentry.edge.config');
+    return;
+  }
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+
+  await import('./sentry.server.config');
 
   const { assertRequiredEnv } = await import('@/lib/config/env-validation');
   assertRequiredEnv();
@@ -95,3 +101,6 @@ export async function register() {
     })
     .catch(() => undefined);
 }
+
+export const onRequestError = Sentry.captureRequestError;
+import * as Sentry from '@sentry/nextjs';

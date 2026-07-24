@@ -1,0 +1,7 @@
+Contact: mailto:security@vidyapath.in
+Expires: 2027-06-14T00:00:00.000Z
+Encryption: https://vidyapath.in/.well-known/pgp-key.txt
+Acknowledgments: https://vidyapath.in/security/acknowledgments
+Policy: https://vidyapath.in/privacy
+Preferred-Languages: en
+Canonical: https://vidyapath.in/.well-known/security.txt

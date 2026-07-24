@@ -8,7 +8,16 @@ function validateBuildEnv() {
   if (!(hasValue('NEXT_PUBLIC_SUPABASE_ANON_KEY') || hasValue('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'))) {
     missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY|NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY');
   }
-  if (!hasValue('SESSION_SIGNING_SECRET')) missing.push('SESSION_SIGNING_SECRET');
+  if (!hasValue('SUPABASE_SERVICE_ROLE_KEY')) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (!hasValue('SESSION_SIGNING_SECRET')) {
+    missing.push('SESSION_SIGNING_SECRET');
+  } else if (process.env.SESSION_SIGNING_SECRET.trim().length < 32) {
+    missing.push('SESSION_SIGNING_SECRET (minimum 32 characters)');
+  }
+  if (!hasValue('TEACHER_PORTAL_KEY')) missing.push('TEACHER_PORTAL_KEY');
+  if (!hasValue('NEXT_PUBLIC_APP_URL')) missing.push('NEXT_PUBLIC_APP_URL');
+  if (!hasValue('DEVELOPER_USERNAME')) missing.push('DEVELOPER_USERNAME');
+  if (!hasValue('DEVELOPER_PASSWORD')) missing.push('DEVELOPER_PASSWORD');
   if (missing.length > 0) {
     throw new Error(`Missing required production env vars: ${missing.join(', ')}`);
   }
@@ -17,6 +26,8 @@ function validateBuildEnv() {
 validateBuildEnv();
 
 const nextConfig = {
+  // Sentry source maps for production error tracking
+  productionBrowserSourceMaps: process.env.SENTRY_DSN ? true : false,
   // Limit parallel static-generation workers to prevent OOM on machines
   // with large RAG context files (retrieval_index.json etc.) in lib/context/.
   experimental: {
@@ -75,3 +86,21 @@ const withSerwist = require('@serwist/next').default({
 });
 
 module.exports = withSerwist(nextConfig);
+
+// ── Sentry: wraps build with source maps + error instrumentation ──
+if (process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN) {
+  const { withSentryConfig } = require('@sentry/nextjs');
+  module.exports = withSentryConfig(module.exports, {
+    org: process.env.SENTRY_ORG || 'adithya-s-nair',
+    project: process.env.SENTRY_PROJECT || 'javascript-nextjs',
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+    silent: true,
+    widenClientFileUpload: true,
+    hideSourceMaps: true,
+    webpack: {
+      treeshake: {
+        removeDebugLogging: true,
+      },
+    },
+  });
+}

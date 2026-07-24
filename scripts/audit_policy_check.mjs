@@ -37,6 +37,22 @@ if (!fs.existsSync(riskRegisterPath)) {
 
 const audit = parseJson(auditPath);
 const riskRegister = parseJson(riskRegisterPath);
+
+if (audit?.error) {
+  const summary =
+    typeof audit.error === 'string'
+      ? audit.error
+      : audit.error.summary || audit.error.message || JSON.stringify(audit.error);
+  fail(`npm audit did not return a valid advisory report: ${summary}`);
+}
+if (
+  !audit?.metadata ||
+  !audit.metadata.vulnerabilities ||
+  typeof audit.metadata.vulnerabilities !== 'object'
+) {
+  fail('npm audit report is missing metadata.vulnerabilities.');
+}
+
 const accepted = Array.isArray(riskRegister.acceptedAdvisories)
   ? riskRegister.acceptedAdvisories
   : [];

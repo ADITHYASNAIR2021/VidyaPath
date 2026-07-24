@@ -35,7 +35,6 @@ export async function POST(req: Request) {
       windowSeconds: 60,
       maxRequests: 12,
       blockSeconds: 120,
-      failOpen: true,
     });
     if (!ipRateLimit.allowed) {
       return errorJson({
@@ -84,7 +83,6 @@ export async function POST(req: Request) {
     windowSeconds: 60,
     maxRequests: 8,
     blockSeconds: 180,
-    failOpen: true,
   });
   if (!identityRateLimit.allowed) {
     return errorJson({

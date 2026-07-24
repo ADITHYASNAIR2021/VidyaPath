@@ -45,8 +45,11 @@ supabase/.branches/
 supabase/.env
 
 # AI context bundle — fetched at runtime from CONTEXT_BUNDLE_URL
-lib/context/chunks.jsonl
-lib/context/retrieval_index.json
+lib/context/*.jsonl
+lib/context/*.jsonl.gz
+lib/context/*_index.json
 lib/context/rag_build_report.json
+lib/context/.rag_count.json
+public/sw.js.map
 __pycache__/
 *.py[cod]

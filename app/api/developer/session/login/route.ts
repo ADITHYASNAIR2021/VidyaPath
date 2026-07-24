@@ -84,7 +84,6 @@ export async function POST(req: Request) {
       windowSeconds: 60,
       maxRequests: 8,
       blockSeconds: 180,
-      failOpen: true,
     });
     if (!rateLimit.allowed) {
       return errorJson({

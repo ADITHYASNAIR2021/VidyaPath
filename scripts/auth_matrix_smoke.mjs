@@ -24,18 +24,35 @@ async function fetchNoRedirect(path, init) {
   });
 }
 
-await check('admin page redirects without auth', async () => {
-  const response = await fetchNoRedirect('/admin');
-  assert([301, 302, 303, 307, 308].includes(response.status), `Expected redirect, got ${response.status}`);
-});
-
-await check('teacher page redirects without auth', async () => {
-  const response = await fetchNoRedirect('/teacher');
-  assert([301, 302, 303, 307, 308].includes(response.status), `Expected redirect, got ${response.status}`);
-});
+for (const [name, path] of [
+  ['admin', '/admin'],
+  ['teacher', '/teacher'],
+  ['student', '/dashboard'],
+  ['developer', '/developer'],
+  ['sentry test', '/sentry-example-page'],
+  ['parent', '/parent'],
+]) {
+  await check(`${name} page redirects without auth`, async () => {
+    const response = await fetchNoRedirect(path);
+    assert(
+      [301, 302, 303, 307, 308].includes(response.status),
+      `Expected redirect, got ${response.status}`,
+    );
+  });
+}
 
 await check('developer API denies without developer session', async () => {
   const response = await fetchNoRedirect('/api/developer/schools');
+  assert(response.status === 401, `Expected 401, got ${response.status}`);
+});
+
+await check('admin API denies without admin session', async () => {
+  const response = await fetchNoRedirect('/api/admin/overview');
+  assert(response.status === 401, `Expected 401, got ${response.status}`);
+});
+
+await check('parent API denies without parent session', async () => {
+  const response = await fetchNoRedirect('/api/parent/dashboard');
   assert(response.status === 401, `Expected 401, got ${response.status}`);
 });
 

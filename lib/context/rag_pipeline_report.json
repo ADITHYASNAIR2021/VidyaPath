@@ -1,0 +1,86 @@
+{
+  "version": "1",
+  "generatedAt": "2026-06-14T14:23:34Z",
+  "args": {
+    "skip_downloads": true,
+    "skip_question_papers": false,
+    "skip_textbooks": false,
+    "class_filter": null,
+    "subject_filter": null,
+    "year": null,
+    "max_files": 0,
+    "max_pages": 20,
+    "image_max_pages": 0,
+    "workers": 15,
+    "nvidia_api_key": null,
+    "skip_clean": false,
+    "skip_benchmark": false
+  },
+  "steps": [
+    {
+      "label": "Build paper context index",
+      "command": [
+        "C:\\Users\\adith\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\python.exe",
+        "D:\\VidyaPath\\scripts\\build_context_index.py",
+        "--max-files",
+        "0",
+        "--max-pages",
+        "20",
+        "--save-images",
+        "--extract-images"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 24183.19
+    },
+    {
+      "label": "Build textbook semantic index",
+      "command": [
+        "C:\\Users\\adith\\AppData\\Local\\hermes\\hermes-agent\\venv\\Scripts\\python.exe",
+        "D:\\VidyaPath\\scripts\\build_textbook_index.py",
+        "--merge-main-index",
+        "--save-images",
+        "--extract-images",
+        "--image-max-pages",
+        "0"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 5390.07
+    },
+    {
+      "label": "Clean context chunks",
+      "command": [
+        "D:\\VidyaPath\\.tools\\node-current\\node.exe",
+        "D:\\VidyaPath\\scripts\\clean_context_chunks.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 40.84
+    },
+    {
+      "label": "Build vector index",
+      "command": [
+        "D:\\VidyaPath\\.tools\\node-current\\node.exe",
+        "D:\\VidyaPath\\scripts\\build_vector_index.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1435.38
+    },
+    {
+      "label": "Build retrieval index",
+      "command": [
+        "D:\\VidyaPath\\.tools\\node-current\\node.exe",
+        "D:\\VidyaPath\\scripts\\build_retrieval_index.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 21.87
+    },
+    {
+      "label": "Check dataset quality",
+      "command": [
+        "D:\\VidyaPath\\.tools\\node-current\\node.exe",
+        "D:\\VidyaPath\\scripts\\check_dataset_quality.mjs"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 1.04
+    }
+  ]
+}

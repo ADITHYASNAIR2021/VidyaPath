@@ -53,6 +53,12 @@ MIN_ENGLISH_RATIO = 0.52
 
 CONTROL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]+")
 
+# CBSE PDFs with custom font encoding for Indian scripts produce garbled
+# Unicode in the private-use area (U+E000–U+F8FF) and symbol blocks.
+# These chunks are noise — detect and drop them.
+FONT_CORRUPTION_RE = re.compile(r"[\uE000-\uF8FF\u2190-\u21FF\u2200-\u22FF\u2300-\u23FF\u25A0-\u25FF\u2600-\u26FF\u2700-\u27BF\uFE00-\uFE0F]")
+MIN_LEGIT_CHAR_RATIO = 0.72  # at least 72% of non-whitespace chars must be normal
+
 # Semantic chunking patterns for CBSE exam papers
 SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+(?=[A-Z(\[])')
 # Detects question starts: "Q1.", "Question 1", "1.", "1)", "(a)", "(i)"
@@ -188,6 +194,26 @@ def is_instruction_chunk(text: str) -> bool:
     )
     question_hits = len(re.findall(r"\b(question|solve|find|calculate|evaluate|prove|show that|which of the following)\b", lower))
     return instruction_hits >= 2 and question_hits < 3
+
+
+def is_corrupted_font_text(text: str) -> bool:
+    """Detect text garbled by custom font encoding in CBSE PDFs (Hindi, regional scripts).
+
+    CBSE often uses pre-Unicode font hacks where Devanagari/Tamil/etc glyphs
+    are mapped to private-use Unicode codepoints (U+E000–U+F8FF) or symbol
+    blocks. The resulting text is unreadable for retrieval.
+
+    Returns True if the text is likely corrupted and should be dropped.
+    """
+    if not text.strip():
+        return False
+    # Strip whitespace for ratio calculation
+    stripped = re.sub(r"\s+", "", text)
+    if len(stripped) < 40:
+        return False  # too short to reliably classify
+    corruption_hits = len(FONT_CORRUPTION_RE.findall(stripped))
+    legit_ratio = (len(stripped) - corruption_hits) / len(stripped) if stripped else 1.0
+    return legit_ratio < MIN_LEGIT_CHAR_RATIO
 
 
 def format_eta(seconds: float) -> str:
@@ -772,6 +798,7 @@ def build_index(
     dropped_unmapped_chunks = 0
     dropped_non_english_chunks = 0
     dropped_instruction_chunks = 0
+    dropped_corrupted_chunks = 0
     kept_unmapped_chunks = 0
     image_manifest_entries: List[dict] = []
     image_output_root = output_dir / "images"
@@ -842,12 +869,16 @@ def build_index(
                 saved_image_entries[candidate.page_num] = manifest_entry
 
         chapter_pool = chapter_candidates_for_subject(chapters, record.class_level, record.subject)
-        for chunk_text in chunks:
+        total_chunks_for_pdf = len(chunks)
+        for chunk_index, chunk_text in enumerate(chunks):
             chunk_text = clean_text(chunk_text)
             if not chunk_text:
                 continue
             if is_instruction_chunk(chunk_text):
                 dropped_instruction_chunks += 1
+                continue
+            if is_corrupted_font_text(chunk_text):
+                dropped_corrupted_chunks += 1
                 continue
             if not include_non_english and not is_english_chunk(chunk_text):
                 dropped_non_english_chunks += 1
@@ -869,6 +900,8 @@ def build_index(
                 "paperType": record.paper_type,
                 "sourcePath": record.relative_path,
                 "text": chunk_text,
+                "chunkIndex": chunk_index,
+                "totalChunks": total_chunks_for_pdf,
             }
             if has_images:
                 entry["hasImages"] = True
@@ -963,6 +996,7 @@ def build_index(
             "droppedUnmappedChunks": dropped_unmapped_chunks,
             "droppedNonEnglishChunks": dropped_non_english_chunks,
             "droppedInstructionChunks": dropped_instruction_chunks,
+            "droppedCorruptedChunks": dropped_corrupted_chunks,
             "selectedYearMin": min((r.year for r in selected), default=None),
             "selectedYearMax": max((r.year for r in selected), default=None),
             "selectedPre2019Papers": sum(1 for r in selected if r.year < 2019),
@@ -996,6 +1030,7 @@ def build_index(
         kept_unmapped_chunks,
         dropped_non_english_chunks,
         dropped_instruction_chunks,
+        dropped_corrupted_chunks,
     )
 
 
@@ -1076,7 +1111,7 @@ def main() -> None:
     if args.extract_images and not nvidia_key:
         print("WARNING: --extract-images without NVIDIA_API_KEY — image detection only, no OCR.", file=sys.stderr)
 
-    selected_count, chunk_count, dropped_unmapped_chunks, kept_unmapped_chunks, dropped_non_english_chunks, dropped_instruction_chunks = build_index(
+    selected_count, chunk_count, dropped_unmapped_chunks, kept_unmapped_chunks, dropped_non_english_chunks, dropped_instruction_chunks, dropped_corrupted_chunks = build_index(
         dataset_root=dataset_root,
         output_dir=output_dir,
         max_files=args.max_files,
@@ -1095,7 +1130,8 @@ def main() -> None:
         "Built context index: "
         f"selected_pdfs={selected_count}, chunks={chunk_count}, dropped_unmapped={dropped_unmapped_chunks}, "
         f"kept_unmapped={kept_unmapped_chunks}, dropped_non_english={dropped_non_english_chunks}, "
-        f"dropped_instruction={dropped_instruction_chunks}, output={output_dir}"
+        f"dropped_instruction={dropped_instruction_chunks}, dropped_corrupted={dropped_corrupted_chunks}, "
+        f"output={output_dir}"
     )
 
 

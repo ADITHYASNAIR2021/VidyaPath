@@ -288,6 +288,7 @@ export async function getDeveloperSessionFromRequestCookies(): Promise<{
   if (context && context.role === 'developer') {
     return {
       authUserId: context.authUserId,
+      username: context.displayName,
       issuedAt: context.issuedAt,
       expiresAt: context.expiresAt,
     };

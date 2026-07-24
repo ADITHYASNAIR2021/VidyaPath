@@ -27,4 +27,8 @@ COPY --from=builder /app/next.config.js ./
 COPY --from=builder /app/package.json ./
 
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/api/health',(r)=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{const j=JSON.parse(d);process.exit(j.status==='ok'?0:1)}catch{process.exit(1)}})});r.on('error',()=>process.exit(1))"
+
 CMD ["npx", "next", "start"]

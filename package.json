@@ -2,6 +2,10 @@
   "name": "vidyapath",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=10"
+  },
   "scripts": {
     "dev": "next dev --webpack",
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=7168 next build --webpack",
@@ -23,11 +27,14 @@
     "build:textbooks": "node scripts/run_python.mjs scripts/build_textbook_index.py --merge-main-index",
     "build:vectors": "node scripts/build_vector_index.mjs",
     "build:retrieval-index": "node scripts/build_retrieval_index.mjs",
-    "build:rag": "npm run build:context && npm run build:textbooks && npm run build:vectors && npm run build:retrieval-index",
-    "build:rag:clean": "npm run build:context && npm run build:textbooks && npm run clean:chunks && npm run build:vectors && npm run build:retrieval-index",
-    "build:rag:full": "node scripts/run_python.mjs scripts/build_rag_pipeline.py",
-    "build:rag:full:no-download": "node scripts/run_python.mjs scripts/build_rag_pipeline.py --skip-downloads",
+    "build:rag": "npm run build:context && npm run build:textbooks && npm run build:vectors && npm run build:retrieval-index && npm run write:rag-count",
+    "build:rag:clean": "npm run build:context && npm run build:textbooks && npm run clean:chunks && npm run build:vectors && npm run build:retrieval-index && npm run write:rag-count",
+    "build:rag:full": "node scripts/run_python.mjs scripts/build_rag_pipeline.py && npm run write:rag-count",
+    "build:rag:full:no-download": "node scripts/run_python.mjs scripts/build_rag_pipeline.py --skip-downloads && npm run write:rag-count",
     "clean:chunks": "node scripts/clean_context_chunks.mjs",
+    "write:rag-count": "node scripts/write_rag_count.mjs",
+    "compress:context": "node scripts/compress_context.mjs",
+    "upload:context": "node scripts/upload_context_to_storage.mjs",
     "verify:context": "node scripts/verify_context_index.mjs",
     "eval:rag": "vitest run lib/ai/__tests__/rag-benchmark.test.ts",
     "check:auth-matrix": "node scripts/auth_matrix_smoke.mjs",
@@ -70,6 +77,7 @@
     "rag:build:no-bench": "node scripts/rag_build.mjs --skip-benchmark"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.57.0",
     "@serwist/next": "^9.5.7",
     "@supabase/supabase-js": "^2.103.3",
     "@types/web-push": "^3.6.4",
@@ -80,7 +88,7 @@
     "katex": "^0.16.45",
     "lucide-react": "^0.400.0",
     "mermaid": "^11.14.0",
-    "next": "16.2.4",
+    "next": "16.2.9",
     "pino": "^10.3.1",
     "postcss": "8.5.10",
     "react": "^18",
@@ -103,7 +111,7 @@
     "autoprefixer": "^10.0.1",
     "cross-env": "^10.1.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.4",
+    "eslint-config-next": "16.2.9",
     "null-loader": "^4.0.1",
     "tailwindcss": "^3.4.1",
     "typescript": "^5",
@@ -114,7 +122,7 @@
     "dompurify": "^3.4.0",
     "uuid": "^14.0.0",
     "next": {
-      ".": "16.2.4",
+      ".": "16.2.9",
       "postcss": "8.5.10"
     }
   },

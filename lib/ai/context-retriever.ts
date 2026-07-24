@@ -54,6 +54,7 @@ interface ContextChunk {
   paperType?: PaperType;
   page?: number;
   chunkIndex?: number;
+  totalChunks?: number;
 }
 
 interface RerankIndexCandidate {
@@ -442,7 +443,21 @@ function isHighQualityChunk(text: string): boolean {
   // Devanagari content (Hindi medium) accepted at ≥0.40 ratio.
   if (englishRatio < 0.50 && devanagariRatio < 0.40) return false;
   if (looksLikeInstructionChunk(text)) return false;
+  if (isCorruptedFontText(text)) return false;
   return true;
+}
+
+// CBSE PDFs with custom font encoding produce garbled Unicode in the
+// private-use area (U+E000–U+F8FF) and symbol blocks. Detect and drop.
+const FONT_CORRUPTION_RE = /[\uE000-\uF8FF\u2190-\u21FF\u2200-\u22FF\u2300-\u23FF\u25A0-\u25FF\u2600-\u26FF\u2700-\u27BF\uFE00-\uFE0F]/g;
+const MIN_LEGIT_CHAR_RATIO = 0.72;
+
+function isCorruptedFontText(text: string): boolean {
+  const stripped = text.replace(/\s+/g, '');
+  if (stripped.length < 40) return false;
+  const corruptionHits = (stripped.match(FONT_CORRUPTION_RE) ?? []).length;
+  const legitRatio = (stripped.length - corruptionHits) / stripped.length;
+  return legitRatio < MIN_LEGIT_CHAR_RATIO;
 }
 
 function inferChapterIdFromSource(sourcePath: string): string | undefined {
@@ -527,12 +542,39 @@ async function loadContextArtifacts(force = false): Promise<void> {
   if (!force && now - cacheLoadedAt < CACHE_TTL_MS) return;
   cacheLoadedAt = now;
 
+  const cdnBaseUrl = (process.env.CONTEXT_CDN_URL || '').trim().replace(/\/+$/, '');
+
   try {
+    // ── Fetch context files from local disk or CDN ──
+    const fetchFile = async (localPath: string, fileName: string): Promise<string> => {
+      // Try local disk first
+      try {
+        return await fs.readFile(localPath, 'utf-8');
+      } catch {
+        // Fallback: fetch from CDN if configured (prefer .gz for smaller transfer)
+        if (cdnBaseUrl) {
+          try {
+            const gzRes = await fetch(`${cdnBaseUrl}/${fileName}.gz`);
+            if (gzRes.ok) {
+              const { gunzipSync } = await import('node:zlib');
+              const compressed = Buffer.from(await gzRes.arrayBuffer());
+              return gunzipSync(compressed).toString('utf-8');
+            }
+          } catch { /* .gz not available — try raw */ }
+          try {
+            const res = await fetch(`${cdnBaseUrl}/${fileName}`);
+            if (res.ok) return await res.text();
+          } catch { /* CDN fetch failed — return empty */ }
+        }
+        return '';
+      }
+    };
+
     const [chunkPayloads, indexPayloads, vectorPayload, retrievalIndexPayload] = await Promise.all([
-      Promise.all(CHUNK_PATHS.map((chunkPath) => fs.readFile(chunkPath, 'utf-8').catch(() => ''))),
-      Promise.all(INDEX_PATHS.map((indexPath) => fs.readFile(indexPath, 'utf-8').catch(() => '{}'))),
-      fs.readFile(VECTOR_INDEX_PATH, 'utf-8').catch(() => ''),
-      fs.readFile(RETRIEVAL_INDEX_PATH, 'utf-8').catch(() => ''),
+      Promise.all(CHUNK_PATHS.map((p) => fetchFile(p, path.basename(p)))),
+      Promise.all(INDEX_PATHS.map((p) => fetchFile(p, path.basename(p)))),
+      fetchFile(VECTOR_INDEX_PATH, path.basename(VECTOR_INDEX_PATH)),
+      fetchFile(RETRIEVAL_INDEX_PATH, path.basename(RETRIEVAL_INDEX_PATH)),
     ]);
 
     const seen = new Set<string>();

@@ -35,6 +35,21 @@ const REQUIRED_SPECS: EnvSpec[] = [
     required: true,
     description: 'Shared secret for teacher portal login.',
   },
+  {
+    key: 'NEXT_PUBLIC_APP_URL',
+    required: true,
+    description: 'Canonical app URL for CSRF origin pinning, cookie domain, and metadata.',
+  },
+  {
+    key: 'DEVELOPER_USERNAME',
+    required: true,
+    description: 'Developer login username. Must be set explicitly in production.',
+  },
+  {
+    key: 'DEVELOPER_PASSWORD',
+    required: true,
+    description: 'Developer login password. Must be set explicitly in production.',
+  },
 ];
 
 const RECOMMENDED_SPECS: EnvSpec[] = [
@@ -100,6 +115,9 @@ export function validateEnv(mode: 'strict' | 'report' = 'report'): EnvValidation
   const sessionSecret = (process.env.SESSION_SIGNING_SECRET || '').trim();
   if (sessionSecret && sessionSecret.length < 32) {
     warnings.push('SESSION_SIGNING_SECRET is shorter than 32 characters — use a longer secret in production.');
+    if (mode === 'strict') {
+      missing.push('SESSION_SIGNING_SECRET must be at least 32 characters');
+    }
   }
 
   for (const spec of RECOMMENDED_SPECS) {

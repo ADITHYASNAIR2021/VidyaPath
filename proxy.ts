@@ -312,6 +312,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/api-lab');
   const needsDeveloper =
     pathname.startsWith('/developer') ||
+    pathname === '/sentry-example-page' ||
     pathname.startsWith('/api-lab') ||
     (singleEnvMode && pathname.startsWith('/admin'));
   const needsTeacher = pathname.startsWith('/teacher');
@@ -423,6 +424,12 @@ export async function proxy(request: NextRequest) {
       url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
       return redirectWithSecurityHeaders(url, nonce);
     }
+  }
+  if (pathname === '/sentry-example-page' && !hasDeveloperLikeSession) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/developer/login';
+    url.searchParams.set('next', pathname);
+    return redirectWithSecurityHeaders(url, nonce);
   }
   if (pathname.startsWith('/teacher') && pathname !== '/teacher/login') {
     if (!hasTeacherSession) return redirectToLogin(request, '/teacher/login', nonce);

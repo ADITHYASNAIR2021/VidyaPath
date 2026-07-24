@@ -35,6 +35,12 @@ export default function SiteFooter() {
         </div>
 
         <div className="flex items-center gap-3 text-xs">
+          <Link href="/privacy" className="text-[#8A8AAA] hover:text-navy-700 transition-colors">
+            Privacy
+          </Link>
+          <Link href="/terms" className="text-[#8A8AAA] hover:text-navy-700 transition-colors">
+            Terms
+          </Link>
           <Link href="/login" className="text-indigo-700 hover:text-indigo-800 font-semibold">
             Login
           </Link>

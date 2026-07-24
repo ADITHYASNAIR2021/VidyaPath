@@ -1,6 +1,10 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -67,7 +71,10 @@ jobs:
         run: npm ci
 
       - name: npm audit (json)
-        run: npm audit --omit=dev --json > .audit-report.json
+        # npm audit exits non-zero when it finds any advisory. The policy step
+        # below decides which severities/accepted risks fail CI, so preserve
+        # the report and let that step make the decision.
+        run: npm audit --omit=dev --json > .audit-report.json || true
 
       - name: Enforce audit policy
         run: npm run audit:policy

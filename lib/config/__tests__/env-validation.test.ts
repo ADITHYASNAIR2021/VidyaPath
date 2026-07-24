@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { validateEnv } from '@/lib/config/env-validation';
 
-const REQUIRED_KEYS = ['SESSION_SIGNING_SECRET', 'TEACHER_PORTAL_KEY'];
+const REQUIRED_KEYS = [
+  'SESSION_SIGNING_SECRET',
+  'TEACHER_PORTAL_KEY',
+  'NEXT_PUBLIC_APP_URL',
+  'DEVELOPER_USERNAME',
+  'DEVELOPER_PASSWORD',
+];
 
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void) {
   const saved: Record<string, string | undefined> = {};
@@ -52,6 +58,9 @@ describe('validateEnv — report mode', () => {
       {
         SESSION_SIGNING_SECRET: 'short',
         TEACHER_PORTAL_KEY: 'test-teacher-key',
+        NEXT_PUBLIC_APP_URL: 'https://test.com',
+        DEVELOPER_USERNAME: 'test-dev',
+        DEVELOPER_PASSWORD: 'test-dev-pw',
       },
       () => {
         const result = validateEnv('report');
@@ -84,6 +93,15 @@ describe('validateEnv — strict mode', () => {
     );
     withEnv(full, () => {
       expect(() => validateEnv('strict')).not.toThrow();
+    });
+  });
+
+  it('throws when SESSION_SIGNING_SECRET is too short', () => {
+    const full = Object.fromEntries(
+      REQUIRED_KEYS.map((k) => [k, 'test-value-long-enough-32-characters-here'])
+    );
+    withEnv({ ...full, SESSION_SIGNING_SECRET: 'too-short' }, () => {
+      expect(() => validateEnv('strict')).toThrow(/at least 32 characters/);
     });
   });
 });

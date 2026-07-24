@@ -71,8 +71,8 @@ Install these before anything else:
 
 | Tool | Version | Why |
 |------|---------|-----|
-| Node.js | 18+ | Runs the Next.js app |
-| npm | 9+ | Installs JavaScript packages |
+| Node.js | 20.9+ | Required by Next.js 16 |
+| npm | 10+ | Installs JavaScript packages |
 | Python | 3.10+ | Runs the chunking and OCR scripts |
 | Git | any | Clones the repo |
 
@@ -133,6 +133,9 @@ Then open `.env.local` and fill in your values. Here is what each variable does:
 ```env
 SESSION_SIGNING_SECRET=replace_with_long_random_secret_min_32_chars
 TEACHER_PORTAL_KEY=replace_with_teacher_secret
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+DEVELOPER_USERNAME=developer@example.org
+DEVELOPER_PASSWORD=replace_with_a_strong_unique_password
 ```
 
 Generate a random secret: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
@@ -285,11 +288,11 @@ npm run verify:context
 
 | File | Contents | Used for |
 |------|----------|----------|
-| `lib/context/chunks.jsonl` | ~3000–8000 text chunks from board papers | Question grounding |
+| `lib/context/chunks.jsonl` | Board-paper text chunks (often tens of thousands) | Question grounding |
 | `lib/context/chapter_index.json` | Maps chapter IDs to source PDF paths | Fast chapter lookup |
 | `lib/context/textbook_chunks.jsonl` | Text chunks from NCERT textbooks | NCERT definitions in prompts |
 | `lib/context/textbook_chapter_index.json` | Textbook source map | Textbook lookup |
-| `lib/context/chunk_vectors.jsonl` | 192-dim hash embeddings per chunk | Semantic similarity scoring |
+| `lib/context/chunk_vectors.jsonl` | Local 384-dim semantic or hash-fallback vectors | Similarity scoring |
 
 **What is semantic chunking?**
 
@@ -495,6 +498,13 @@ npm run start           # Serve production build
 npm run lint            # ESLint
 npm run typecheck       # TypeScript type check (no emit)
 npm run test            # Run test suite
+npm run check:ci        # Typecheck + strict lint + tests
+npm run test:security-guards
+npm run check:route-links
+
+# Live auth checks (run the app first)
+npm run check:auth-matrix
+npm run check:auth-suite
 
 # Database
 npm run db:push         # Push Supabase migrations

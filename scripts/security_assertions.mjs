@@ -31,7 +31,9 @@ const guardsTs = read('lib/auth/guards.ts');
 const interactiveApiPolicyTs = read('lib/security/interactive-api-policy.ts');
 const packageJson = JSON.parse(read('package.json'));
 const ciWorkflow = read('.github/workflows/ci.yml');
-const publicSwJs = read('public/sw.js');
+const publicSwPath = path.join(root, 'public', 'sw.js');
+const publicSwJs = fs.existsSync(publicSwPath) ? read('public/sw.js') : '';
+const nextConfigJs = read('next.config.js');
 const migrationDir = path.join(root, 'supabase', 'migrations');
 const migrationNames = fs.existsSync(migrationDir) ? fs.readdirSync(migrationDir) : [];
 const apiRouteDir = path.join(root, 'app', 'api');
@@ -64,8 +66,16 @@ assertIncludes(interactiveApiPolicyTs, "'/api/generate-quiz'", 'lib/security/int
 assertIncludes(middlewareTs, 'isInteractiveApiRoute(pathname)', edgeAuthFile);
 assertIncludes(ciWorkflow, 'name: CI', '.github/workflows/ci.yml');
 assertNotIncludes(ciWorkflow, '# name: CI', '.github/workflows/ci.yml');
-assertNotIncludes(publicSwJs, 'eval-source-map', 'public/sw.js');
-assertNotIncludes(publicSwJs, 'module.hot', 'public/sw.js');
+if (publicSwJs) {
+  assertNotIncludes(publicSwJs, 'eval-source-map', 'public/sw.js');
+  assertNotIncludes(publicSwJs, 'module.hot', 'public/sw.js');
+} else {
+  // Serwist generates public/sw.js during a production build. Fresh CI
+  // checkouts run this guard before the build, so verify the source and
+  // destination configuration when the generated artifact is absent.
+  assertIncludes(nextConfigJs, "swSrc: 'app/sw.ts'", 'next.config.js');
+  assertIncludes(nextConfigJs, "swDest: 'public/sw.js'", 'next.config.js');
+}
 
 assert(!Object.prototype.hasOwnProperty.call(packageJson.dependencies || {}, 'xlsx'), 'package.json: xlsx dependency should be removed');
 
@@ -100,6 +110,9 @@ if (fs.existsSync(apiRouteDir)) {
       if (!entry.isFile() || entry.name !== 'route.ts') continue;
       const relPath = path.relative(root, full).replace(/\\/g, '/');
       const route = fs.readFileSync(full, 'utf8');
+      if (/\/api\/(?:admin|developer|parent|student|teacher)\/session\/(?:bootstrap|login)\/route\.ts$/.test(`/${relPath}`)) {
+        assertNotIncludes(route, 'failOpen: true', relPath);
+      }
       if (!allowLegacySupabaseHelperRoutes.has(relPath)) {
         assertNotIncludes(route, 'supabaseSelect', relPath);
         assertNotIncludes(route, 'supabaseInsert', relPath);
