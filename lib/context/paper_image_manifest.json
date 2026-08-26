@@ -3,7 +3,9 @@
   "generatedAt": "2026-06-14T12:28:45.019738Z",
   "datasetKind": "paper",
   "fitzAvailable": false,
-  "saveImagesEnabled": true,
+  "saveImagesRequested": true,
+  "saveImagesEnabled": false,
+  "status": "unavailable_missing_pymupdf",
   "ocrEnabled": false,
   "totalImages": 0,
   "images": []

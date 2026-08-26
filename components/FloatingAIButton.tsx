@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { isAuthExperiencePath } from '@/lib/ui/layout-shell';
 import clsx from 'clsx';
 import {
   Loader2,
@@ -52,6 +53,7 @@ function LoginCta() {
 export default function FloatingAIButton() {
   const pathname = usePathname();
   const isExamRoute = pathname.startsWith('/exam/');
+  const isAuthRoute = isAuthExperiencePath(pathname);
 
   const [open, setOpen] = useState(false);
   const [showLockModal, setShowLockModal] = useState(false);
@@ -151,7 +153,7 @@ export default function FloatingAIButton() {
     }
   }
 
-  if (isExamRoute) return null;
+  if (isAuthRoute || isExamRoute) return null;
 
   const isAnonymous = authRole === 'anonymous';
   const isAuthenticated = authRole === 'student' || authRole === 'teacher' || authRole === 'admin' || authRole === 'developer';

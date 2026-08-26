@@ -2,6 +2,7 @@ import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies,
 import { normalizeAcademicStream } from '@/lib/academic-taxonomy';
 import {
   generateStrongPassword,
+  generateSecureNumericPin,
   validatePasswordPolicy,
 } from '@/lib/auth/password-policy';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
@@ -12,6 +13,7 @@ import { isSubjectInCatalog } from '@/lib/subject-catalog-db';
 import { createStudent } from '@/lib/teacher-admin-db';
 import { recordAuditEvent } from '@/lib/security/audit';
 import { checkRateLimit, buildRateLimitKey } from '@/lib/security/rate-limit';
+import { createOrUpdateParentLink } from '@/lib/parent-portal-db';
 
 export const dynamic = 'force-dynamic';
 const MAX_IMPORT_ROWS_TEACHER = 200;
@@ -167,13 +169,15 @@ export async function POST(req: Request) {
       const name = readString(row.name, 120);
       const rollNo = readString(row.rollNo ?? row.roll_number ?? row.roll, 50).toUpperCase();
       const rollCode = readString(row.rollCode ?? row.roll_code, 80).toUpperCase();
+      const parentPhone = readString(row.parentPhone ?? row.parent_phone ?? row.guardianPhone, 24).replace(/\D/g, '').slice(-10);
+      const parentName = readString(row.parentName ?? row.parent_name ?? row.guardianName, 120);
       const stream = normalizeAcademicStream(row.stream ?? row.academicStream ?? row.track);
       const subjects = readString(row.subjects, 500)
         .split(/[,|;]/)
         .map((item) => item.trim())
         .filter((item) => item.length > 0);
-      if (!name) {
-        throw new Error('Required student field missing: name.');
+      if (!name || !rollNo || parentPhone.length !== 10) {
+        throw new Error('Required student fields: name, roll number, and a valid 10-digit parent phone.');
       }
       if (classSection.classLevel === 10 && stream) {
         throw new Error('Class 10 does not use stream.');
@@ -207,6 +211,16 @@ export async function POST(req: Request) {
         subjects,
         forcePasswordChangeOnFirstLogin: true,
       });
+      const parentPortalPin = parentPhone ? generateSecureNumericPin(6) : undefined;
+      if (parentPhone && parentPortalPin) {
+        await createOrUpdateParentLink({
+          schoolId: classSection.schoolId,
+          studentId: student.id,
+          phone: parentPhone,
+          pin: parentPortalPin,
+          name: parentName || undefined,
+        });
+      }
       created.push({
         rowIndex: index + 1,
         id: student.id,
@@ -215,10 +229,12 @@ export async function POST(req: Request) {
         section: student.section,
         batch: student.batch,
         issuedCredentials: {
-          loginIdentifier: student.rollCode,
-          alternateIdentifier: student.rollNo,
+          loginIdentifier: parentPhone || student.rollCode,
+          alternateIdentifier: student.rollCode || student.rollNo,
           password: issuedPassword,
+          parentPortalPin,
         },
+        parentPhone: parentPhone || undefined,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Import row failed.';

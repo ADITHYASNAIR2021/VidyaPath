@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useMemo, useState, type ChangeEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 type ImportEntity = 'students' | 'teachers';
 type SourceFormat = 'csv' | 'tsv' | 'xlsx';
@@ -176,7 +177,8 @@ function pickPreviewFromSheets(entity: ImportEntity, sheets: Record<string, Arra
 }
 
 export default function AdminRosterImportPage() {
-  const [entity, setEntity] = useState<ImportEntity>('students');
+  const searchParams = useSearchParams();
+  const [entity, setEntity] = useState<ImportEntity>(() => searchParams.get('entity') === 'teachers' ? 'teachers' : 'students');
   const [csvText, setCsvText] = useState('');
   const [preview, setPreview] = useState<ParsedPreview>({ headers: [], rows: [] });
   const [sheets, setSheets] = useState<Record<string, Array<Record<string, string>>> | null>(null);
@@ -189,8 +191,8 @@ export default function AdminRosterImportPage() {
 
   const sampleTemplate = useMemo(() => (
     entity === 'students'
-      ? 'name,rollNo,classLevel,section,batch,schoolName,subjects,yearOfEnrollment\nArjun Nair,001,12,A,2026,VidyaPath Public School,"Physics,Chemistry,Math,English Core",2026'
-      : 'name,email,phone,staffCode,scopeClassLevel,scopeSubject,scopeSection,schoolName\nAnanya Rao,ananya.rao@example.com,9001000001,PHY12,12,Physics,A,VidyaPath Public School'
+      ? 'name,rollNo,parentPhone,parentName,classLevel,section,batch,schoolName,subjects,yearOfEnrollment\nArjun Nair,1,9876543210,Ravi Nair,12,A,2026,VidyaPath Public School,"Physics,Chemistry,Math,English Core",2026'
+      : 'name,phone,email,staffCode,scopeClassLevel,scopeSubject,scopeSection,schoolName\nAnanya Rao,9001000001,ananya.rao@example.com,PHY12,12,Physics,A,VidyaPath Public School'
   ), [entity]);
 
   function refreshPreview(nextText: string) {
@@ -331,14 +333,14 @@ export default function AdminRosterImportPage() {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => downloadTemplate('students', 'name,rollNo,classLevel,section,batch,schoolName,subjects,yearOfEnrollment\nArjun Nair,001,12,A,2026,VidyaPath Public School,"Physics,Chemistry,Math,English Core",2026')}
+              onClick={() => downloadTemplate('students', 'name,rollNo,parentPhone,parentName,classLevel,section,batch,schoolName,subjects,yearOfEnrollment\nArjun Nair,1,9876543210,Ravi Nair,12,A,2026,VidyaPath Public School,"Physics,Chemistry,Math,English Core",2026')}
               className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
             >
               Download Students CSV Template
             </button>
             <button
               type="button"
-              onClick={() => downloadTemplate('teachers', 'name,email,phone,staffCode,scopeClassLevel,scopeSubject,scopeSection,schoolName\nAnanya Rao,ananya.rao@example.com,9001000001,PHY12,12,Physics,A,VidyaPath Public School')}
+              onClick={() => downloadTemplate('teachers', 'name,phone,email,staffCode,scopeClassLevel,scopeSubject,scopeSection,schoolName\nAnanya Rao,9001000001,ananya.rao@example.com,PHY12,12,Physics,A,VidyaPath Public School')}
               className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
             >
               Download Teachers CSV Template
@@ -354,8 +356,8 @@ export default function AdminRosterImportPage() {
 
           <p className="mt-2 text-xs text-[#7A7490]">
             Source: {sourceFormat.toUpperCase()} {sheets ? '(relational sheets detected)' : '(simple rows mode)'}.
-            Students: name, classLevel, batch, rollNo or rollCode, schoolName, subjects, yearOfEnrollment.
-            Teachers: name, email, schoolName, scopeClassLevel, scopeSubject, scopeSection.
+            Students: name, rollNo, parentPhone, optional parentName, classLevel, section, subjects, yearOfEnrollment.
+            Teachers: name, phone, optional email, schoolName, scopeClassLevel, scopeSubject, scopeSection.
           </p>
           {entity === 'students' && (
             <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-amber-800">

@@ -4,10 +4,9 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Calculator, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
-import 'katex/dist/katex.min.css';
-import { BlockMath } from 'react-katex';
 import Fuse from 'fuse.js';
 import { getAllFormulaEntries, getFormulaEntriesForChapter, type FormulaEntry } from '@/lib/formulas';
+import AccessibleFormula from '@/components/AccessibleFormula';
 
 const ALL_ENTRIES = getAllFormulaEntries();
 
@@ -148,7 +147,7 @@ export default function FormulaCard({
                 </Link>
               </div>
               <div className="equation-scroll rounded-lg bg-white px-2 py-1 dark:bg-gray-800">
-                <BlockMath math={item.latex} />
+                <AccessibleFormula latex={item.latex} label={item.name} compact />
               </div>
             </div>
           ))}
@@ -184,7 +183,7 @@ export default function FormulaCard({
                     </div>
                     <div className="equation-mobile-wrap mt-2 min-h-[4.25rem] rounded-lg bg-white px-2 py-2 text-base dark:bg-gray-800 sm:min-h-[4.75rem] sm:px-3 sm:py-3 sm:text-lg">
                       <div>
-                        <BlockMath math={formula.latex} />
+                        <AccessibleFormula latex={formula.latex} label={formula.name} compact />
                       </div>
                     </div>
                     <div className="text-[11px] text-[#6E6984] dark:text-gray-400">

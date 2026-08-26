@@ -15,7 +15,7 @@ import {
   Bookmark,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
+import { isAuthExperiencePath, isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
 import { fetchClientAuthSession } from '@/lib/client-auth-session';
 
 type Role = 'student' | 'teacher' | 'admin' | 'developer' | 'anonymous';
@@ -75,6 +75,7 @@ export default function MobileBottomNav() {
   const pathname = usePathname();
   const [role, setRole] = useState<Role>('anonymous');
   const isExamRoute = pathname.startsWith('/exam/');
+  const isAuthRoute = isAuthExperiencePath(pathname);
   const isPortalRoute = isPortalPath(pathname);
   const isRoleSidebarMode =
     (role === 'student' && isStudentShellPath(pathname)) ||
@@ -98,7 +99,7 @@ export default function MobileBottomNav() {
     return () => { active = false; };
   }, [pathname]);
 
-  if (isExamRoute || isPortalRoute || isRoleSidebarMode) return null;
+  if (isAuthRoute || isExamRoute || isPortalRoute || isRoleSidebarMode) return null;
 
   const navItems = getNavItems(role);
 

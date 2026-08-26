@@ -36,7 +36,8 @@ function sanitizeId(value: string): string {
 }
 
 function normalizePhone(value: string): string {
-  return value.replace(/[^\d+]/g, '').trim().slice(0, 20);
+  const digits = value.replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : digits;
 }
 
 export async function createOrUpdateParentLink(input: {

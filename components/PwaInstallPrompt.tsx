@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { isAuthExperiencePath } from '@/lib/ui/layout-shell';
 import { Download, PlusSquare, Share2, X } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -38,6 +39,7 @@ export default function PwaInstallPrompt() {
   const [isIosSafari, setIsIosSafari] = useState(false);
 
   const isExamMode = pathname.startsWith('/exam/');
+  const isAuthRoute = isAuthExperiencePath(pathname);
 
   useEffect(() => {
     setMounted(true);
@@ -86,7 +88,7 @@ export default function PwaInstallPrompt() {
     return 'Use VidyaPath as an App';
   }, [installEvent, isIosSafari]);
 
-  if (!mounted || !show || isStandaloneMode() || isExamMode) return null;
+  if (!mounted || !show || isStandaloneMode() || isExamMode || isAuthRoute) return null;
 
   const dismiss = () => {
     markDismissed();

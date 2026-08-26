@@ -162,7 +162,7 @@ You only need one. Groq is the easiest (free, no credit card):
 | Cerebras | https://cloud.cerebras.ai | Yes — key starts with `csk-` |
 | Mistral | https://console.mistral.ai | Yes — limited |
 | Gemini | https://aistudio.google.com | Yes — generous |
-| NVIDIA | https://build.nvidia.com | Yes — needed for pgvector embeddings |
+| NVIDIA | https://build.nvidia.com | Yes — used for reranking and supported NIM features |
 
 ```env
 NVIDIA_API_KEY=nvapi-...
@@ -187,7 +187,7 @@ AI_REQUEST_TIMEOUT_MS=30000
 AI_ENABLE_NVIDIA_RERANK=1
 
 # Enable pgvector semantic retrieval from Supabase document_embeddings table
-# Requires NVIDIA_API_KEY for query embedding and populated embeddings table
+# Requires GEMINI_API_KEY for query embedding and a populated embeddings table
 AI_ENABLE_PGVECTOR_RAG=1
 ```
 
@@ -378,8 +378,8 @@ npm run db:reset-full
 
 ## Ingest Embeddings
 
-This step takes the chunks you built and stores high-dimensional NVIDIA embeddings in Supabase for semantic search. It requires:
-- `NVIDIA_API_KEY` set
+This step takes the chunks you built and stores high-dimensional Gemini embeddings in Supabase for semantic search. It requires:
+- `GEMINI_API_KEY` set
 - `AI_ENABLE_PGVECTOR_RAG=1` set
 - Database migrations pushed
 
@@ -389,10 +389,14 @@ node scripts/ingest_embeddings.mjs --skip-existing --batch-size 32
 
 - `--skip-existing` skips chunks already in the DB (safe to re-run)
 - `--batch-size 32` controls how many chunks are embedded per API call
+- `--verify` compares live row IDs with the current corpus and reports exact coverage
+- `--async-batch` uses Gemini Batch API for a paid project and is the practical option for a full rebuild
 
-This upserts rows into `public.document_embeddings` (1024-dim NVIDIA embeddings). Once populated, the app uses pgvector for retrieval instead of local hash embeddings.
+This upserts rows into `public.document_embeddings` (1024-dimensional, normalized `gemini-embedding-001` vectors). Once populated, the app uses pgvector for retrieval instead of local hash embeddings.
 
-**Skip this step** if you don't have an NVIDIA key. The local hash-embedding retrieval in `lib/context/chunk_vectors.jsonl` still works — it's just less semantically precise.
+Gemini Batch API is not available on the free tier. Standard free-tier ingestion is resumable, but its daily quota is too small for a one-day rebuild of the full corpus. Enable billing in Google AI Studio before using `--async-batch`; otherwise run the standard command over multiple quota-reset days. Do not mix embedding models: changing models requires re-embedding the entire table.
+
+**Skip this step** if you don't have a Gemini embedding key. The local retrieval index remains active, and startup automatically keeps pgvector disabled until the live row count covers the corpus manifest.
 
 ---
 

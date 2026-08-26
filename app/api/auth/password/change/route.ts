@@ -16,6 +16,7 @@ import { recordAuditEvent } from '@/lib/security/audit';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { markStudentPasswordChangeCompleted } from '@/lib/teacher-admin-db';
 import { markTeacherPasswordChangeCompleted } from '@/lib/teacher/auth.db';
+import { markAdminPasswordChangeCompleted } from '@/lib/onboarding-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -127,6 +128,9 @@ export async function POST(req: Request) {
     }
     if (context.role === 'teacher' && context.profileId) {
       await markTeacherPasswordChangeCompleted(context.profileId);
+    }
+    if (context.role === 'admin' && context.profileId) {
+      await markAdminPasswordChangeCompleted(context.profileId);
     }
 
     const response = dataJson({

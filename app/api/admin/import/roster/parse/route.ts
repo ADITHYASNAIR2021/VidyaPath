@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
+import { getAdminSessionFromRequestCookies, getTeacherSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 
 export const dynamic = 'force-dynamic';
@@ -101,8 +101,11 @@ function resolvePythonLauncher(): PythonLauncher | null {
 
 export async function POST(req: Request) {
   const requestId = getRequestId(req);
-  const adminSession = await getAdminSessionFromRequestCookies();
-  if (!adminSession) return unauthorizedJson('Admin session required.', requestId);
+  const [adminSession, teacherSession] = await Promise.all([
+    getAdminSessionFromRequestCookies(),
+    getTeacherSessionFromRequestCookies(),
+  ]);
+  if (!adminSession && !teacherSession) return unauthorizedJson('School staff session required.', requestId);
 
   try {
     const formData = await req.formData();

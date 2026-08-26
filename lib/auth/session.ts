@@ -42,6 +42,8 @@ function clearRoleSessionCookie(res: NextResponse, name: string): void {
 
 export interface AdminSession {
   role: 'admin';
+  profileId?: string;
+  mustChangePassword?: boolean;
   issuedAt: number;
   expiresAt: number;
 }
@@ -56,6 +58,7 @@ export interface DeveloperSession {
 export interface TeacherSession {
   role: 'teacher';
   teacherId: string;
+  mustChangePassword?: boolean;
   issuedAt: number;
   expiresAt: number;
 }
@@ -130,12 +133,18 @@ function verifyToken(token: string): SessionPayload | null {
     if (!parsed || typeof parsed !== 'object') return null;
     if (typeof parsed.expiresAt !== 'number' || parsed.expiresAt < Date.now()) return null;
     if (parsed.role === 'admin') {
+      if (parsed.mustChangePassword !== undefined && typeof parsed.mustChangePassword !== 'boolean') return null;
       return parsed;
     }
     if (parsed.role === 'developer' && typeof (parsed as DeveloperSession).username === 'string') {
       return parsed;
     }
-    if (parsed.role === 'teacher' && typeof parsed.teacherId === 'string' && parsed.teacherId.trim()) {
+    if (
+      parsed.role === 'teacher' &&
+      typeof parsed.teacherId === 'string' &&
+      parsed.teacherId.trim() &&
+      (parsed.mustChangePassword === undefined || typeof parsed.mustChangePassword === 'boolean')
+    ) {
       return parsed;
     }
     if (
@@ -161,10 +170,15 @@ function verifyToken(token: string): SessionPayload | null {
   }
 }
 
-export function createAdminSessionToken(ttlSeconds = DEFAULT_TTL_SECONDS): string {
+export function createAdminSessionToken(
+  admin?: { profileId?: string; mustChangePassword?: boolean },
+  ttlSeconds = DEFAULT_TTL_SECONDS
+): string {
   const issuedAt = Date.now();
   return issueToken({
     role: 'admin',
+    profileId: admin?.profileId,
+    mustChangePassword: admin?.mustChangePassword === true,
     issuedAt,
     expiresAt: issuedAt + ttlSeconds * 1000,
   });
@@ -180,11 +194,16 @@ export function createDeveloperSessionToken(username: string, ttlSeconds = DEFAU
   });
 }
 
-export function createTeacherSessionToken(teacherId: string, ttlSeconds = DEFAULT_TTL_SECONDS): string {
+export function createTeacherSessionToken(
+  teacherId: string,
+  mustChangePassword = false,
+  ttlSeconds = DEFAULT_TTL_SECONDS
+): string {
   const issuedAt = Date.now();
   return issueToken({
     role: 'teacher',
     teacherId,
+    mustChangePassword,
     issuedAt,
     expiresAt: issuedAt + ttlSeconds * 1000,
   });

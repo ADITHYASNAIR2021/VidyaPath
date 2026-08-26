@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import Fuse from 'fuse.js';
-import { ALL_CHAPTERS } from '@/lib/data';
+import { BOARD_CHAPTERS } from '@/lib/data';
 import type { Subject, ClassLevel } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { fetchClientStudentSession } from '@/lib/client-student-session';
@@ -72,7 +72,8 @@ const SUBJECT_PILL_INACTIVE: Record<string, string> = {
 function ChaptersContent() {
   const searchParams = useSearchParams();
   const initialSubject = (searchParams.get('subject') as Subject) || 'All';
-  const initialClass = Number(searchParams.get('class') || 0) as ClassLevel | 0;
+  const requestedClass = Number(searchParams.get('class') || 0);
+  const initialClass: ClassLevel | 0 = requestedClass === 10 || requestedClass === 12 ? requestedClass : 0;
 
   const [selectedClass, setSelectedClass] = useState<ClassLevel | 0>(initialClass);
   const [selectedSubject, setSelectedSubject] = useState<Subject | 'All'>(
@@ -134,7 +135,7 @@ function ChaptersContent() {
   }, [studentSession.classLevel, studentSession.isStudent]);
 
   const availableSubjects = useMemo(() => {
-    const classScoped = ALL_CHAPTERS.filter((chapter) => (selectedClass === 0 ? chapter.classLevel !== 11 : chapter.classLevel === selectedClass));
+    const classScoped = BOARD_CHAPTERS.filter((chapter) => selectedClass === 0 || chapter.classLevel === selectedClass);
     const subjectSet = new Set<Subject>(classScoped.map((chapter) => chapter.subject));
     if (selectedClass === 10) {
       for (const subject of Array.from(subjectSet)) {
@@ -154,7 +155,7 @@ function ChaptersContent() {
   }, [availableSubjects, selectedSubject]);
 
   const chapterSearchDocs = useMemo(() => {
-    return ALL_CHAPTERS.map((chapter) => {
+    return BOARD_CHAPTERS.map((chapter) => {
       const pyq = getPYQData(chapter.id);
       return {
         id: chapter.id,
@@ -193,7 +194,7 @@ function ChaptersContent() {
   }, [chapterFuse, deferredSearchQuery]);
 
   const filtered = useMemo(() => {
-    const base = ALL_CHAPTERS.filter((ch) => {
+    const base = BOARD_CHAPTERS.filter((ch) => {
       if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
         if (ch.classLevel !== studentSession.classLevel) return false;
       }
@@ -219,18 +220,18 @@ function ChaptersContent() {
 
   const headerTotalChapters = useMemo(() => {
     if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
-      return ALL_CHAPTERS.filter((chapter) => {
+      return BOARD_CHAPTERS.filter((chapter) => {
         if (chapter.classLevel !== studentSession.classLevel) return false;
         if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(chapter.subject)) return false;
         return true;
       }).length;
     }
-    return ALL_CHAPTERS.length;
+    return BOARD_CHAPTERS.length;
   }, [studentSession.classLevel, studentSession.isStudent]);
 
   const studiedInScopeCount = useMemo(() => {
     const allowedIds = new Set(
-      ALL_CHAPTERS.filter((chapter) => {
+      BOARD_CHAPTERS.filter((chapter) => {
         if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
           if (chapter.classLevel !== studentSession.classLevel) return false;
           if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(chapter.subject)) return false;

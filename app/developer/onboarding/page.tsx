@@ -134,8 +134,8 @@ export default function DeveloperOnboardingPage() {
     setSuccess('');
     setIssuedCredentials(null);
     try {
-      if (!adminForm.schoolId || !adminForm.name || !adminForm.authEmail) {
-        setError('School, admin name, and admin email are required.');
+      if (!adminForm.schoolId || !adminForm.name || !adminForm.phone) {
+        setError('School, principal name, and principal phone are required.');
         return;
       }
       const response = await fetch(`/api/developer/schools/${adminForm.schoolId}/admins`, {
@@ -180,9 +180,9 @@ export default function DeveloperOnboardingPage() {
         <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="font-fraunces text-3xl font-bold text-navy-700">Developer Onboarding Console</h1>
+              <h1 className="font-fraunces text-3xl font-bold text-navy-700">School activation</h1>
               <p className="mt-1 text-sm text-[#5F5A73]">
-                Review affiliate requests, approve/reject schools, and provision admin credentials.
+                Review school requests, approve access, then issue the principal a one-time credential.
               </p>
             </div>
             <Link href="/developer" className="rounded-xl border border-[#E8E4DC] bg-white px-3 py-2 text-sm font-semibold text-navy-700">
@@ -261,7 +261,10 @@ export default function DeveloperOnboardingPage() {
         </section>
 
         <section className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm">
-          <h2 className="font-fraunces text-2xl font-bold text-navy-700">Provision School Admin (Developer Only)</h2>
+          <h2 className="font-fraunces text-2xl font-bold text-navy-700">Activate the principal account</h2>
+          <p className="mt-1 text-sm text-[#6A6482]">
+            The principal signs in with their phone number and the one-time password, then chooses a private password before entering the admin workspace.
+          </p>
           <div className="mt-3 grid gap-2 md:grid-cols-3">
             <select
               value={adminForm.schoolId}
@@ -278,31 +281,33 @@ export default function DeveloperOnboardingPage() {
             <input
               value={adminForm.name}
               onChange={(event) => setAdminForm((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="Admin full name *"
+              placeholder="Principal full name *"
               className="rounded-lg border border-[#E8E4DC] px-2.5 py-2 text-sm"
             />
             <input
               value={adminForm.adminIdentifier}
               onChange={(event) => setAdminForm((prev) => ({ ...prev, adminIdentifier: event.target.value }))}
-              placeholder="Admin identifier (optional)"
+              placeholder="Principal ID (generated automatically)"
               className="rounded-lg border border-[#E8E4DC] px-2.5 py-2 text-sm"
             />
             <input
               value={adminForm.phone}
               onChange={(event) => setAdminForm((prev) => ({ ...prev, phone: event.target.value }))}
-              placeholder="Admin phone"
+              placeholder="Principal phone (login ID) *"
+              inputMode="tel"
               className="rounded-lg border border-[#E8E4DC] px-2.5 py-2 text-sm"
             />
             <input
               value={adminForm.authEmail}
               onChange={(event) => setAdminForm((prev) => ({ ...prev, authEmail: event.target.value }))}
-              placeholder="Admin email *"
+              placeholder="Delivery email (optional)"
+              inputMode="email"
               className="rounded-lg border border-[#E8E4DC] px-2.5 py-2 text-sm"
             />
             <input
               value={adminForm.password}
               onChange={(event) => setAdminForm((prev) => ({ ...prev, password: event.target.value }))}
-              placeholder="Initial password (optional)"
+              placeholder="One-time password (generated if blank)"
               className="rounded-lg border border-[#E8E4DC] px-2.5 py-2 text-sm"
             />
           </div>
@@ -312,16 +317,17 @@ export default function DeveloperOnboardingPage() {
             onClick={provisionSchoolAdmin}
             className="mt-3 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
           >
-            {loading ? 'Processing...' : 'Provision Admin'}
+            {loading ? 'Processing...' : 'Activate principal'}
           </button>
 
           {issuedCredentials && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-              <p className="font-semibold">Issued Credentials (show once)</p>
+              <p className="font-semibold">One-time principal credential (show once)</p>
               <p className="mt-1">School: {String(issuedCredentials.schoolName || issuedCredentials.schoolCode || issuedCredentials.schoolId || '-')}</p>
               <p>Login Identifier: {String(issuedCredentials.loginIdentifier || '-')}</p>
-              <p>Auth Email: {String(issuedCredentials.authEmail || '-')}</p>
+              {issuedCredentials.authEmail ? <p>Delivery email: {String(issuedCredentials.authEmail)}</p> : null}
               <p>Password: {String(issuedCredentials.password || '-')}</p>
+              <p className="mt-1 text-xs">The principal must replace this password on first login.</p>
             </div>
           )}
         </section>

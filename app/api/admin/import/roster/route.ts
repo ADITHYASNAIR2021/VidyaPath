@@ -1,6 +1,7 @@
 import { getAdminSessionFromRequestCookies, unauthorizedJson } from '@/lib/auth/guards';
 import { normalizeAcademicStream } from '@/lib/academic-taxonomy';
 import {
+  generateSecureNumericPin,
   generateStrongPassword,
   validatePasswordPolicy,
 } from '@/lib/auth/password-policy';
@@ -11,6 +12,7 @@ import { recordAuditEvent } from '@/lib/security/audit';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { isSubjectInCatalog } from '@/lib/subject-catalog-db';
 import { createStudent } from '@/lib/teacher-admin-db';
+import { createOrUpdateParentLink } from '@/lib/parent-portal-db';
 import { createTeacher } from '@/lib/teacher/auth.db';
 import type { TeacherScope } from '@/lib/teacher-types';
 
@@ -210,16 +212,18 @@ export async function POST(req: Request) {
     });
   }
 
-  const teacherScopesByEmail = new Map<string, Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }>>();
+  const teacherScopesByIdentity = new Map<string, Array<{ classLevel: 10 | 12; subject: TeacherScope['subject']; section?: string }>>();
   for (const scopeRow of parseRows((sheets as Record<string, unknown>).TeacherScopes)) {
     const teacherEmail = readString(scopeRow.teacherEmail ?? scopeRow.email, 180).toLowerCase();
+    const teacherPhone = readString(scopeRow.teacherPhone ?? scopeRow.phone, 24).replace(/\D/g, '').slice(-10);
+    const teacherIdentity = teacherPhone || teacherEmail;
     const classLevel = readClassLevel(scopeRow.classLevel ?? scopeRow.class ?? scopeRow.scopeClassLevel);
     const subject = normalizeSubject(readString(scopeRow.subject ?? scopeRow.scopeSubject, 80));
     const section = readString(scopeRow.section ?? scopeRow.scopeSection, 40);
-    if (!teacherEmail || !classLevel || !subject) continue;
-    const current = teacherScopesByEmail.get(teacherEmail) ?? [];
+    if (!teacherIdentity || !classLevel || !subject) continue;
+    const current = teacherScopesByIdentity.get(teacherIdentity) ?? [];
     current.push({ classLevel, subject, section: section || undefined });
-    teacherScopesByEmail.set(teacherEmail, current);
+    teacherScopesByIdentity.set(teacherIdentity, current);
   }
 
   const studentSubjectsByKey = new Map<string, TeacherScope['subject'][]>();
@@ -239,14 +243,18 @@ export async function POST(req: Request) {
     studentSubjectsByKey.set(key, current);
   }
 
-  if (entity === 'teachers' && teacherScopesByEmail.size > 0) {
-    const teacherEmails = new Set(rows.map((row) => readString(row.email ?? row.authEmail ?? row.teacherEmail, 180).toLowerCase()).filter(Boolean));
-    const unresolved = [...teacherScopesByEmail.keys()].filter((email) => !teacherEmails.has(email));
+  if (entity === 'teachers' && teacherScopesByIdentity.size > 0) {
+    const teacherIdentities = new Set(rows.flatMap((row) => {
+      const email = readString(row.email ?? row.authEmail ?? row.teacherEmail, 180).toLowerCase();
+      const phone = readString(row.phone, 24).replace(/\D/g, '').slice(-10);
+      return [phone, email].filter(Boolean);
+    }));
+    const unresolved = [...teacherScopesByIdentity.keys()].filter((identity) => !teacherIdentities.has(identity));
     if (unresolved.length > 0) {
       return errorJson({
         requestId,
         errorCode: 'teacher-scope-reference-mismatch',
-        message: `TeacherScopes contains references that do not exist in Teachers sheet: ${unresolved.slice(0, 5).join(', ')}`,
+        message: `TeacherScopes contains phone/email references that do not exist in Teachers sheet: ${unresolved.slice(0, 5).join(', ')}`,
         status: 400,
       });
     }
@@ -310,6 +318,8 @@ export async function POST(req: Request) {
         const section = readString(row.section ?? row.sectionName, 30);
         const batch = readString(row.batch, 30);
         const yearOfEnrollment = Number(row.yearOfEnrollment);
+        const parentPhone = readString(row.parentPhone ?? row.parent_phone ?? row.guardianPhone, 24).replace(/\D/g, '').slice(-10);
+        const parentName = readString(row.parentName ?? row.parent_name ?? row.guardianName, 120);
         const subjectList = parseSubjectList(row.subjects);
         const relationalSubjects = studentSubjectsByKey.get(studentMapKey({
           rollCode,
@@ -319,8 +329,8 @@ export async function POST(req: Request) {
           section,
         })) ?? [];
         const mergedSubjects = [...new Set([...subjectList, ...relationalSubjects])];
-        if (!name || !classLevel) {
-          throw new Error('Required student fields: name and classLevel.');
+        if (!name || !classLevel || !rollNo || parentPhone.length !== 10) {
+          throw new Error('Required student fields: name, classLevel, roll number, and a valid 10-digit parent phone.');
         }
         const rosterKey = studentMapKey({ rollCode, rollNo, name, classLevel, section });
         if (seenStudentRosterKeys.has(rosterKey)) {
@@ -357,10 +367,11 @@ export async function POST(req: Request) {
             yearOfEnrollment: Number.isFinite(yearOfEnrollment) ? yearOfEnrollment : undefined,
             subjects: mergedSubjects,
             issuedCredentials: {
-              loginIdentifier: rollCode || '(auto-generated)',
-              alternateIdentifier: rollNo || undefined,
+              loginIdentifier: parentPhone || rollCode || '(auto-generated)',
+              alternateIdentifier: rollCode || rollNo || undefined,
               password: issuedPassword,
             },
+            parentPhone: parentPhone || undefined,
             mustChangePassword: forcePasswordChangeOnFirstLogin,
             dryRun: true,
           });
@@ -379,6 +390,16 @@ export async function POST(req: Request) {
           password: issuedPassword,
           subjects: mergedSubjects,
         });
+        const parentPortalPin = parentPhone ? generateSecureNumericPin(6) : undefined;
+        if (parentPhone && parentPortalPin) {
+          await createOrUpdateParentLink({
+            schoolId,
+            studentId: student.id,
+            phone: parentPhone,
+            pin: parentPortalPin,
+            name: parentName || undefined,
+          });
+        }
         created.push({
           rowIndex: index + 1,
           id: student.id,
@@ -390,10 +411,12 @@ export async function POST(req: Request) {
           stream: student.stream,
           subjects: mergedSubjects,
           issuedCredentials: {
-            loginIdentifier: student.rollCode,
-            alternateIdentifier: student.rollNo,
+            loginIdentifier: parentPhone || student.rollCode,
+            alternateIdentifier: student.rollCode || student.rollNo,
             password: issuedPassword,
+            parentPortalPin,
           },
+          parentPhone: parentPhone || undefined,
           mustChangePassword: student.mustChangePassword === true,
         });
       } else {
@@ -402,15 +425,17 @@ export async function POST(req: Request) {
         const email = readString(row.email ?? row.authEmail ?? row.teacherEmail, 180).toLowerCase();
         const phone = readString(row.phone, 24);
         const staffCode = readString(row.staffCode ?? row.staff_code ?? row.teacherCode, 50).toUpperCase();
-        const relationalScopes = teacherScopesByEmail.get(email) ?? [];
+        const normalizedPhone = phone.replace(/\D/g, '').slice(-10);
+        const relationalScopes = teacherScopesByIdentity.get(normalizedPhone) ?? teacherScopesByIdentity.get(email) ?? [];
         const scopes = parseTeacherScopes(row, relationalScopes);
-        if (!name || !email) {
-          throw new Error('Required teacher fields: name and email.');
+        if (!name || !phone) {
+          throw new Error('Required teacher fields: name and phone.');
         }
-        if (seenTeacherEmails.has(email)) {
-          throw new Error('Duplicate teacher email row detected in this import file.');
+        const teacherIdentityKey = email || phone.replace(/\D/g, '');
+        if (seenTeacherEmails.has(teacherIdentityKey)) {
+          throw new Error('Duplicate teacher phone/email row detected in this import file.');
         }
-        seenTeacherEmails.add(email);
+        seenTeacherEmails.add(teacherIdentityKey);
         if (scopes.length === 0) {
           throw new Error('Each teacher row must include at least one valid scope (class + subject).');
         }
@@ -436,7 +461,7 @@ export async function POST(req: Request) {
             name,
             scopes,
             issuedCredentials: {
-              loginIdentifier: email,
+              loginIdentifier: phone,
               alternateIdentifier: staffCode || phone || undefined,
               password: issuedPassword,
             },
@@ -449,7 +474,7 @@ export async function POST(req: Request) {
         const teacher = await createTeacher({
           schoolId,
           name,
-          email,
+          email: email || undefined,
           phone,
           staffCode: staffCode || undefined,
           password: issuedPassword,
@@ -463,7 +488,7 @@ export async function POST(req: Request) {
           entity: 'teacher',
           name: teacher.name,
           issuedCredentials: {
-            loginIdentifier: email,
+            loginIdentifier: teacher.phone,
             alternateIdentifier: teacher.staffCode || teacher.phone,
             password: issuedPassword,
           },

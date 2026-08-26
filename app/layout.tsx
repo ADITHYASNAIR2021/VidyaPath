@@ -115,11 +115,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${fraunces.variable} ${dmSans.variable} ${jetbrainsMono.variable}`}
     >
       <head>
         <script
           nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html:
               "(function(){try{var saved=localStorage.getItem('vp-theme');var dark=saved?saved==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',dark);document.documentElement.style.colorScheme=dark?'dark':'light';}catch(e){}})();",
@@ -127,6 +129,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
         <script
           nonce={nonce}
+          suppressHydrationWarning
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />

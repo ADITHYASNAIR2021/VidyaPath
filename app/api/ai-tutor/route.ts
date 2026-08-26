@@ -16,6 +16,8 @@ import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request
 import { aiTutorRequestSchema } from '@/lib/schemas/ai';
 import { logServerEvent } from '@/lib/observability';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { buildSafeSystemPrompt } from '@/lib/ai/content-safety';
+import { getStudentSafetyIntervention } from '@/lib/ai/student-safety';
 
 interface ChapterContext {
   chapterId?: string;
@@ -63,7 +65,7 @@ const SYSTEM_PROMPT = `You are VidyaAI, a CBSE tutor for VidyaPath.
 SCOPE (STRICT)
 You only answer:
 - Class 10: Science, Mathematics, and English Core (NCERT)
-- Class 12: Physics, Chemistry, Biology, Mathematics, and English Core (NCERT)
+- Class 12: Physics, Chemistry, Biology, Mathematics, English Core, Accountancy, Business Studies, and Economics (NCERT/CBSE)
 - CBSE board prep, marking schemes, PYQ trends, study plans
 - JEE/NEET foundational relevance for these same topics
 
@@ -218,6 +220,30 @@ export async function POST(req: NextRequest) {
     }
 
     const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+    const safetyIntervention = getStudentSafetyIntervention(lastUserMessage);
+    if (safetyIntervention) {
+      return dataJson({
+        requestId,
+        data: {
+          responseId: `safety-${requestId}`,
+          message: safetyIntervention.message,
+          isOffTopic: true,
+          sources: [],
+          safety: { intervention: true, kind: safetyIntervention.kind },
+          quality: {
+            provider: 'local-guardrail',
+            model: 'deterministic-student-safety-v1',
+            latencyMs: 0,
+            groundednessScore: 100,
+            citationCoverageScore: 100,
+            retrievalMiss: false,
+            repaired: false,
+            retrievalConfidence: 100,
+            retrievalConfidenceLevel: 'high',
+          },
+        },
+      });
+    }
     const pyq = chapterContext?.chapterId
       ? (await getGroundedPYQData(chapterContext.chapterId)) ?? getPYQData(chapterContext.chapterId)
       : null;
@@ -252,14 +278,14 @@ export async function POST(req: NextRequest) {
       weakQuestions: recentHistory.weakQuestions,
     });
     const chapterPin = buildChapterPin(chapterContext, pyq);
-    const fullSystemPrompt = `${SYSTEM_PROMPT}
+    const fullSystemPrompt = buildSafeSystemPrompt(`${SYSTEM_PROMPT}
 
 ${chapterPin ? `${chapterPin}\n` : ''}STUDENT PRACTICE SIGNAL
 ${practiceSignal.summary}
 Performance band: ${practiceSignal.performanceBand}
 Review urgency: ${practiceSignal.reviewUrgency}
 Recent weak questions: ${recentHistory.weakQuestions.slice(0, 3).join(' | ') || 'none'}
-Recent asked questions: ${recentHistory.recentQuestions.slice(0, 3).join(' | ') || 'none'}`;
+Recent asked questions: ${recentHistory.recentQuestions.slice(0, 3).join(' | ') || 'none'}`);
 
     const generated = await generateTaskJson<TutorResponse>({
       task: 'chat',

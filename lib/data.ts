@@ -2025,6 +2025,12 @@ export const ALL_CHAPTERS: Chapter[] = [
   ...class12English,
 ];
 
+/** Student-facing board catalogue. Class 11 data is retained for internal
+ * bridge/career tools but is not part of the advertised Class 10/12 LMS. */
+export const BOARD_CHAPTERS: Chapter[] = ALL_CHAPTERS.filter(
+  (chapter) => chapter.classLevel === 10 || chapter.classLevel === 12
+);
+
 // ── Helper Functions ────────────────────────────────────────
 
 export function getChapterById(id: string): Chapter | undefined {
@@ -2056,7 +2062,7 @@ const SUBJECT_ORDER: Record<Subject, number> = {
 };
 
 export function getSortedChapters(): Chapter[] {
-  return [...ALL_CHAPTERS].sort((a, b) => {
+  return [...BOARD_CHAPTERS].sort((a, b) => {
     if (a.classLevel !== b.classLevel) return a.classLevel - b.classLevel;
     const subjectDiff = SUBJECT_ORDER[a.subject] - SUBJECT_ORDER[b.subject];
     if (subjectDiff !== 0) return subjectDiff;
@@ -2077,7 +2083,7 @@ export function getAdjacentChapters(id: string): {
 }
 
 export function getChapterStats() {
-  const byClass: Record<number, number> = { 10: 0, 11: 0, 12: 0 };
+  const byClass: Record<number, number> = { 10: 0, 12: 0 };
   const bySubject: Record<string, number> = {
     Physics: 0,
     Chemistry: 0,
@@ -2088,11 +2094,11 @@ export function getChapterStats() {
     Economics: 0,
     'English Core': 0,
   };
-  for (const ch of ALL_CHAPTERS) {
+  for (const ch of BOARD_CHAPTERS) {
     byClass[ch.classLevel]++;
     bySubject[ch.subject]++;
   }
-  return { total: ALL_CHAPTERS.length, byClass, bySubject };
+  return { total: BOARD_CHAPTERS.length, byClass, bySubject };
 }
 
 // ============================================================

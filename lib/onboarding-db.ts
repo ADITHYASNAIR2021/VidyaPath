@@ -39,6 +39,7 @@ interface SchoolAdminProfileRow {
   phone: string | null;
   name: string;
   status: 'active' | 'inactive';
+  must_change_password?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -387,7 +388,7 @@ export async function provisionSchoolAdminByDeveloper(input: {
     schoolName?: string;
     loginIdentifier: string;
     password: string;
-    authEmail: string;
+    authEmail?: string;
   };
 }> {
   if (!isSupabaseServiceConfigured()) throw new Error('Supabase is not configured.');
@@ -397,6 +398,7 @@ export async function provisionSchoolAdminByDeveloper(input: {
   const name = sanitize(input.name, 120);
   if (!name) throw new Error('Admin name is required.');
   const phone = input.phone ? normalizePhone(input.phone) : '';
+  if (phone.length !== 10) throw new Error('A valid 10-digit principal phone number is required.');
   const identity = await issueFriendlyIdentifier({
     schoolId: school.id,
     roleCode: 'AD',
@@ -416,10 +418,11 @@ export async function provisionSchoolAdminByDeveloper(input: {
   if (existingIdentifier[0]) {
     throw new Error('Admin identifier already exists for this school. Please retry.');
   }
-  const authEmail = sanitize(input.authEmail || '', 160).toLowerCase();
-  if (!authEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authEmail)) {
-    throw new Error('Valid admin authEmail is required.');
+  const deliveryEmail = sanitize(input.authEmail || '', 160).toLowerCase();
+  if (deliveryEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(deliveryEmail)) {
+    throw new Error('Admin email must be valid when provided.');
   }
+  const authEmail = deliveryEmail || `admin.${school.school_code.toLowerCase()}.${phone}.${randomUUID().slice(0, 12)}@vidyapath.local`;
 
   const authUser = await createSupabaseAuthUser({
     email: authEmail,
@@ -442,6 +445,7 @@ export async function provisionSchoolAdminByDeveloper(input: {
     phone: phone || null,
     name,
     status: 'active',
+    must_change_password: true,
   });
   if (!created) throw new Error('Failed to provision school admin profile.');
 
@@ -451,15 +455,17 @@ export async function provisionSchoolAdminByDeveloper(input: {
     profileId: created.id,
   });
 
-  await sendCredentialMail({
-    to: authUser.email ?? authEmail,
-    recipientName: created.name,
-    role: 'admin',
-    schoolName: school.school_name,
-    loginId: authUser.email ?? authEmail,
-    password,
-    mustChangePassword: true,
-  }).catch(() => undefined);
+  if (deliveryEmail) {
+    await sendCredentialMail({
+      to: deliveryEmail,
+      recipientName: created.name,
+      role: 'admin',
+      schoolName: school.school_name,
+      loginId: phone,
+      password,
+      mustChangePassword: true,
+    }).catch(() => undefined);
+  }
 
   return {
     admin: {
@@ -479,9 +485,20 @@ export async function provisionSchoolAdminByDeveloper(input: {
       schoolId: school.id,
       schoolCode: school.school_code,
       schoolName: school.school_name,
-      loginIdentifier: created.auth_email ?? authEmail,
+      loginIdentifier: phone,
       password,
-      authEmail: created.auth_email ?? authEmail,
+      authEmail: deliveryEmail || undefined,
     },
   };
+}
+
+export async function markAdminPasswordChangeCompleted(adminId: string): Promise<void> {
+  if (!isSupabaseServiceConfigured()) return;
+  const cleanAdminId = sanitize(adminId, 80);
+  if (!cleanAdminId) return;
+  await supabaseUpdate<SchoolAdminProfileRow>(
+    TABLES.schoolAdmins,
+    { must_change_password: false },
+    [{ column: 'id', value: cleanAdminId }]
+  ).catch(() => []);
 }

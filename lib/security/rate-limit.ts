@@ -44,6 +44,7 @@ interface RateLimitRpcRow {
 }
 
 const TABLE = 'request_throttle';
+const localBuckets = new Map<string, { windowStartedAt: number; count: number; blockedUntil: number }>();
 
 function normalizeKey(input: string): string {
   return input.trim().toLowerCase().slice(0, 240);
@@ -88,6 +89,53 @@ function fallbackDecision(limit: number, forceFailOpen = false): RateLimitDecisi
     retryAfterSeconds: 30,
     remaining: 0,
     limit,
+  };
+}
+
+function shouldUseLocalMemory(): boolean {
+  return ['1', 'true', 'yes'].includes((process.env.RATE_LIMIT_USE_LOCAL_MEMORY || '').trim().toLowerCase());
+}
+
+function checkRateLimitInMemory(input: {
+  key: string;
+  windowSeconds: number;
+  limit: number;
+  blockSeconds: number;
+}): RateLimitDecision {
+  const now = Date.now();
+  const windowMs = input.windowSeconds * 1000;
+  const existing = localBuckets.get(input.key);
+  const bucket = !existing || now - existing.windowStartedAt >= windowMs
+    ? { windowStartedAt: now, count: 0, blockedUntil: 0 }
+    : existing;
+
+  if (bucket.blockedUntil > now) {
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((bucket.blockedUntil - now) / 1000)),
+      remaining: 0,
+      limit: input.limit,
+    };
+  }
+
+  bucket.count += 1;
+  if (bucket.count > input.limit) {
+    bucket.blockedUntil = now + input.blockSeconds * 1000;
+    localBuckets.set(input.key, bucket);
+    return { allowed: false, retryAfterSeconds: input.blockSeconds, remaining: 0, limit: input.limit };
+  }
+
+  localBuckets.set(input.key, bucket);
+  if (localBuckets.size > 10_000) {
+    for (const [key, value] of localBuckets) {
+      if (value.blockedUntil <= now && now - value.windowStartedAt >= windowMs) localBuckets.delete(key);
+    }
+  }
+  return {
+    allowed: true,
+    retryAfterSeconds: 0,
+    remaining: Math.max(0, input.limit - bucket.count),
+    limit: input.limit,
   };
 }
 
@@ -225,6 +273,12 @@ export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDe
   const key = normalizeKey(input.key);
   if (!key) {
     return fallbackDecision(limit, failOpen);
+  }
+
+  // Explicit single-process mode for local demos and `next start` on a laptop.
+  // Production deployments should use Upstash or the shared Supabase limiter.
+  if (shouldUseLocalMemory()) {
+    return checkRateLimitInMemory({ key, windowSeconds, limit, blockSeconds });
   }
 
   // ── Fast path: Redis/Upstash ────────────────────────────────────────────

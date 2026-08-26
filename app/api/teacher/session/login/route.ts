@@ -152,7 +152,10 @@ export async function POST(req: Request) {
       clearSupabaseSessionCookies(response);
       clearAllRoleSessionCookies(response);
       attachSupabaseSessionCookies(response, authSession, 'teacher');
-      attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
+      attachTeacherSessionCookie(response, createTeacherSessionToken(
+        teacherSession.teacher.id,
+        teacherSession.teacher.mustChangePassword === true
+      ));
       attachActiveRoleCookie(response, 'teacher');
       return response;
     } catch (error) {
@@ -219,7 +222,10 @@ export async function POST(req: Request) {
       clearSupabaseSessionCookies(response);
       clearAllRoleSessionCookies(response);
       attachSupabaseSessionCookies(response, authSession, 'teacher');
-      attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
+      attachTeacherSessionCookie(response, createTeacherSessionToken(
+        teacherSession.teacher.id,
+        teacherSession.teacher.mustChangePassword === true
+      ));
       attachActiveRoleCookie(response, 'teacher');
       await recordAuditEvent({
         requestId,
@@ -275,7 +281,10 @@ export async function POST(req: Request) {
         clearSupabaseSessionCookies(response);
         clearAllRoleSessionCookies(response);
         attachSupabaseSessionCookies(response, authSession, 'teacher');
-        attachTeacherSessionCookie(response, createTeacherSessionToken(teacherSession.teacher.id));
+        attachTeacherSessionCookie(response, createTeacherSessionToken(
+          teacherSession.teacher.id,
+          teacherSession.teacher.mustChangePassword === true
+        ));
         attachActiveRoleCookie(response, 'teacher');
         return response;
       }

@@ -1,11 +1,29 @@
 {
-  "updatedAt": "2026-04-09T05:00:01.459Z",
+  "updatedAt": "2026-08-26T19:28:10.033Z",
   "chapterViews": {
-    "c12-phy-1": 2,
-    "c10-chem-1": 2,
-    "c10-chem-2": 1,
-    "c10-chem-3": 2
+    "c10-chem-1": 2
   },
   "aiQuestionsByChapter": {},
-  "searchNoResults": {}
+  "searchNoResults": {},
+  "uxPageLoadsByRoute": {
+    "/": 1
+  },
+  "uxPageLoadBuckets": {
+    "300ms": 1
+  },
+  "uxApiRequestsByEndpoint": {
+    "get /api/teacher": 1,
+    "get /api/auth/session": 1
+  },
+  "uxApiErrorsByEndpoint": {
+    "get /api/student/session/me :: 401": 3,
+    "post /api/generate-flashcards :: 401": 1
+  },
+  "uxRouteDropoffsByRoute": {
+    "/chapters/c10-chem-1 :: navigated": 1,
+    "/student/login :: dropped": 1
+  },
+  "uxPageLoadSamples": 1,
+  "uxPageLoadTotalMs": 20,
+  "uxSlowPageLoads": 0
 }

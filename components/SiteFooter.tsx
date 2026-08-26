@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { GraduationCap } from 'lucide-react';
-import { isPortalPath, isStudentShellPath } from '@/lib/ui/layout-shell';
+import { isAuthExperiencePath, isPortalPath, isStudentShellPath } from '@/lib/ui/layout-shell';
 
 export default function SiteFooter() {
   const pathname = usePathname();
@@ -16,7 +16,7 @@ export default function SiteFooter() {
     pathname.startsWith('/cbse-notes') ||
     pathname.startsWith('/concept-web') ||
     pathname.startsWith('/helper');
-  if (pathname.startsWith('/exam/assignment/') || isPortalPath(pathname) || isStudentShellPath(pathname) || sharedShellPath) return null;
+  if (isAuthExperiencePath(pathname) || pathname.startsWith('/exam/assignment/') || isPortalPath(pathname) || isStudentShellPath(pathname) || sharedShellPath) return null;
 
   return (
     <footer className="border-t border-[#E8E4DC] bg-white px-4 py-7 mt-8">

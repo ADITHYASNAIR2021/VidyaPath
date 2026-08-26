@@ -31,6 +31,19 @@ const EXCLUDED_STUDENT_SHELL_PREFIXES = [
   '/practice/assignment',
 ];
 
+const AUTH_EXPERIENCE_PATHS = [
+  '/login',
+  '/student/login',
+  '/student/first-login',
+  '/teacher/login',
+  '/teacher/first-login',
+  '/admin/login',
+  '/developer/login',
+  '/parent/login',
+  '/forgot-password',
+  '/reset-password',
+];
+
 const SHARED_ROLE_SHELL_PREFIXES = [
   '/chapters',
   '/formulas',
@@ -58,4 +71,8 @@ export function isSharedRoleShellPath(pathname: string): boolean {
 
 export function isExamLikePath(pathname: string): boolean {
   return pathname.startsWith('/exam/');
+}
+
+export function isAuthExperiencePath(pathname: string): boolean {
+  return AUTH_EXPERIENCE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }

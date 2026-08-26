@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 
 export const PASSWORD_MIN_LENGTH = 6;
 export const PASSWORD_MAX_LENGTH = 18;
@@ -64,6 +64,13 @@ export function generateStrongPassword(length = 12): string {
   const generated = chars.join('');
   assertPasswordPolicy(generated);
   return generated;
+}
+
+export function generateSecureNumericPin(digits = 6): string {
+  const width = Math.max(4, Math.min(8, Math.floor(digits)));
+  const min = 10 ** (width - 1);
+  const maxExclusive = 10 ** width;
+  return String(randomInt(min, maxExclusive));
 }
 
 export function generateLegacyPin(seed: string, digits = 6): string {

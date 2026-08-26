@@ -27,6 +27,10 @@ let cachedFormulaEntries: FormulaEntry[] | null = null;
 const SOURCE_DOC_BY_NAME = new Map(FORMULA_SOURCE_DOCS.map((doc) => [doc.sourceName, doc]));
 
 const UNIT_HINTS: Array<{ matcher: RegExp; unit: string }> = [
+  { matcher: /current ratio|quick ratio|debt[- ]equity ratio|return on capital employed|probability|multiplier|\bmpc\b|\bmps\b|pH|pOH|van'?t hoff factor/i, unit: 'Dimensionless (ratio or index)' },
+  { matcher: /break-even point.*units/i, unit: 'units (count)' },
+  { matcher: /break-even sales value|cash flow|gross domestic product|\bgdp\b|fiscal deficit|balance of trade/i, unit: 'Currency (use the unit stated in the question)' },
+  { matcher: /power of lens/i, unit: 'D (dioptre)' },
   { matcher: /force|newton|f=|gravitation|coulomb/i, unit: 'N (newton)' },
   { matcher: /energy|work|enthalpy|gibbs/i, unit: 'J (joule)' },
   { matcher: /power|watt|p=/i, unit: 'W (watt)' },
@@ -39,7 +43,10 @@ const UNIT_HINTS: Array<{ matcher: RegExp; unit: string }> = [
 ];
 
 function inferSiUnitHint(chapter: Chapter, formulaName: string, latex: string): string {
-  const source = `${chapter.subject} ${chapter.title} ${formulaName} ${latex}`;
+  // Match the formula itself, not the chapter title. A chapter such as "Current
+  // Electricity" must not turn every formula into amperes, and "Current Ratio"
+  // is an accounting ratio rather than electric current.
+  const source = `${formulaName} ${latex}`;
   const hit = UNIT_HINTS.find((item) => item.matcher.test(source));
   return hit?.unit ?? 'Depends on variables; write final SI unit explicitly in answers.';
 }

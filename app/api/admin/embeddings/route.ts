@@ -7,12 +7,22 @@ import { getEmbeddingCoverageStats } from '@/lib/admin-embeddings-db';
 
 export const dynamic = 'force-dynamic';
 
-async function countJsonlLines(filePath: string): Promise<number> {
+async function readJsonlIds(filePath: string): Promise<Set<string>> {
   try {
     const content = await fs.readFile(filePath, 'utf-8');
-    return content.split('\n').filter((line) => line.trim().length > 0).length;
+    const ids = new Set<string>();
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const chunk = JSON.parse(line) as { id?: unknown };
+        if (chunk.id) ids.add(String(chunk.id));
+      } catch {
+        // Invalid records are not counted as ingestible chunks.
+      }
+    }
+    return ids;
   } catch {
-    return 0;
+    return new Set();
   }
 }
 
@@ -24,22 +34,30 @@ export async function GET(req: Request) {
 
   try {
     const contextDir = path.join(process.cwd(), 'lib', 'context');
-    const [papersCount, textbookCount, dbStats] = await Promise.all([
-      countJsonlLines(path.join(contextDir, 'chunks.jsonl')),
-      countJsonlLines(path.join(contextDir, 'textbook_chunks.jsonl')),
+    const [paperIds, textbookIds, dbStats] = await Promise.all([
+      readJsonlIds(path.join(contextDir, 'chunks.jsonl')),
+      readJsonlIds(path.join(contextDir, 'textbook_chunks.jsonl')),
       getEmbeddingCoverageStats(),
     ]);
 
     const totalInDb = dbStats.reduce((sum, row) => sum + row.total_chunks, 0);
-    const totalJsonl = papersCount + textbookCount;
+    const uniqueIds = new Set([...paperIds, ...textbookIds]);
+    const totalJsonl = uniqueIds.size;
+    const duplicateRecords = paperIds.size + textbookIds.size - totalJsonl;
 
     return dataJson({
       requestId,
       data: {
         summary: {
-          jsonlChunks: { papers: papersCount, textbooks: textbookCount, total: totalJsonl },
+          jsonlChunks: {
+            papersFile: paperIds.size,
+            textbooksFile: textbookIds.size,
+            uniqueTotal: totalJsonl,
+            duplicateRecords,
+            total: totalJsonl,
+          },
           embeddedInDb: totalInDb,
-          coveragePct: totalJsonl > 0 ? Math.round((totalInDb / totalJsonl) * 100) : 0,
+          coveragePct: totalJsonl > 0 ? Math.min(100, Math.round((totalInDb / totalJsonl) * 100)) : 0,
         },
         byClassSubject: dbStats,
         ingestionCommand: 'node scripts/ingest_embeddings.mjs --skip-existing',

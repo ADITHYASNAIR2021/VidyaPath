@@ -4,8 +4,8 @@
 create extension if not exists vector;
 
 -- document_embeddings: stores pre-computed semantic embeddings for all context chunks.
--- Dimension 1024 matches NVIDIA nv-embedqa-e5-v5 / nv-embed-v1.
--- To use OpenAI text-embedding-3-small (1536-dim) run this migration with vector(1536).
+-- Dimension 1024 matches VidyaPath's normalized Gemini embedding output and
+-- the configured reduced OpenAI fallback.
 create table if not exists public.document_embeddings (
   id          text         primary key,
   text        text         not null,

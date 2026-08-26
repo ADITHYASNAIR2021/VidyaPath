@@ -75,7 +75,7 @@ const RECOMMENDED_SPECS: EnvSpec[] = [
     key: 'NVIDIA_API_KEY',
     required: false,
     warnOnly: true,
-    description: 'NVIDIA NIM API key (nvapi-...). Required for pgvector RAG embeddings and NVIDIA reranking.',
+    description: 'NVIDIA NIM API key (nvapi-...). Used for NVIDIA reranking and supported NIM features.',
   },
   {
     key: 'GROQ_API_KEY',

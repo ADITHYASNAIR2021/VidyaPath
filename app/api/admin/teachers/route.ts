@@ -16,8 +16,8 @@ import type { TeacherScope } from '@/lib/teacher-types';
 export const dynamic = 'force-dynamic';
 
 interface CreateTeacherRequest {
-  email: string;
-  phone?: string;
+  email?: string;
+  phone: string;
   name: string;
   staffCode?: string;
   password?: string;
@@ -29,13 +29,13 @@ function parseCreateTeacher(value: unknown): CreateTeacherRequest | null {
   if (!value || typeof value !== 'object') return null;
   const body = value as Record<string, unknown>;
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
-  const phone = typeof body.phone === 'string' ? body.phone.trim() : undefined;
+  const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   const staffCode = typeof body.staffCode === 'string' ? body.staffCode.trim() : undefined;
   const password = typeof body.password === 'string' ? body.password.trim() : undefined;
   const sendCredentialEmail = body.sendCredentialEmail !== false;
-  if (!email || !name) return null;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+  if (!phone || !name) return null;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
   if (password) {
     const passwordPolicy = validatePasswordPolicy(password);
     if (!passwordPolicy.ok) return null;
@@ -96,7 +96,7 @@ export async function POST(req: Request) {
     return errorJson({
       requestId,
       errorCode: 'invalid-create-teacher-payload',
-      message: 'Invalid request. Required: { email, name } and optional { phone, password(6-18 with upper/lower/number/symbol), scopes?, sendCredentialEmail }.',
+      message: 'Invalid request. Required: { name, phone } and optional { email, password, scopes, sendCredentialEmail }.',
       status: 400,
     });
   }
@@ -140,20 +140,20 @@ export async function POST(req: Request) {
       forcePasswordChangeOnFirstLogin: true,
       rotatePasswordIfExisting: true,
     });
-    const mailDelivery = parsed.sendCredentialEmail
+    const mailDelivery = parsed.sendCredentialEmail && parsed.email
       ? await sendCredentialMail({
           to: parsed.email,
           recipientName: teacher.name,
           role: 'teacher',
           schoolName: adminSession.schoolName,
-          loginId: parsed.email,
+          loginId: teacher.phone,
           password: issuedPassword,
           mustChangePassword: true,
         })
       : {
           delivered: false,
           provider: 'none' as const,
-          message: 'Credential email intentionally skipped.',
+          message: parsed.email ? 'Credential email intentionally skipped.' : 'No email supplied; share the one-time credentials privately.',
         };
     const committedAt = new Date().toISOString();
     await recordAuditEvent({
@@ -171,10 +171,10 @@ export async function POST(req: Request) {
       data: {
         teacher,
         issuedCredentials: {
-          loginIdentifier: parsed.email,
+          loginIdentifier: teacher.phone,
           staffIdentifier: teacher.staffCode,
           phone: teacher.phone,
-          email: parsed.email,
+          email: parsed.email || undefined,
           password: issuedPassword,
         },
         delivery: mailDelivery,

@@ -30,7 +30,10 @@ function applyTheme(theme: Theme): void {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => getInitialThemePreference());
+  // Keep the server render and the first client render identical. The inline
+  // layout script applies the saved class before paint; this effect then syncs
+  // React state without causing a hydration mismatch.
+  const [theme, setTheme] = useState<Theme>('light');
 
   useEffect(() => {
     const preferred = getInitialThemePreference();

@@ -143,7 +143,7 @@ function buildContextualText(chunk, chapter, topicHints, modalityHints) {
 }
 
 function readChunks() {
-  const chunks = [];
+  const chunksById = new Map();
   for (const filePath of chunkPaths) {
     if (!fs.existsSync(filePath)) continue;
     const lines = fs.readFileSync(filePath, 'utf8').split('\n').map((line) => line.trim()).filter(Boolean);
@@ -151,13 +151,13 @@ function readChunks() {
       try {
         const parsed = JSON.parse(line);
         if (!parsed?.id || !parsed?.text || !parsed?.sourcePath) continue;
-        chunks.push(parsed);
+        if (!chunksById.has(String(parsed.id))) chunksById.set(String(parsed.id), parsed);
       } catch {
         continue;
       }
     }
   }
-  return chunks;
+  return [...chunksById.values()];
 }
 
 function readImageEntries() {
@@ -244,7 +244,7 @@ function buildIndex() {
         `Class ${chapter.classLevel} ${chapter.subject} chapter ${chapter.title}.`,
         `Topic focus: ${topic}.`,
         ranked.length > 0
-          ? `Key evidence: ${ranked.map((entry) => entry.doc.text.slice(0, 140)).join(' ')}`
+          ? `Key evidence: ${ranked.map((entry) => entry.doc.contextualText.slice(0, 140)).join(' ')}`
           : `Key NCERT wording and board phrasing should mention ${topic}.`,
       ].join(' ');
       const termFreq = buildTermFreq(tokenize(summaryText));

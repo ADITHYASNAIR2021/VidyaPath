@@ -149,7 +149,13 @@ export function errorJson(input: {
     hint: input.hint,
     issues: input.issues,
   };
-  return withRequestIdHeader(NextResponse.json(body, { status }), input.requestId);
+  const response = withRequestIdHeader(NextResponse.json(body, { status }), input.requestId);
+  if (status === 429) {
+    const retryAfter = Number(String(input.hint || '').match(/(\d+)/)?.[1]);
+    response.headers.set('retry-after', String(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 60));
+    response.headers.set('cache-control', 'no-store');
+  }
+  return response;
 }
 
 export function dataJson<T>(input: {

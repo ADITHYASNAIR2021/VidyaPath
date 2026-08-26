@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { TeacherProfile, TeacherScope } from '@/lib/teacher-types';
-import { ChevronDown, ChevronUp, KeyRound, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileSpreadsheet, KeyRound, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
+import Link from 'next/link';
 import BackButton from '@/components/BackButton';
 import clsx from 'clsx';
 
@@ -80,7 +81,7 @@ export default function AdminTeachersPage() {
   }, []);
 
   async function addTeacher() {
-    if (!newTeacher.name.trim() || !newTeacher.email.trim()) return;
+    if (!newTeacher.name.trim() || !newTeacher.phone.trim()) return;
     setCreating(true);
     setError('');
     try {
@@ -93,7 +94,7 @@ export default function AdminTeachersPage() {
           phone: newTeacher.phone || undefined,
           password: newTeacher.password || undefined,
           scopes: pendingScopes,
-          sendCredentialEmail: true,
+          sendCredentialEmail: Boolean(newTeacher.email.trim()),
         }),
       });
       const body = await response.json().catch(() => null);
@@ -105,7 +106,7 @@ export default function AdminTeachersPage() {
       const credentials = data?.issuedCredentials as Record<string, unknown> | undefined;
       const delivery = data?.delivery as Record<string, unknown> | undefined;
       setIssued({
-        loginIdentifier: String(credentials?.loginIdentifier || newTeacher.email),
+        loginIdentifier: String(credentials?.loginIdentifier || newTeacher.phone),
         password: String(credentials?.password || ''),
         mailMessage: typeof delivery?.message === 'string' ? delivery.message : undefined,
       });
@@ -190,14 +191,19 @@ export default function AdminTeachersPage() {
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 flex items-center gap-2">
             <Users className="w-6 h-6 text-indigo-600" /> Teachers
           </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Create teacher accounts using email login and assign scopes.</p>
+          <p className="text-sm text-gray-500 mt-0.5">Create phone-based faculty accounts, assign subjects, and designate class teachers.</p>
         </div>
-        <button
-          onClick={() => setShowCreate((value) => !value)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" /> Add Teacher
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/roster-import?entity=teachers" className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">
+            <FileSpreadsheet className="h-4 w-4" /> Bulk import
+          </Link>
+          <button
+            onClick={() => setShowCreate((value) => !value)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Add Teacher
+          </button>
+        </div>
       </div>
 
       {issued && (
@@ -215,8 +221,8 @@ export default function AdminTeachersPage() {
           <h2 className="font-semibold text-indigo-800">New Teacher</h2>
           <div className="grid sm:grid-cols-2 gap-4">
             <input value={newTeacher.name} onChange={(e) => setNewTeacher((p) => ({ ...p, name: e.target.value }))} placeholder="Full name" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
-            <input value={newTeacher.email} onChange={(e) => setNewTeacher((p) => ({ ...p, email: e.target.value }))} placeholder="teacher@school.org" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
-            <input value={newTeacher.phone} onChange={(e) => setNewTeacher((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone (optional)" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
+            <input value={newTeacher.phone} onChange={(e) => setNewTeacher((p) => ({ ...p, phone: e.target.value }))} placeholder="10-digit phone (login ID)" inputMode="tel" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
+            <input value={newTeacher.email} onChange={(e) => setNewTeacher((p) => ({ ...p, email: e.target.value }))} placeholder="Email (optional, for delivery)" inputMode="email" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
             <input type="password" value={newTeacher.password} onChange={(e) => setNewTeacher((p) => ({ ...p, password: e.target.value }))} placeholder="Password (optional)" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm" />
           </div>
 
@@ -252,7 +258,7 @@ export default function AdminTeachersPage() {
           </div>
 
           <div className="flex gap-2">
-            <button onClick={addTeacher} disabled={!newTeacher.name.trim() || !newTeacher.email.trim() || creating} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+            <button onClick={addTeacher} disabled={!newTeacher.name.trim() || !newTeacher.phone.trim() || creating} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
               {creating ? 'Adding...' : 'Add Teacher'}
             </button>
             <button onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50">Cancel</button>

@@ -3,7 +3,6 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
-import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { chapterNotesSlug, parseChapterFromNotesSlug, slugify } from '@/lib/seo-notes';
 
 interface NotesParams {
@@ -26,7 +25,11 @@ export async function generateMetadata({ params }: { params: Promise<NotesParams
   const resolvedParams = await params;
   const chapter = parseChapterFromNotesSlug(resolvedParams.classLevel, resolvedParams.subject, resolvedParams.chapterSlug);
   if (!chapter) return { title: 'CBSE Notes | VidyaPath' };
-  const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
+  // SEO notes pages are pre-rendered in bulk. Use the curated synchronous PYQ
+  // summary here; rebuilding the full grounded corpus inside static workers can
+  // exceed Next.js' per-page timeout. Interactive chapter tools still use the
+  // grounded retrieval pipeline at runtime.
+  const pyq = getPYQData(chapter.id);
   const baseTitle = `CBSE Class ${chapter.classLevel} ${chapter.subject} ${chapter.title} Notes`;
   return {
     title: `${baseTitle} | VidyaPath`,
@@ -46,7 +49,7 @@ export default async function CbseNotesChapterPage({ params }: { params: Promise
   const resolvedParams = await params;
   const chapter = parseChapterFromNotesSlug(resolvedParams.classLevel, resolvedParams.subject, resolvedParams.chapterSlug);
   if (!chapter) notFound();
-  const pyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
+  const pyq = getPYQData(chapter.id);
   const formulaNames = (chapter.formulas ?? []).map((formula) => formula.name).slice(0, 6);
   const highYieldTopics = pyq?.importantTopics?.slice(0, 8) ?? chapter.topics.slice(0, 8);
   const yearsAsked = pyq?.yearsAsked ? [...pyq.yearsAsked].sort((a, b) => b - a) : [];

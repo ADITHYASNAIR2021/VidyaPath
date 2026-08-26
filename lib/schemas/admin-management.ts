@@ -17,8 +17,8 @@ const emailField = z.string().trim().toLowerCase().email().max(180);
 
 export const createTeacherSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  email: emailField,
-  phone: phoneField.optional(),
+  email: emailField.optional().or(z.literal('')),
+  phone: phoneField.regex(/^\+?[0-9 ()-]{10,20}$/, 'Provide a valid teacher phone number.'),
   staffCode: z.string().trim().max(40).optional(),
   password: z.string().trim().min(8).max(128).optional(),
   schoolId: uuidField.optional(),
@@ -194,6 +194,8 @@ const rosterRow = z.object({
   scopeSubject: z.string().trim().max(80).optional(),
   scopeSection: z.string().trim().max(40).optional(),
   password: z.string().trim().min(8).max(128).optional(),
+  parentPhone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/, 'Provide a valid parent phone number.').optional(),
+  parentName: z.string().trim().max(120).optional(),
 }).passthrough();
 
 const importSheetsSchema = z.object({

@@ -102,6 +102,10 @@ body {
     radial-gradient(circle at 100% 100%, rgba(232, 81, 26, 0.03), transparent 30%);
 }
 
+body:has([data-auth-experience]) {
+  padding-bottom: 0;
+}
+
 .dark body {
   color-scheme: dark;
   background-image:
@@ -539,6 +543,31 @@ h2 { letter-spacing: -0.02em; }
   margin: 0;
   padding-top: 0.2rem;
   padding-bottom: 0.35rem;
+}
+
+.accessible-formula {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+  font-size: clamp(1rem, 2.4vw, 1.35rem);
+  line-height: 1.35;
+  scrollbar-width: thin;
+}
+
+.accessible-formula--compact {
+  font-size: clamp(0.92rem, 2vw, 1.12rem);
+}
+
+.accessible-formula math {
+  display: block;
+  flex: 0 0 auto;
+  max-width: none;
+  white-space: nowrap;
 }
 
 @media (max-width: 640px) {

@@ -1,4 +1,5 @@
 import Sidebar from '@/components/Sidebar';
+import RoleSwitcher from '@/components/auth/RoleSwitcher';
 
 type Role = 'teacher' | 'admin' | 'developer';
 
@@ -44,11 +45,14 @@ export default function RolePortalLayout({
               </p>
               <p className="text-xs text-[var(--color-text-secondary)]">{copy.subtitle}</p>
             </div>
-            {displayName ? (
-              <div className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]">
-                {displayName}
-              </div>
-            ) : null}
+            <div className="flex items-center gap-2">
+              <RoleSwitcher />
+              {displayName ? (
+                <div className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-soft)] px-3 py-1 text-xs font-semibold text-[var(--color-text)]">
+                  {displayName}
+                </div>
+              ) : null}
+            </div>
           </div>
           {headerContent ? <div className="mt-2">{headerContent}</div> : null}
         </header>

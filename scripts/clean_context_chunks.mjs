@@ -28,6 +28,10 @@ const contextDir = path.join(root, "lib", "context");
 const DEFAULT_MIN_WORDS = 55;
 const DEFAULT_MIN_ALPHA_RATIO = 0.42;
 const DEFAULT_MIN_UNIQUE_RATIO = 0.28;
+const SUPPORTED_SUBJECTS = new Map([
+  [10, new Set(["Science", "Physics", "Chemistry", "Biology", "Math", "English Core"])],
+  [12, new Set(["Physics", "Chemistry", "Biology", "Math", "English Core", "Accountancy", "Business Studies", "Economics"])],
+]);
 
 function parseArgs(argv) {
   const args = {
@@ -197,6 +201,12 @@ function dedupeKey(text) {
   return crypto.createHash("sha1").update(canonical).digest("hex");
 }
 
+function isSupportedChunk(obj) {
+  const classLevel = Number(obj?.classLevel);
+  const subject = String(obj?.subject ?? "").trim();
+  return SUPPORTED_SUBJECTS.get(classLevel)?.has(subject) === true;
+}
+
 function processFile(filePath, config) {
   if (!fs.existsSync(filePath)) {
     return {
@@ -220,6 +230,8 @@ function processFile(filePath, config) {
     kept: 0,
     dropped_json_parse: 0,
     dropped_missing_text: 0,
+    dropped_unsupported_subject: 0,
+    dropped_redundant_textbook: 0,
     dropped_short: 0,
     dropped_low_alpha: 0,
     dropped_low_unique: 0,
@@ -239,6 +251,18 @@ function processFile(filePath, config) {
     }
     if (!obj || typeof obj !== "object" || typeof obj.text !== "string") {
       stats.dropped_missing_text += 1;
+      continue;
+    }
+    if (!isSupportedChunk(obj)) {
+      stats.dropped_unsupported_subject += 1;
+      continue;
+    }
+    if (
+      path.basename(filePath) === "chunks.jsonl" &&
+      obj.sourceType === "textbook" &&
+      fs.existsSync(path.join(contextDir, "textbook_chunks.jsonl"))
+    ) {
+      stats.dropped_redundant_textbook += 1;
       continue;
     }
 
@@ -275,9 +299,7 @@ function processFile(filePath, config) {
     seen.add(key);
 
     obj.text = cleaned;
-    if (typeof obj.wordCount === "number") {
-      obj.wordCount = tokens.length;
-    }
+    obj.wordCount = tokens.length;
 
     outLines.push(JSON.stringify(obj, null, 0));
     stats.kept += 1;
@@ -308,6 +330,7 @@ function summarize(result) {
       `  total=${s.total} kept=${s.kept} dropped=${s.total - s.kept}`,
       `  dropped_short=${s.dropped_short} dropped_instruction=${s.dropped_instruction} dropped_duplicate=${s.dropped_duplicate}`,
       `  dropped_low_alpha=${s.dropped_low_alpha} dropped_low_unique=${s.dropped_low_unique}`,
+      `  dropped_unsupported_subject=${s.dropped_unsupported_subject} dropped_redundant_textbook=${s.dropped_redundant_textbook}`,
       `  cleaned_text_changed=${s.cleaned_text_changed}`,
     ].join("\n")
   );

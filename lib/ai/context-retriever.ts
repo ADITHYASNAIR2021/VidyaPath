@@ -133,7 +133,7 @@ const DATASET_ROOT = path.join(process.cwd(), 'dataset', 'cbse_papers');
 const INDEX_SCRIPT = path.join(process.cwd(), 'scripts', 'build_context_index.py');
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const EMBEDDING_DIM = 192;
-const DEFAULT_NVIDIA_EMBED_MODEL = 'nvidia/nv-embedqa-e5-v5';
+const DEFAULT_NVIDIA_EMBED_MODEL = 'nvidia/nemotron-3-embed-1b';
 const DEFAULT_NVIDIA_RERANK_MODEL = 'nvidia/llama-nemotron-rerank-1b-v2';
 const VECTOR_INDEX_PATH = path.join(CONTEXT_DIR, 'chunk_vectors.jsonl');
 const RETRIEVAL_INDEX_PATH = path.join(CONTEXT_DIR, 'retrieval_index.json');
@@ -321,7 +321,7 @@ async function tryLoadOnnxPipeline(): Promise<unknown> {
   if (onnxEmbedPipelineLoading) return null;
   onnxEmbedPipelineLoading = true;
   try {
-    const { pipeline, env } = await import('@xenova/transformers' as string as any);
+    const { pipeline, env } = await import('@huggingface/transformers' as string as any);
     (env as any).allowLocalModels = false;
     onnxEmbedPipeline = await (pipeline as Function)('feature-extraction', persistedEmbeddingModel || 'Xenova/all-MiniLM-L6-v2');
     return onnxEmbedPipeline;
@@ -821,7 +821,8 @@ function shouldUseNvidiaRerank(query: ContextQuery): boolean {
 }
 
 function isPgvectorEnabled(): boolean {
-  return process.env.AI_ENABLE_PGVECTOR_RAG === '1';
+  return process.env.AI_ENABLE_PGVECTOR_RAG === '1'
+    && process.env.AI_PGVECTOR_RUNTIME_READY !== '0';
 }
 
 function isPgvectorMissingError(error: unknown): boolean {
@@ -1244,15 +1245,17 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
   if (!isPgvectorEnabled()) return null;
   if (Date.now() < pgvectorUnavailableUntilMs) return null;
 
-  const nvidiaKey = process.env.NVIDIA_API_KEY?.trim();
-  if (!isUsableNvidiaApiKey(nvidiaKey)) return null;
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
 
   try {
-    const [{ isSupabaseServiceConfigured, supabaseRpc }, { createNvidiaEmbeddings }] = await Promise.all([
+    const [
+      { isSupabaseServiceConfigured, supabaseRpc },
+      { createGeminiRetrievalEmbeddings, isUsableGeminiApiKey },
+    ] = await Promise.all([
       import('@/lib/supabase-rest'),
-      import('@/lib/ai/nvidia-client'),
+      import('@/lib/ai/gemini-embeddings'),
     ]);
-    if (!isSupabaseServiceConfigured()) return null;
+    if (!isSupabaseServiceConfigured() || !isUsableGeminiApiKey(geminiKey)) return null;
 
     const pyqForHyDE = query.chapterId ? getPYQData(query.chapterId) : null;
     const expandedQuery = expandRetrievalQuery({
@@ -1274,13 +1277,13 @@ async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[
       )
     ).slice(0, 2048);
 
-    const [embedding] = await createNvidiaEmbeddings({
-      apiKey: nvidiaKey,
-      model: 'nvidia/nv-embedqa-e5-v5',
+    const [embedding] = await createGeminiRetrievalEmbeddings({
+      apiKey: geminiKey,
       input: [queryText],
-      inputType: 'query',
+      taskType: 'RETRIEVAL_QUERY',
+      dimensions: 1024,
     });
-    if (!embedding || embedding.length === 0) return null;
+    if (!embedding || embedding.length !== 1024) return null;
 
     const topK = Math.max(1, Math.min(14, query.topK ?? 4));
     const candidatePoolSize = resolveCandidatePoolSize(topK, 64);

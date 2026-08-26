@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
 import { fetchClientAuthSession } from '@/lib/client-auth-session';
+import RoleSwitcher from '@/components/auth/RoleSwitcher';
 
 interface AuthSnapshot {
   role: 'student' | 'teacher' | 'admin' | 'developer' | 'anonymous';
@@ -69,11 +70,14 @@ export default function AppMainShell({ children }: { children: React.ReactNode }
                 </p>
                 <p className="text-xs text-[var(--color-text-muted)]">{roleHeader.subtitle}</p>
               </div>
-              {auth.displayName ? (
-                <div className="ui-chip rounded-full px-3 py-1 text-xs font-semibold">
-                  {auth.displayName}
-                </div>
-              ) : null}
+              <div className="flex items-center gap-2">
+                <RoleSwitcher />
+                {auth.displayName ? (
+                  <div className="ui-chip rounded-full px-3 py-1 text-xs font-semibold">
+                    {auth.displayName}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </header>
           <main id="main-content" tabIndex={-1} className="flex-1 min-h-[calc(100vh-65px)]">

@@ -21,6 +21,12 @@ export async function GET(req: Request) {
         authUserId: session.authUserId,
         displayName: session.displayName,
         availableRoles: session.availableRoles,
+        mustChangePassword: session.mustChangePassword === true,
+        admin: {
+          id: session.profileId,
+          name: session.displayName,
+          mustChangePassword: session.mustChangePassword === true,
+        },
       },
     });
   } catch (error) {

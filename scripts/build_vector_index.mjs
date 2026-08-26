@@ -10,9 +10,9 @@
  *   - lib/context/chunk_vectors.jsonl
  *
  * Embedding priority:
- *   1. NVIDIA nv-embedqa-e5-v5 (1024 dim) — requires NVIDIA_API_KEY
- *   2. @xenova/transformers all-MiniLM-L6-v2 (384 dim) — free local ONNX
- *      Install: npm install @xenova/transformers
+ *   1. @huggingface/transformers all-MiniLM-L6-v2 (384 dim) — free local ONNX
+ *   2. NVIDIA nemotron-3-embed-1b (2048 dim) — optional API fallback
+ *      Install: npm install @huggingface/transformers
  *   3. Hashed bag-of-words (192 dim) — always available, NOT semantic
  */
 
@@ -22,7 +22,7 @@ import path from 'node:path';
 const EMBEDDING_DIM = 192;
 const ONNX_EMBEDDING_DIM = 384;
 const ONNX_MODEL = 'Xenova/all-MiniLM-L6-v2';
-const NVIDIA_EMBED_MODEL = 'nvidia/nv-embedqa-e5-v5';
+const NVIDIA_EMBED_MODEL = 'nvidia/nemotron-3-embed-1b';
 const root = process.cwd();
 const contextDir = path.join(root, 'lib', 'context');
 const chunkPaths = [
@@ -35,7 +35,7 @@ let onnxPipeline = null;
 async function initOnnxPipeline() {
   if (onnxPipeline) return onnxPipeline;
   try {
-    const { pipeline, env } = await import('@xenova/transformers');
+    const { pipeline, env } = await import('@huggingface/transformers');
     env.allowLocalModels = false;
     onnxPipeline = await pipeline('feature-extraction', ONNX_MODEL);
     console.log(`[vector-index] ONNX model loaded: ${ONNX_MODEL}`);
@@ -169,7 +169,7 @@ async function main() {
     console.log('[vector-index] Using ONNX local embeddings (384 dim) — semantic search enabled without API key');
   } else if (!canUseNvidia) {
     console.warn('[vector-index] WARNING: No semantic embedding available. Falling back to hashed bag-of-words (NOT semantic).');
-    console.warn('[vector-index] Install @xenova/transformers for free local semantic embeddings: npm install @xenova/transformers');
+    console.warn('[vector-index] Install @huggingface/transformers for free local semantic embeddings: npm install @huggingface/transformers');
   }
 
   if (canUseNvidia) {

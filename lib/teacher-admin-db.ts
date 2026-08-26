@@ -1040,6 +1040,7 @@ export async function updateStudent(
     const password = updates.password.trim();
     if (!password) throw new Error('Valid password is required.');
     assertPasswordPolicy(password);
+    patch.must_change_password = true;
   }
   const hasPasswordUpdate = typeof updates.password === 'string';
   const hasSubjectsUpdate = Array.isArray(updates.subjects);

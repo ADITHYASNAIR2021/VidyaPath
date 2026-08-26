@@ -29,7 +29,8 @@ import {
   sanitizeText,
   normalizePhone,
   normalizeRollCode,
-  buildSyntheticPhoneFromSeed,
+  buildProvisionedAuthEmail,
+  normalizeAuthLocalPart,
   ensurePlatformRole,
   toScope,
   toTeacherProfile,
@@ -249,7 +250,7 @@ async function findExistingAuthIdentityByEmail(email: string): Promise<{ authUse
 
 export async function createTeacher(input: {
   schoolId?: string;
-  email: string;
+  email?: string;
   phone?: string;
   name: string;
   pin?: string;
@@ -263,8 +264,8 @@ export async function createTeacher(input: {
     throw new Error('Supabase is not configured.');
   }
   const schoolId = input.schoolId ? sanitizeText(input.schoolId, 80) : '';
-  const email = sanitizeText(input.email || '', 180).toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Valid teacher email is required.');
+  const requestedEmail = sanitizeText(input.email || '', 180).toLowerCase();
+  if (requestedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedEmail)) throw new Error('Teacher email is invalid.');
   const name = sanitizeText(input.name, 120);
   if (!schoolId) throw new Error('schoolId is required to create teacher.');
   if (!name) throw new Error('Valid teacher name is required.');
@@ -274,8 +275,8 @@ export async function createTeacher(input: {
   });
   const staffCode = normalizeRollCode(input.staffCode || identity.identifier);
   if (!staffCode) throw new Error('Valid staffCode is required.');
-  let phone = normalizePhone(input.phone || '');
-  if (!phone) phone = buildSyntheticPhoneFromSeed(`${schoolId}:${staffCode}:${email}`);
+  const phone = normalizePhone(input.phone || '');
+  if (phone.length !== 10) throw new Error('A valid 10-digit teacher phone number is required.');
   const duplicateTeacher = await supabaseSelect<Pick<TeacherProfileRow, 'id'>>(TABLES.profiles, {
     select: 'id',
     filters: [
@@ -288,6 +289,12 @@ export async function createTeacher(input: {
     throw new Error('Teacher identifier already exists for this school. Please retry.');
   }
   const teacherId = randomUUID();
+  const email = requestedEmail || buildProvisionedAuthEmail({
+    role: 'teacher',
+    schoolToken: normalizeAuthLocalPart(identity.schoolCode, 30),
+    userToken: normalizeAuthLocalPart(phone, 30),
+    profileId: teacherId,
+  });
   const providedPassword = typeof input.password === 'string' ? input.password.trim() : '';
   const teacherPassword = providedPassword || generateStrongPassword(12);
   assertPasswordPolicy(teacherPassword);

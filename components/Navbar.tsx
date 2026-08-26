@@ -27,9 +27,10 @@ import clsx from 'clsx';
 import CommandPalette from '@/components/CommandPalette';
 import { useTheme } from '@/components/ThemeProvider';
 import type { PlatformRole } from '@/lib/auth/roles';
-import { isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
+import { isAuthExperiencePath, isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
 import { clearClientAuthSessionCache, fetchClientAuthSession } from '@/lib/client-auth-session';
 import { clearClientStudentSessionCache } from '@/lib/client-student-session';
+import RoleSwitcher from '@/components/auth/RoleSwitcher';
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -142,6 +143,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const isExamRoute = pathname.startsWith('/exam/assignment/');
+  const isAuthRoute = isAuthExperiencePath(pathname);
   const isPortalRoute = isPortalPath(pathname);
   const isRoleSidebarMode = session.authenticated && (
     (session.role === 'student' && isStudentShellPath(pathname)) ||
@@ -183,7 +185,7 @@ export default function Navbar() {
   }
 
   /* Sidebar routes — dedicated role shell handles navigation */
-  if (isPortalRoute || isRoleSidebarMode) return null;
+  if (isAuthRoute || isPortalRoute || isRoleSidebarMode) return null;
 
   /* Exam mode — minimal nav */
   if (isExamRoute) {
@@ -255,6 +257,7 @@ export default function Navbar() {
 
             {session.authenticated ? (
               <div className="flex items-center gap-2">
+                <RoleSwitcher />
                 {/* Role + name badge */}
                 {roleMeta && (
                   <span className={clsx('inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold', roleMeta.chip)}>
@@ -312,11 +315,14 @@ export default function Navbar() {
 
             {/* Role badge (mobile) */}
             {session.authenticated && roleMeta && (
-              <div className={clsx('mb-2 inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold', roleMeta.chip)}>
-                {session.displayName ? session.displayName : roleMeta.label}
-                {(session.role === 'teacher' || session.role === 'admin' || session.role === 'developer') && (
-                  <span className="ml-1 inline-flex items-center gap-0.5 text-saffron-600 dark:text-saffron-400"><Zap className="w-3 h-3" />AI</span>
-                )}
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <div className={clsx('inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold', roleMeta.chip)}>
+                  {session.displayName ? session.displayName : roleMeta.label}
+                  {(session.role === 'teacher' || session.role === 'admin' || session.role === 'developer') && (
+                    <span className="ml-1 inline-flex items-center gap-0.5 text-saffron-600 dark:text-saffron-400"><Zap className="w-3 h-3" />AI</span>
+                  )}
+                </div>
+                <RoleSwitcher />
               </div>
             )}
 

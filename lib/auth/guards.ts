@@ -36,6 +36,7 @@ export interface RequestAuthContext {
   displayName?: string;
   classLevel?: 10 | 12;
   section?: string;
+  mustChangePassword?: boolean;
   availableRoles?: Array<Exclude<PlatformRole, 'anonymous'>>;
   issuedAt?: number;
   expiresAt?: number;
@@ -63,6 +64,7 @@ function toRequestAuthContext(
     displayName: roleContext.displayName,
     classLevel: roleContext.classLevel,
     section: roleContext.section,
+    mustChangePassword: roleContext.mustChangePassword,
     availableRoles: roleContext.availableRoles,
     issuedAt: typeof tokenPayload?.iat === 'number' ? tokenPayload.iat * 1000 : undefined,
     expiresAt: typeof tokenPayload?.exp === 'number' ? tokenPayload.exp * 1000 : undefined,
@@ -117,6 +119,8 @@ async function resolveLegacyContext(): Promise<RequestAuthContext | null> {
   if (admin) {
     return {
       role: 'admin',
+      profileId: admin.profileId,
+      mustChangePassword: admin.mustChangePassword === true,
       issuedAt: admin.issuedAt,
       expiresAt: admin.expiresAt,
       availableRoles: ['admin'],
@@ -128,6 +132,7 @@ async function resolveLegacyContext(): Promise<RequestAuthContext | null> {
     return {
       role: 'teacher',
       profileId: teacher.teacherId,
+      mustChangePassword: teacher.mustChangePassword === true,
       issuedAt: teacher.issuedAt,
       expiresAt: teacher.expiresAt,
       availableRoles: ['teacher'],
@@ -191,7 +196,9 @@ export async function getAdminSessionFromRequestCookies(): Promise<{
   schoolCode?: string;
   schoolName?: string;
   authUserId?: string;
+  profileId?: string;
   displayName?: string;
+  mustChangePassword?: boolean;
   availableRoles?: Array<Exclude<PlatformRole, 'anonymous'>>;
   role: 'admin' | 'developer';
 } | null> {
@@ -205,7 +212,9 @@ export async function getAdminSessionFromRequestCookies(): Promise<{
     schoolCode: context.schoolCode,
     schoolName: context.schoolName,
     authUserId: context.authUserId,
+    profileId: context.profileId,
     displayName: context.displayName,
+    mustChangePassword: context.mustChangePassword,
     availableRoles: context.availableRoles,
   };
 }

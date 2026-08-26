@@ -4,13 +4,12 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Fuse from 'fuse.js';
-import { BlockMath } from 'react-katex';
 import { Calculator, Filter, Search } from 'lucide-react';
-import 'katex/dist/katex.min.css';
 import { getAllFormulaEntries, type FormulaEntry } from '@/lib/formulas';
 import { FORMULA_SOURCE_DOCS } from '@/lib/formula-handbook';
 import { fetchClientAuthSession } from '@/lib/client-auth-session';
 import PushNotificationToggle from '@/components/PushNotificationToggle';
+import AccessibleFormula from '@/components/AccessibleFormula';
 
 const SUBJECTS = [
   'All',
@@ -118,7 +117,29 @@ export default function FormulasPage() {
     });
 
     if (!deferredQuery.trim()) return base;
-    const ranked = new Map(fuse.search(deferredQuery.trim()).map((result, index) => [result.item.id, index]));
+    const normalizedQuery = deferredQuery.trim().toLowerCase();
+    const directMatches = base.filter((item) => {
+      const searchable = [
+        item.name,
+        item.chapterTitle,
+        item.subject,
+        item.usageNote,
+        ...item.variableGuide,
+      ].join(' ').toLowerCase();
+      return searchable.includes(normalizedQuery);
+    });
+    if (directMatches.length > 0) {
+      return directMatches.sort((a, b) => {
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+        const aRank = aName === normalizedQuery ? 0 : aName.startsWith(normalizedQuery) ? 1 : 2;
+        const bRank = bName === normalizedQuery ? 0 : bName.startsWith(normalizedQuery) ? 1 : 2;
+        return aRank - bRank || a.name.localeCompare(b.name);
+      });
+    }
+    const ranked = new Map(
+      fuse.search(deferredQuery.trim(), { limit: 24 }).map((result, index) => [result.item.id, index])
+    );
     return base
       .filter((item) => ranked.has(item.id))
       .sort((a, b) => (ranked.get(a.id) ?? 9999) - (ranked.get(b.id) ?? 9999));
@@ -326,7 +347,7 @@ export default function FormulasPage() {
             ) : activeView === 'cards' ? (
               <div className="grid gap-3 sm:gap-4 2xl:grid-cols-2">
                 {filtered.map((item) => (
-                  <div key={item.id} className="rounded-2xl border border-[#E8E4DC] bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-4">
+                  <div key={item.id} className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-[#E8E4DC] bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-4">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
                         <h2 className="text-sm font-semibold text-navy-700 dark:text-gray-100">{item.name}</h2>
@@ -340,7 +361,7 @@ export default function FormulasPage() {
                     </div>
 
                     <div className="equation-scroll mt-3 flex min-h-[5rem] items-center justify-center rounded-xl border border-[#F0ECE4] bg-[#FCFBF8] px-3 py-3 dark:border-gray-700 dark:bg-gray-950 sm:min-h-[5.5rem] sm:px-4 sm:py-4">
-                      <BlockMath math={item.latex} />
+                      <AccessibleFormula latex={item.latex} label={item.name} />
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
@@ -349,7 +370,7 @@ export default function FormulasPage() {
                         <div className="mt-0.5">{item.usageNote}</div>
                       </div>
                       <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-2.5 py-2 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
-                        <div className="font-semibold">SI unit hint</div>
+                        <div className="font-semibold">Unit / result type</div>
                         <div className="mt-0.5">{item.siUnitHint}</div>
                       </div>
                     </div>
@@ -408,7 +429,7 @@ export default function FormulasPage() {
             ) : (
               <div className="space-y-4">
                 {grouped.map((subjectGroup) => (
-                  <section key={subjectGroup.subject} className="rounded-2xl border border-[#E8E4DC] bg-white p-4 dark:border-gray-700 dark:bg-gray-900 sm:p-5">
+                  <section key={subjectGroup.subject} className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-[#E8E4DC] bg-white p-4 dark:border-gray-700 dark:bg-gray-900 sm:p-5">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                       <h2 className="font-fraunces text-xl font-bold text-navy-700 dark:text-gray-100">{subjectGroup.subject}</h2>
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6E6984] dark:text-gray-400">
@@ -436,7 +457,7 @@ export default function FormulasPage() {
                               <div key={entry.id} className="min-w-0 rounded-lg border border-[#E8E4DC] bg-white px-2.5 py-2 dark:border-gray-700 dark:bg-gray-900 sm:px-3 sm:py-2.5">
                                 <p className="text-xs font-semibold text-[#1F1F35] dark:text-gray-100">{entry.name}</p>
                                 <div className="equation-scroll mt-1 flex min-h-[4.25rem] items-center justify-center rounded-lg bg-[#FCFBF8] px-2 py-2 dark:bg-gray-950 sm:min-h-[4.75rem] sm:px-3 sm:py-2.5">
-                                  <BlockMath math={entry.latex} />
+                                  <AccessibleFormula latex={entry.latex} label={entry.name} compact />
                                 </div>
                                 <p className="mt-1 text-[11px] text-[#6E6984] dark:text-gray-400">{entry.usageNote}</p>
                                 <p className="mt-0.5 text-[11px] text-[#6E6984] dark:text-gray-400">{entry.sourceLocator}</p>

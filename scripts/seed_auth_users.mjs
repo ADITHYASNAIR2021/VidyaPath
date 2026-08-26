@@ -7,35 +7,14 @@
  *
  * Usage: node scripts/seed_auth_users.mjs
  *
- * Credentials created:
- * ─────────────────────────────────────────────────────────────────
- * ADMIN (email+password login):
- *   email:    admin@aps.school
- *   password: Admin@APS2026!
- *   Login:    /admin/login  →  identifier=admin@aps.school, password=Admin@APS2026!
- *
- * TEACHER (first-login required):
- *   email:    adithya.teacher@aps.school
- *   password: adithya.teacher@aps.school   (initial = own email verbatim)
- *   Login:    /teacher/login  →  identifier=adithya.teacher@aps.school, password=adithya.teacher@aps.school
- *   → redirected to /teacher/first-login
- *   Current password: adithya.teacher@aps.school
- *   New password: must pass policy (6-18 chars, upper+lower+digit+special)
- *
- * STUDENTS (first-login required):
- *   rollCode → initial password (lowercase, dots stripped):
- *   APS.STU.10.A.2600001 → apsstu10a2600001  (class 10, section A)
- *   APS.STU.10.B.2600500 → apsstu10b2600500  (class 10, section B)
- *   APS.STU.12.A.2600100 → apsstu12a2600100  (class 12, section A)
- *   APS.STU.12.B.2600500 → apsstu12b2600500  (class 12, section B)
- *   Login:    /student/login  →  rollCode=APS.STU.10.A.2600001, password=apsstu10a2600001
- *   → redirected to /student/first-login
- * ─────────────────────────────────────────────────────────────────
+ * Passwords are read from SEED_* environment variables when supplied. Otherwise
+ * strong one-time demo passwords are generated and printed only by this command.
+ * Do not reuse these demo identities in production.
  */
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID, scryptSync } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID, scryptSync } from 'node:crypto';
 
 const ROOT = process.cwd();
 
@@ -240,9 +219,12 @@ const STUDENT_ROLE_IDS = {
   'ca0a5c04-c004-4c04-8c04-c00400000004': 'ca0a5d14-d014-4d14-8d14-d01400000014',
 };
 
-function studentInitialPassword(rollCode) {
-  // mirrors buildInitialStudentPasswordFromLoginId: lowercase, strip non-alphanumeric
-  return rollCode.toLowerCase().replace(/[^a-z0-9]/g, '');
+function generatedDemoPassword() {
+  return `Vp!7${randomBytes(8).toString('base64url')}`;
+}
+
+function generatedPin() {
+  return String(randomInt(100000, 1000000));
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -268,9 +250,9 @@ async function main() {
   console.log('  ✓ APS school ready');
 
   // ── 2. Admin ───────────────────────────────────────────────────────────────
-  console.log('\n[2/4] Creating admin (admin@aps.school)...');
-  const adminEmail = 'admin@aps.school';
-  const adminPassword = 'Admin@APS2026!';
+  const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim() || 'admin@aps.school';
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD?.trim() || generatedDemoPassword();
+  console.log(`\n[2/4] Creating admin (${adminEmail})...`);
   const adminAuthUser = await createAuthUser({
     email: adminEmail,
     password: adminPassword,
@@ -302,9 +284,9 @@ async function main() {
   console.log(`  Login: identifier=${adminEmail}  password=${adminPassword}`);
 
   // ── 3. Teacher ─────────────────────────────────────────────────────────────
-  console.log('\n[3/4] Creating teacher (adithya.teacher@aps.school)...');
-  const teacherEmail = 'adithya.teacher@aps.school';
-  const teacherInitialPassword = teacherEmail; // email verbatim
+  const teacherEmail = process.env.SEED_TEACHER_EMAIL?.trim() || 'adithya.teacher@aps.school';
+  const teacherInitialPassword = process.env.SEED_TEACHER_PASSWORD?.trim() || generatedDemoPassword();
+  console.log(`\n[3/4] Creating teacher (${teacherEmail})...`);
   const teacherAuthUser = await createAuthUser({
     email: teacherEmail,
     password: teacherInitialPassword,
@@ -322,7 +304,7 @@ async function main() {
     phone: '9800000020',
     staff_code: 'APS.TC.00.X.2600001',
     name: 'Adithya Nair',
-    pin_hash: hashPin('1111'),
+    pin_hash: hashPin(process.env.SEED_TEACHER_PIN?.trim() || generatedPin()),
     must_change_password: true,
     status: 'active',
   });
@@ -353,8 +335,10 @@ async function main() {
 
   // ── 4. Students ────────────────────────────────────────────────────────────
   console.log('\n[4/4] Creating students...');
+  const studentPasswords = new Map();
   for (const student of STUDENTS) {
-    const initPw = studentInitialPassword(student.rollCode);
+    const initPw = process.env.SEED_STUDENT_PASSWORD?.trim() || generatedDemoPassword();
+    studentPasswords.set(student.id, initPw);
     const authEmail = buildProvisionedAuthEmail('student', 'APS', student.rollCode, student.id);
 
     const authUser = await createAuthUser({
@@ -380,7 +364,7 @@ async function main() {
       roll_code: student.rollCode,
       class_level: student.classLevel,
       section: student.section,
-      pin_hash: hashPin('0000'),
+      pin_hash: hashPin(process.env.SEED_STUDENT_PIN?.trim() || generatedPin()),
       must_change_password: true,
       status: 'active',
     });
@@ -429,7 +413,7 @@ async function main() {
 
   console.log('\nSTUDENT LOGIN  →  /student/login  (first-login required)');
   for (const student of STUDENTS) {
-    const initPw = studentInitialPassword(student.rollCode);
+    const initPw = studentPasswords.get(student.id);
     console.log(`  rollCode=${student.rollCode}  password=${initPw}`);
   }
   console.log(`  After login : redirect → /student/first-login`);

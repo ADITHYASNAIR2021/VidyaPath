@@ -14,6 +14,7 @@ import { dataJson, errorJson, getClientIp, getRequestId, hasResolvedClientIp } f
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { studentLoginSchema } from '@/lib/schemas/auth';
 import {
+  findStudentAuthIdentitiesByParentPhone,
   findStudentAuthIdentitiesByRollNo,
   findStudentAuthIdentity,
   resolveRoleContextByAuthUserId,
@@ -112,6 +113,8 @@ export async function POST(req: Request) {
   const secret = password;
   const normalizedRollNo = (rollNo || rollNoFromInput).trim().toUpperCase();
   const normalizedRollCode = (rollCode || rollCodeFromInput).trim().toUpperCase().replace(/[^A-Z0-9._-]/g, '').slice(0, 80);
+  const parentPhoneDigits = rollInput.replace(/\D/g, '');
+  const normalizedParentPhone = parentPhoneDigits.length >= 10 ? parentPhoneDigits.slice(-10) : '';
   const identityToken = normalizedRollNo || normalizedRollCode || 'unknown';
 
   const identityLimit = await checkRateLimit({
@@ -163,7 +166,7 @@ export async function POST(req: Request) {
     schoolId?: string;
     batch?: string;
     mustChangePassword?: boolean;
-    auth: 'supabase' | 'legacy-roll' | 'legacy';
+    auth: 'supabase' | 'supabase-parent-phone' | 'legacy-roll' | 'legacy';
   }) => {
     await recordStudentActivity(data.studentId, new Date()).catch(() => undefined);
     const response = dataJson({
@@ -198,6 +201,63 @@ export async function POST(req: Request) {
     );
     return response;
   };
+
+  if (normalizedParentPhone) {
+    const identities = await findStudentAuthIdentitiesByParentPhone({
+      phone: normalizedParentPhone,
+      schoolCode: schoolCode || undefined,
+      classLevel: classLevel === 10 || classLevel === 12 ? classLevel : undefined,
+      section: section || undefined,
+    });
+    if (identities.length > 0) {
+      const matches: Array<{
+        authSession: Awaited<ReturnType<typeof signInWithPassword>>;
+        student: NonNullable<Awaited<ReturnType<typeof getStudentById>>>;
+      }> = [];
+      for (const identity of identities.slice(0, 10)) {
+        try {
+          const authSession = await signInWithPassword({ email: identity.authEmail, password: secret });
+          const student = await getStudentById(identity.studentId, identity.schoolId);
+          if (student) matches.push({ authSession, student });
+        } catch {
+          // A shared parent phone may map to siblings. Their one-time passwords remain individual.
+        }
+      }
+      if (matches.length > 1) {
+        return errorJson({
+          requestId,
+          errorCode: 'student-parent-phone-ambiguous',
+          message: 'This phone and password match more than one student. Add the school/class details or ask the class teacher to reset one account.',
+          status: 409,
+        });
+      }
+      if (matches.length === 1) {
+        const match = matches[0];
+        const response = await buildSuccessResponse({
+          ...buildSessionPayload(match.student),
+          auth: 'supabase-parent-phone',
+        });
+        attachSupabaseSessionCookies(response, match.authSession, 'student');
+        await recordAuditEvent({
+          requestId,
+          endpoint: '/api/student/session/login',
+          action: 'student-login-success',
+          statusCode: 200,
+          actorRole: 'student',
+          actorAuthUserId: match.authSession.user?.id,
+          schoolId: match.student.schoolId,
+          metadata: { mode: 'parent-phone' },
+        });
+        return response;
+      }
+      return errorJson({
+        requestId,
+        errorCode: 'invalid-student-credentials',
+        message: 'Invalid student credentials.',
+        status: 401,
+      });
+    }
+  }
 
   if (useCompositeLogin) {
     const identity = await findStudentAuthIdentity({

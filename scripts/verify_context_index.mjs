@@ -53,14 +53,20 @@ function main() {
       .filter(Boolean)
   );
 
-  const parsed = [];
+  const parsedById = new Map();
+  let validRecords = 0;
   for (const line of lines) {
     try {
-      parsed.push(JSON.parse(line));
+      const chunk = JSON.parse(line);
+      if (!chunk?.id) continue;
+      validRecords += 1;
+      if (!parsedById.has(String(chunk.id))) parsedById.set(String(chunk.id), chunk);
     } catch {
       // Ignore malformed lines but keep counting valid data
     }
   }
+  const parsed = [...parsedById.values()];
+  const duplicateRecords = validRecords - parsed.length;
 
   const index = readJson(indexPath, {});
   const textbookIndex = fs.existsSync(textbookIndexPath) ? readJson(textbookIndexPath, {}) : {};
@@ -80,7 +86,7 @@ function main() {
   const maxYear = years.length ? Math.max(...years) : null;
   const subjects = [...new Set(parsed.map((item) => `${item.classLevel}|${item.subject}`))].sort();
 
-  console.log(`[verify:context] chunks=${total}, mapped=${mapped}, unmapped=${unmapped}`);
+  console.log(`[verify:context] chunks=${total} unique, duplicateRecords=${duplicateRecords}, mapped=${mapped}, unmapped=${unmapped}`);
   console.log(`[verify:context] yearRange=${minYear ?? 'N/A'}-${maxYear ?? 'N/A'}, pre2019=${pre2019}`);
   console.log(`[verify:context] subjectBuckets=${subjects.length}`);
   if (subjects.length > 0) {

@@ -26,12 +26,14 @@
     "build:context:python:fast": "node scripts/run_python.mjs scripts/build_context_index.py --max-files 220",
     "build:textbooks": "node scripts/run_python.mjs scripts/build_textbook_index.py --merge-main-index",
     "build:vectors": "node scripts/build_vector_index.mjs",
+    "filter:vectors": "node scripts/filter_vector_index.mjs",
     "build:retrieval-index": "node scripts/build_retrieval_index.mjs",
     "build:rag": "npm run build:context && npm run build:textbooks && npm run build:vectors && npm run build:retrieval-index && npm run write:rag-count",
     "build:rag:clean": "npm run build:context && npm run build:textbooks && npm run clean:chunks && npm run build:vectors && npm run build:retrieval-index && npm run write:rag-count",
     "build:rag:full": "node scripts/run_python.mjs scripts/build_rag_pipeline.py && npm run write:rag-count",
     "build:rag:full:no-download": "node scripts/run_python.mjs scripts/build_rag_pipeline.py --skip-downloads && npm run write:rag-count",
-    "clean:chunks": "node scripts/clean_context_chunks.mjs",
+    "clean:chunks": "node scripts/clean_context_chunks.mjs && node scripts/sync_context_metadata.mjs",
+    "sync:rag-metadata": "node scripts/sync_context_metadata.mjs",
     "write:rag-count": "node scripts/write_rag_count.mjs",
     "compress:context": "node scripts/compress_context.mjs",
     "upload:context": "node scripts/upload_context_to_storage.mjs",
@@ -60,7 +62,7 @@
     "db:new": "npx supabase migration new",
     "db:pull": "npx supabase db pull",
     "db:status": "npx supabase migration list",
-    "db:lint": "npx supabase db lint",
+    "db:lint": "npx supabase db lint --local --fail-on error",
     "rag:rebuild": "node scripts/rag_rebuild.mjs",
     "rag:rebuild:fast": "node scripts/rag_rebuild.mjs --fast",
     "rag:rebuild:class10": "node scripts/rag_rebuild.mjs --skip-download --class 10",
@@ -87,10 +89,10 @@
     "fuse.js": "^7.3.0",
     "katex": "^0.16.45",
     "lucide-react": "^0.400.0",
-    "mermaid": "^11.14.0",
-    "next": "16.2.9",
+    "mermaid": "^11.17.2",
+    "next": "16.3.3",
     "pino": "^10.3.1",
-    "postcss": "8.5.10",
+    "postcss": "8.5.26",
     "react": "^18",
     "react-dom": "^18",
     "react-katex": "^3.1.0",
@@ -119,14 +121,14 @@
   },
   "overrides": {
     "xlsx": "npm:@e965464e/xlsx@^0.20.3",
-    "dompurify": "^3.4.0",
+    "dompurify": "^3.4.14",
     "uuid": "^14.0.0",
     "next": {
-      ".": "16.2.9",
-      "postcss": "8.5.10"
+      ".": "16.3.3",
+      "postcss": "8.5.26"
     }
   },
   "optionalDependencies": {
-    "@xenova/transformers": "^2.17.2"
+    "@huggingface/transformers": "^4.2.0"
   }
 }

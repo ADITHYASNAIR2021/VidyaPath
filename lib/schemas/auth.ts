@@ -56,6 +56,7 @@ export const adminBootstrapSchema = z
     email: optionalString,
     password: optionalString,
     identifier: optionalString,
+    schoolCode: optionalShortString,
   })
   .refine(
     (value) => !!(value.password && (value.identifier || value.email)),

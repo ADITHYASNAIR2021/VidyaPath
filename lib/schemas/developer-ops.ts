@@ -31,7 +31,7 @@ export type UpdateSchoolInput = z.infer<typeof updateSchoolSchema>;
 
 export const createSchoolAdminSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  phone: z.string().trim().max(20).optional(),
+  phone: z.string().trim().regex(/^(?:\+?91[\s-]?)?[6-9]\d{9}$/, 'Enter a valid 10-digit Indian phone number.'),
   adminIdentifier: z.string().trim().max(60).optional(),
   password: z.string().min(6).max(128).optional(),
   email: z.string().trim().email().max(200).optional().or(z.literal('')),

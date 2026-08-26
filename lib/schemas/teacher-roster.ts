@@ -29,6 +29,8 @@ const studentImportRow = z.object({
   classLevel: z.union([z.literal(10), z.literal(12)]).optional(),
   stream: academicStream.optional(),
   password: z.string().trim().min(8).max(128).optional(),
+  parentPhone: z.string().trim().regex(/^\+?[0-9 ()-]{10,20}$/, 'Provide a valid parent phone number.').optional(),
+  parentName: z.string().trim().max(120).optional(),
 }).passthrough();
 
 export const importStudentsSchema = z.object({

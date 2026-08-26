@@ -27,6 +27,7 @@ export interface PlatformRoleContext {
   displayName?: string;
   classLevel?: 10 | 12;
   section?: string;
+  mustChangePassword?: boolean;
   availableRoles: Array<Exclude<PlatformRole, 'anonymous'>>;
 }
 
@@ -82,6 +83,7 @@ interface SchoolAdminMinimalRow {
   phone?: string | null;
   auth_email?: string | null;
   admin_identifier?: string;
+  must_change_password?: boolean;
 }
 
 interface TokenUsageRow {
@@ -121,6 +123,7 @@ const TABLES = {
   teacherProfiles: 'teacher_profiles',
   studentProfiles: 'student_profiles',
   tokenUsageEvents: 'token_usage_events',
+  parentLinks: 'parent_links',
 };
 
 function sanitize(value: string, max = 120): string {
@@ -334,7 +337,7 @@ export async function resolveRoleContextByAuthUserId(
 
   if (chosenRole === 'teacher' && chosen.profile_id) {
     const rows = await supabaseSelect<TeacherProfileMinimalRow>(TABLES.teacherProfiles, {
-      select: 'id,name,status,school_id,auth_user_id',
+      select: 'id,name,status,school_id,auth_user_id,must_change_password',
       filters: [{ column: 'id', value: chosen.profile_id }],
       limit: 1,
     }).catch(() => []);
@@ -370,7 +373,7 @@ export async function resolveRoleContextByAuthUserId(
 
   if (chosenRole === 'admin' && chosen.profile_id) {
     const rows = await supabaseSelect<SchoolAdminMinimalRow>(TABLES.schoolAdmins, {
-      select: 'id,name,status,school_id,auth_user_id',
+      select: 'id,name,status,school_id,auth_user_id,must_change_password',
       filters: [{ column: 'id', value: chosen.profile_id }],
       limit: 1,
     }).catch(() => []);
@@ -381,6 +384,7 @@ export async function resolveRoleContextByAuthUserId(
       schoolId: admin.school_id ?? contextBase.schoolId,
       displayName: admin.name,
       profileId: admin.id,
+      mustChangePassword: admin.must_change_password === true,
     };
   }
 
@@ -530,6 +534,56 @@ export async function findStudentAuthIdentitiesByRollNo(input: {
     }));
 }
 
+export async function findStudentAuthIdentitiesByParentPhone(input: {
+  phone: string;
+  schoolCode?: string;
+  classLevel?: 10 | 12;
+  section?: string;
+}): Promise<Array<{ authEmail: string; studentId: string; schoolId: string }>> {
+  if (!isSupabaseServiceConfigured()) return [];
+  const phone = normalizePhoneIdentifier(input.phone);
+  if (phone.length !== 10) return [];
+  const school = input.schoolCode ? await getSchoolByCode(input.schoolCode) : null;
+  if (input.schoolCode && (!school || school.status !== 'active')) return [];
+  const linkFilters: Array<{ column: string; value: string }> = [
+    { column: 'phone', value: phone },
+    { column: 'status', value: 'active' },
+  ];
+  if (school?.id) linkFilters.push({ column: 'school_id', value: school.id });
+  const links = await supabaseSelect<Array<{
+    student_id: string;
+    school_id: string;
+  }>[number]>(TABLES.parentLinks, {
+    select: 'student_id,school_id',
+    filters: linkFilters,
+    limit: 50,
+  }).catch(() => []);
+  const uniqueLinks = [...new Map(links.map((link) => [link.student_id, link])).values()];
+  const candidates = await Promise.all(uniqueLinks.map(async (link) => {
+    const filters: Array<{ column: string; value: string | number }> = [
+      { column: 'id', value: link.student_id },
+      { column: 'school_id', value: link.school_id },
+      { column: 'status', value: 'active' },
+    ];
+    if (input.classLevel === 10 || input.classLevel === 12) filters.push({ column: 'class_level', value: input.classLevel });
+    if (input.section) filters.push({ column: 'section', value: sanitize(input.section, 20) });
+    const rows = await supabaseSelect<Array<{
+      id: string;
+      school_id: string | null;
+      auth_email: string | null;
+    }>[number]>(TABLES.studentProfiles, {
+      select: 'id,school_id,auth_email',
+      filters,
+      limit: 1,
+    }).catch(() => []);
+    const row = rows[0];
+    return row?.auth_email && row.school_id
+      ? { authEmail: row.auth_email, studentId: row.id, schoolId: row.school_id }
+      : null;
+  }));
+  return candidates.filter((candidate): candidate is { authEmail: string; studentId: string; schoolId: string } => candidate !== null);
+}
+
 export async function findAdminAuthIdentity(input: {
   schoolCode: string;
   identifier: string;
@@ -562,6 +616,46 @@ export async function findAdminAuthIdentity(input: {
   });
   if (!matched || !matched.auth_email) return null;
   return { authEmail: matched.auth_email, adminId: matched.id, schoolId: school.id };
+}
+
+export async function findAdminAuthIdentities(input: {
+  identifier: string;
+  schoolCode?: string;
+}): Promise<Array<{ authEmail: string; adminId: string; schoolId: string }>> {
+  if (!isSupabaseServiceConfigured()) return [];
+  const identifier = sanitize(input.identifier, 90);
+  if (!identifier) return [];
+  if (input.schoolCode) {
+    const matched = await findAdminAuthIdentity({ schoolCode: input.schoolCode, identifier });
+    return matched ? [matched] : [];
+  }
+  const normalizedIdentifier = identifier.toUpperCase();
+  const normalizedEmail = identifier.toLowerCase();
+  const normalizedPhone = normalizePhoneIdentifier(identifier);
+  const rows = await supabaseSelect<Array<{
+    id: string;
+    school_id: string;
+    status: string;
+    auth_email: string | null;
+    admin_identifier: string;
+    phone: string | null;
+  }>[number]>(TABLES.schoolAdmins, {
+    select: 'id,school_id,status,auth_email,admin_identifier,phone',
+    filters: [{ column: 'status', value: 'active' }],
+    limit: 1000,
+  }).catch(() => []);
+  return rows
+    .filter((row) => {
+      const adminIdentifier = sanitize(row.admin_identifier || '', 90).toUpperCase();
+      const phone = normalizePhoneIdentifier(row.phone || '');
+      const authEmail = sanitize(row.auth_email || '', 160).toLowerCase();
+      return !!row.auth_email && !!row.school_id && (
+        adminIdentifier === normalizedIdentifier ||
+        authEmail === normalizedEmail ||
+        (normalizedPhone ? phone === normalizedPhone : false)
+      );
+    })
+    .map((row) => ({ authEmail: String(row.auth_email), adminId: row.id, schoolId: row.school_id }));
 }
 
 export async function recordTokenUsageEvent(input: TokenUsageEventInput): Promise<void> {

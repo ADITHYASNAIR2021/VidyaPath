@@ -12,7 +12,7 @@
  *   Step 2   Build textbook chunks        →  lib/context/textbook_chunks.jsonl
  *   Step 3   Clean & deduplicate chunks
  *   Step 4   Build vector embeddings      →  lib/context/chunk_vectors.jsonl
- *            (NVIDIA 1024-dim → ONNX 384-dim → hashed-BoW 192-dim)
+ *            (ONNX 384-dim → supported NVIDIA NIM → hashed-BoW 192-dim)
  *   Step 5   Build BM25 retrieval index   →  lib/context/retrieval_index.json
  *   Step 6   Dataset quality report
  *   Step 7   Verify all artifacts
@@ -148,8 +148,8 @@ ${bold('Options:')}
   --max-files N      Max QP files to chunk (default: 0 = all)
 
 ${bold('Embedding priority (auto-detected):')}
-  1. NVIDIA nv-embedqa-e5-v5  — set NVIDIA_API_KEY
-  2. @xenova/transformers      — npm install @xenova/transformers
+  1. @huggingface/transformers — npm install @huggingface/transformers
+  2. NVIDIA nemotron-3-embed-1b — optional NIM fallback
   3. Hashed bag-of-words       — always available (NOT semantic)
 `);
   process.exit(0);
@@ -184,7 +184,7 @@ function resolveVitest() {
 }
 
 function onnxInstalled() {
-  return existsSync(path.join(ROOT, 'node_modules', '@xenova', 'transformers'));
+  return existsSync(path.join(ROOT, 'node_modules', '@huggingface', 'transformers'));
 }
 
 function validKey(val, prefix) {
@@ -206,7 +206,7 @@ async function pingNvidia(key) {
       signal: ctrl.signal,
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'nvidia/nv-embedqa-e5-v5',
+        model: 'nvidia/nemotron-3-embed-1b',
         input: ['ping'],
         encoding_format: 'float',
         input_type: 'query',
@@ -333,7 +333,7 @@ async function runApiHealthCheck() {
       ping:      async (k) => pingSupabase(env.NEXT_PUBLIC_SUPABASE_URL, k),
     },
     {
-      name:      '@xenova/transformers',
+      name:      '@huggingface/transformers',
       role:      'ONNX local embeddings (no API)',
       tier:      'embedding-local',
       key:       'local',
@@ -342,7 +342,7 @@ async function runApiHealthCheck() {
         ok: onnxInstalled(),
         note: onnxInstalled()
           ? 'installed → 384-dim semantic'
-          : 'not installed  →  npm install @xenova/transformers',
+          : 'not installed  →  npm install @huggingface/transformers',
       }),
     },
   ];
@@ -408,13 +408,13 @@ async function runApiHealthCheck() {
   const hasNvidiaEmbed = settled.find(c => c.name === 'NVIDIA')?.result?.ok;
 
   if (hasNvidiaEmbed) {
-    console.log(`${ok('  ✓')}  ${bold('Embeddings:')}  NVIDIA nv-embedqa-e5-v5 ${dim('(1024-dim semantic)')}`);
+    console.log(`${ok('  ✓')}  ${bold('Embeddings:')}  NVIDIA nemotron-3-embed-1b ${dim('(2048-dim semantic)')}`);
   } else if (hasOnnx) {
-    console.log(`${ok('  ✓')}  ${bold('Embeddings:')}  @xenova/transformers all-MiniLM-L6-v2 ${dim('(384-dim semantic)')}`);
+    console.log(`${ok('  ✓')}  ${bold('Embeddings:')}  @huggingface/transformers all-MiniLM-L6-v2 ${dim('(384-dim semantic)')}`);
   } else {
     console.log(`${warn('  ⚠')}  ${bold('Embeddings:')}  ${warn('hashed bag-of-words (192-dim, NOT semantic)')}`);
     console.log(dim('              Vector search will be lexical, not semantic.'));
-    console.log(dim('              → npm install @xenova/transformers  for free ONNX embeddings'));
+    console.log(dim('              → npm install @huggingface/transformers  for free ONNX embeddings'));
     hasWarning = true;
   }
 
@@ -428,11 +428,11 @@ async function runApiHealthCheck() {
   if (!canEmbed) {
     console.log(warn('  ⚠  No semantic embedding provider found.'));
     console.log(dim('     Will use hashed bag-of-words (NOT semantic) — vector search quality is poor.'));
-    console.log(dim('     Install: npm install @xenova/transformers  for free 384-dim embeddings.'));
+    console.log(dim('     Install: npm install @huggingface/transformers  for free 384-dim embeddings.'));
   } else {
     const embedLabel = hasNvidiaEmbed
-      ? ok('NVIDIA nv-embedqa-e5-v5 (1024-dim)')
-      : ok('@xenova/transformers all-MiniLM-L6-v2 (384-dim)');
+      ? ok('NVIDIA nemotron-3-embed-1b (2048-dim)')
+      : ok('@huggingface/transformers all-MiniLM-L6-v2 (384-dim)');
     console.log(`${ok('  ✓')}  ${bold('Embedding provider ready:')}  ${embedLabel}`);
   }
 

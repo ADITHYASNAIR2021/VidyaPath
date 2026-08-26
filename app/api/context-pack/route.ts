@@ -119,8 +119,8 @@ export async function POST(req: Request) {
     await logAiUsage({
       context,
       endpoint: '/api/context-pack',
-      provider: contextPack.usedPgvector ? 'nvidia-pgvector' : 'local-retriever',
-      model: contextPack.usedPgvector ? 'nv-embedqa-e5-v5' : 'context-index',
+      provider: contextPack.usedPgvector ? 'gemini-pgvector' : 'local-retriever',
+      model: contextPack.usedPgvector ? 'gemini-embedding-001' : 'context-index',
       promptText: query,
       completionText: JSON.stringify({ snippets: payload.snippets.length, usedPgvector: payload.usedPgvector }),
       estimated: true,

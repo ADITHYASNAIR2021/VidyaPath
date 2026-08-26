@@ -1,25 +1,116 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useId, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, LogIn, GraduationCap, School, ChevronDown } from 'lucide-react';
-
-function useClientSearchParams(): URLSearchParams {
-  if (typeof window === 'undefined') return new URLSearchParams();
-  return new URLSearchParams(window.location.search);
-}
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import {
+  ArrowRight,
+  CheckCircle2,
+  Code2,
+  Eye,
+  EyeOff,
+  GraduationCap,
+  Loader2,
+  LockKeyhole,
+  School,
+  ShieldCheck,
+  Sparkles,
+  Users,
+} from 'lucide-react';
+import clsx from 'clsx';
 
 type LoginRole = 'student' | 'teacher' | 'admin' | 'developer';
 
-function resolvePortalDefaultNext(portal: string | null): string {
+const ROLE_LOGIN_PATHS: Record<LoginRole, string> = {
+  student: '/student/login',
+  teacher: '/teacher/login',
+  admin: '/admin/login',
+  developer: '/developer/login',
+};
+
+const ROLE_OPTIONS: Array<{
+  id: LoginRole;
+  label: string;
+  shortLabel: string;
+  description: string;
+  identifierLabel: string;
+  identifierPlaceholder: string;
+  icon: typeof GraduationCap;
+}> = [
+  {
+    id: 'student',
+    label: 'Student workspace',
+    shortLabel: 'Student',
+    description: 'Study plans, practice, assignments, and progress.',
+    identifierLabel: 'Parent phone or Student ID',
+    identifierPlaceholder: 'e.g. 9876543210 or school ID',
+    icon: GraduationCap,
+  },
+  {
+    id: 'teacher',
+    label: 'Teacher workspace',
+    shortLabel: 'Teacher',
+    description: 'Classes, grading, resources, and student support.',
+    identifierLabel: 'Teacher ID, email, or phone',
+    identifierPlaceholder: 'e.g. teacher@school.edu',
+    icon: Users,
+  },
+  {
+    id: 'admin',
+    label: 'Admin workspace',
+    shortLabel: 'Admin',
+    description: 'People, timetables, analytics, and school settings.',
+    identifierLabel: 'Principal phone, ID, or email',
+    identifierPlaceholder: 'e.g. 9876543210',
+    icon: ShieldCheck,
+  },
+  {
+    id: 'developer',
+    label: 'Developer workspace',
+    shortLabel: 'Developer',
+    description: 'Platform health, schools, usage, and diagnostics.',
+    identifierLabel: 'Developer username or email',
+    identifierPlaceholder: 'Enter your developer account',
+    icon: Code2,
+  },
+];
+
+const ROLE_HEADLINES: Record<LoginRole, { eyebrow: string; title: string; body: string }> = {
+  student: {
+    eyebrow: 'Your learning space',
+    title: 'Pick up exactly where you left off.',
+    body: 'Your chapters, revision plan, assignments, and progress are waiting in one calm workspace.',
+  },
+  teacher: {
+    eyebrow: 'Your classroom space',
+    title: 'Start the day with your class already in focus.',
+    body: 'Move from attendance to teaching, grading, and support without losing the thread.',
+  },
+  admin: {
+    eyebrow: 'Your school operations space',
+    title: 'See what needs attention without the noise.',
+    body: 'Manage your school with clear priorities, scoped access, and a reliable record of changes.',
+  },
+  developer: {
+    eyebrow: 'Your platform space',
+    title: 'Keep the learning platform healthy and observable.',
+    body: 'Review schools, quality, usage, and system health from a restricted operations workspace.',
+  },
+};
+
+function parseRole(value: string | null): LoginRole | null {
+  if (value === 'student' || value === 'teacher' || value === 'admin' || value === 'developer') return value;
+  return null;
+}
+
+function resolvePortalDefaultNext(portal: LoginRole | null): string {
   if (portal === 'teacher') return '/teacher';
   if (portal === 'admin') return '/admin';
   if (portal === 'developer') return '/developer';
   return '/chapters';
 }
 
-function normalizeNextPath(rawNext: string | null, portal: string | null): string {
+function normalizeNextPath(rawNext: string | null, portal: LoginRole | null): string {
   const fallback = resolvePortalDefaultNext(portal);
   const next = (rawNext || '').trim();
   if (!next) return fallback;
@@ -32,16 +123,11 @@ function normalizeNextPath(rawNext: string | null, portal: string | null): strin
 
 function extractRole(payload: unknown): LoginRole | null {
   if (!payload || typeof payload !== 'object') return null;
-  const role = (payload as Record<string, unknown>).role;
-  if (role === 'student' || role === 'teacher' || role === 'admin' || role === 'developer') return role;
-  return null;
+  return parseRole(String((payload as Record<string, unknown>).role || ''));
 }
 
 function resolveRoleDefaultPath(role: LoginRole): string {
-  if (role === 'student') return '/chapters';
-  if (role === 'teacher') return '/teacher';
-  if (role === 'admin') return '/admin';
-  return '/developer';
+  return resolvePortalDefaultNext(role);
 }
 
 function isNextPathAllowedForRole(nextPath: string, role: LoginRole): boolean {
@@ -49,8 +135,13 @@ function isNextPathAllowedForRole(nextPath: string, role: LoginRole): boolean {
   if (nextPath.startsWith('/teacher')) return role === 'teacher';
   if (nextPath.startsWith('/developer')) return role === 'developer';
   if (nextPath.startsWith('/api-lab')) return role === 'admin' || role === 'developer';
-  if (nextPath.startsWith('/student') || nextPath.startsWith('/dashboard') || nextPath.startsWith('/bookmarks') ||
-      nextPath.startsWith('/mock-exam') || nextPath.startsWith('/exam/assignment/')) {
+  if (
+    nextPath.startsWith('/student') ||
+    nextPath.startsWith('/dashboard') ||
+    nextPath.startsWith('/bookmarks') ||
+    nextPath.startsWith('/mock-exam') ||
+    nextPath.startsWith('/exam/assignment/')
+  ) {
     return role === 'student';
   }
   return true;
@@ -59,27 +150,60 @@ function isNextPathAllowedForRole(nextPath: string, role: LoginRole): boolean {
 function resolvePostLoginDestination(role: LoginRole, payload: Record<string, unknown>, nextPath: string): string {
   if (role === 'student' && payload.mustChangePassword === true) return '/student/first-login';
   if (role === 'teacher' && payload.mustChangePassword === true) return '/teacher/first-login';
+  if (role === 'admin' && payload.mustChangePassword === true) return '/admin/first-login';
   if (!isNextPathAllowedForRole(nextPath, role)) return resolveRoleDefaultPath(role);
   return nextPath || resolveRoleDefaultPath(role);
 }
 
-export default function UnifiedLoginPage() {
-  const router = useRouter();
-  const searchParams = useClientSearchParams();
-  const portal = searchParams.get('portal');
-  const nextPath = normalizeNextPath(searchParams.get('next'), portal);
-  const reason = searchParams.get('reason')?.trim() || '';
+function LoginFallback() {
+  return (
+    <main className="flex min-h-[100svh] items-center justify-center bg-[#f7f8fc] px-4 dark:bg-slate-950">
+      <div className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300" role="status">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        Preparing secure sign in…
+      </div>
+    </main>
+  );
+}
 
+function UnifiedLoginContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const portalFromUrl = parseRole(searchParams.get('portal'));
+  const pathRole = parseRole(pathname.split('/').filter(Boolean)[0] ?? null);
+  const initialRole = pathRole ?? portalFromUrl;
+  const reason = searchParams.get('reason')?.trim() || '';
+  const [selectedRole, setSelectedRole] = useState<LoginRole>(initialRole ?? portalFromUrl ?? 'student');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-
-  // Student-specific fields
+  const [retryAfterSeconds, setRetryAfterSeconds] = useState(0);
   const [classLevel, setClassLevel] = useState<'10' | '12' | ''>('');
   const [schoolCode, setSchoolCode] = useState('');
+  const identifierId = useId();
+  const passwordId = useId();
+  const classId = useId();
+  const schoolCodeId = useId();
+
+  const activeRole = ROLE_OPTIONS.find((role) => role.id === selectedRole) ?? ROLE_OPTIONS[0];
+  const headline = ROLE_HEADLINES[selectedRole];
+  const nextPath = normalizeNextPath(searchParams.get('next'), selectedRole);
+
+  useEffect(() => {
+    if (initialRole) setSelectedRole(initialRole);
+  }, [initialRole, portalFromUrl]);
+
+  useEffect(() => {
+    if (retryAfterSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setRetryAfterSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [retryAfterSeconds]);
 
   function navigateAfterLogin(path: string) {
     if (typeof window !== 'undefined') {
@@ -91,11 +215,15 @@ export default function UnifiedLoginPage() {
 
   useEffect(() => {
     if (reason === 'auth-required') return;
-    let active = true;
-    fetch('/api/auth/session', { cache: 'no-store', credentials: 'include' })
+    const controller = new AbortController();
+    fetch('/api/auth/session', {
+      cache: 'no-store',
+      credentials: 'include',
+      signal: controller.signal,
+    })
       .then(async (response) => {
         const result = await response.json().catch(() => null);
-        if (!active || !response.ok || !result) return;
+        if (!response.ok || !result) return;
         const payload = result?.data && typeof result.data === 'object'
           ? result.data as Record<string, unknown>
           : result as Record<string, unknown>;
@@ -104,10 +232,30 @@ export default function UnifiedLoginPage() {
         navigateAfterLogin(resolvePostLoginDestination(role, payload, nextPath));
       })
       .catch(() => undefined);
-    return () => { active = false; };
-  }, [nextPath, router, reason]);
+    return () => controller.abort();
+  }, [nextPath, reason]);
+
+  function selectRole(role: LoginRole) {
+    setError('');
+    setSuccessMsg('');
+    setRetryAfterSeconds(0);
+    setIdentifier('');
+    setPassword('');
+    setClassLevel('');
+    setSchoolCode('');
+
+    const nextParams = new URLSearchParams();
+    if (reason) nextParams.set('reason', reason);
+    const requestedNext = searchParams.get('next');
+    if (requestedNext && isNextPathAllowedForRole(requestedNext, role)) {
+      nextParams.set('next', requestedNext);
+    }
+    const query = nextParams.toString();
+    router.replace(`${ROLE_LOGIN_PATHS[role]}${query ? `?${query}` : ''}`);
+  }
 
   async function login() {
+    if (loading || retryAfterSeconds > 0) return;
     setLoading(true);
     setError('');
     setSuccessMsg('');
@@ -115,12 +263,11 @@ export default function UnifiedLoginPage() {
       const body: Record<string, unknown> = {
         identifier: identifier.trim(),
         password: password.trim(),
-        portal: portal || undefined,
+        portal: selectedRole,
       };
 
-      // Attach class level + school code for student-oriented logins
-      if (classLevel) body.classLevel = Number(classLevel);
-      if (schoolCode.trim()) body.schoolCode = schoolCode.trim().toUpperCase();
+      if (selectedRole === 'student' && classLevel) body.classLevel = Number(classLevel);
+      if (selectedRole !== 'developer' && schoolCode.trim()) body.schoolCode = schoolCode.trim().toUpperCase();
 
       const response = await fetch('/api/auth/login', {
         method: 'POST',
@@ -130,181 +277,275 @@ export default function UnifiedLoginPage() {
       });
       const result = await response.json().catch(() => null);
       if (!response.ok || !result) {
-        setError(result?.message || result?.error || 'Login failed.');
+        if (response.status === 429) {
+          const retryHeader = Number(response.headers.get('retry-after'));
+          const retryHint = Number(String(result?.hint || '').match(/(\d+)/)?.[1]);
+          const retrySeconds = Math.max(1, Number.isFinite(retryHeader) ? retryHeader : Number.isFinite(retryHint) ? retryHint : 60);
+          setRetryAfterSeconds(retrySeconds);
+          setError(`Too many sign-in attempts. Try again in ${retrySeconds} seconds.`);
+        } else {
+          setError(result?.message || result?.error || 'We could not sign you in. Check your details and try again.');
+        }
         return;
       }
-
-      // Show success briefly before redirecting
-      setSuccessMsg('Login successful! Redirecting...');
 
       const payload = result?.data && typeof result.data === 'object'
         ? result.data as Record<string, unknown>
         : result as Record<string, unknown>;
       const role = extractRole(payload);
       if (!role) {
-        setError('Unable to resolve account role from login response.');
-        setSuccessMsg('');
+        setError('Your account was verified, but its workspace could not be resolved. Please contact your administrator.');
         return;
       }
+
+      setSuccessMsg(`${ROLE_OPTIONS.find((item) => item.id === role)?.shortLabel ?? 'Your'} workspace is ready.`);
       navigateAfterLogin(resolvePostLoginDestination(role, payload, nextPath));
     } catch {
-      setError('Failed to login. Check your connection and try again.');
+      setError('The connection was interrupted. Your details are safe—please try again.');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#FDFAF6] via-[#F0EDF8] to-[#E8F0FE] px-4 py-10">
-      <div className="max-w-md mx-auto">
-        {/* Logo / Brand */}
-        <div className="text-center mb-6">
-          <h1 className="font-fraunces text-3xl font-bold bg-gradient-to-r from-indigo-700 via-purple-700 to-indigo-600 bg-clip-text text-transparent">
-            VidyaPath
-          </h1>
-          <p className="text-sm text-[#6A6580] mt-1">CBSE Board Prep Toolkit</p>
-        </div>
+    <main data-auth-experience className="relative min-h-[100svh] overflow-hidden bg-[#f7f8fc] px-4 py-7 sm:px-6 sm:py-10 dark:bg-slate-950">
+      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+        <div className="absolute -left-32 -top-32 h-80 w-80 rounded-full bg-indigo-200/45 blur-3xl dark:bg-indigo-900/20" />
+        <div className="absolute -bottom-40 right-[-5rem] h-96 w-96 rounded-full bg-amber-100/70 blur-3xl dark:bg-amber-900/10" />
+      </div>
 
-        {/* Card */}
-        <div className="bg-white/80 backdrop-blur-sm border border-[#E8E4DC] rounded-2xl shadow-lg shadow-indigo-100/50 p-6">
-          <h2 className="font-fraunces text-xl font-bold text-navy-700 flex items-center gap-2">
-            <LogIn className="w-5 h-5 text-indigo-600" />
-            Login
-          </h2>
-          <p className="text-sm text-[#5F5A73] mt-1.5">
-            Sign in with your ID and password. Works for all account types.
-          </p>
-
-          {/* Status banners */}
-          {reason === 'auth-required' && (
-            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              Login required to access that page.
-            </p>
-          )}
-          {reason === 'password-updated' && (
-            <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-              Password updated! Please login with your new password.
-            </p>
-          )}
-
-          <form className="space-y-3 mt-4" onSubmit={(e) => { e.preventDefault(); login(); }}>
-            {/* Identifier */}
-            <div>
-              <label className="block text-xs font-medium text-[#5F5A73] mb-1">
-                Student ID / Email / Username
-              </label>
-              <input
-                value={identifier}
-                onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="e.g. C10-ABC-001 or teacher@school.edu"
-                className="w-full text-sm border border-[#E0DCD4] rounded-xl px-3 py-2.5 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none transition-colors"
-                autoComplete="username"
-              />
+      <div className="relative mx-auto flex min-h-[calc(100svh-3.5rem)] max-w-6xl items-center">
+        <div className="grid w-full overflow-hidden rounded-[1.75rem] border border-white/80 bg-white/80 shadow-[0_24px_80px_-36px_rgba(15,23,42,0.35)] backdrop-blur-xl lg:grid-cols-[0.88fr_1.12fr] dark:border-white/10 dark:bg-slate-900/80">
+          <section className="relative hidden overflow-hidden bg-slate-950 p-10 text-white lg:flex lg:flex-col lg:justify-between" aria-labelledby="login-story-title">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.42),transparent_40%),radial-gradient(circle_at_bottom_left,rgba(245,158,11,0.18),transparent_34%)]" aria-hidden="true" />
+            <div className="relative">
+              <Link href="/" className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-white/12">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950">
+                  <GraduationCap className="h-4 w-4" aria-hidden="true" />
+                </span>
+                VidyaPath
+              </Link>
+              <p className="mt-14 text-xs font-bold uppercase tracking-[0.2em] text-indigo-200">{headline.eyebrow}</p>
+              <h1 id="login-story-title" className="mt-4 max-w-md font-fraunces text-4xl font-bold leading-tight text-white">
+                {headline.title}
+              </h1>
+              <p className="mt-4 max-w-md text-base leading-7 text-slate-300">{headline.body}</p>
             </div>
 
-            {/* Student extra fields — collapsible */}
-            <details className="group">
-              <summary className="flex items-center gap-1 text-xs text-[#6A6580] cursor-pointer hover:text-indigo-600 transition-colors select-none">
-                <GraduationCap className="w-3.5 h-3.5" />
-                Student? Add class & school
-                <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
-              </summary>
-              <div className="mt-2 space-y-2 pl-1">
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-[#5F5A73] mb-1">Class</label>
-                    <select
-                      value={classLevel}
-                      onChange={(e) => setClassLevel(e.target.value as '10' | '12' | '')}
-                      className="w-full text-sm border border-[#E0DCD4] rounded-xl px-3 py-2.5 bg-white focus:border-indigo-400 outline-none"
-                    >
-                      <option value="">Any</option>
-                      <option value="10">Class 10</option>
-                      <option value="12">Class 12</option>
-                    </select>
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-[#5F5A73] mb-1">
-                      <School className="w-3 h-3 inline mr-1" />
-                      School Code
-                    </label>
-                    <input
-                      value={schoolCode}
-                      onChange={(e) => setSchoolCode(e.target.value.toUpperCase())}
-                      placeholder="e.g. VID"
-                      maxLength={6}
-                      className="w-full text-sm border border-[#E0DCD4] rounded-xl px-3 py-2.5 focus:border-indigo-400 outline-none uppercase"
-                    />
-                  </div>
+            <div className="relative space-y-3 text-sm text-slate-300">
+              {[
+                'One account, only the tools your role can access',
+                'Secure school-scoped sessions and clear workspace switching',
+                'Designed for keyboard, touch, and screen-reader use',
+              ].map((item) => (
+                <div key={item} className="flex items-start gap-2.5">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" aria-hidden="true" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="p-5 sm:p-8 lg:p-10" aria-labelledby="login-form-title">
+            <div className="mb-7 flex items-center justify-between gap-4 lg:hidden">
+              <Link href="/" className="inline-flex items-center gap-2 font-fraunces text-xl font-bold text-slate-900 dark:text-white">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950">
+                  <GraduationCap className="h-5 w-5" aria-hidden="true" />
+                </span>
+                VidyaPath
+              </Link>
+              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200">
+                Secure sign in
+              </span>
+            </div>
+
+            <div className="max-w-2xl">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200">
+                  <LockKeyhole className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <h2 id="login-form-title" className="font-fraunces text-2xl font-bold text-slate-950 dark:text-white">Welcome back</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">Choose your workspace, then use the ID your school or platform administrator gave you.</p>
                 </div>
               </div>
-            </details>
 
-            {/* Password */}
-            <div>
-              <div className="mb-1 flex items-center justify-between gap-3">
-                <label className="block text-xs font-medium text-[#5F5A73]">Password</label>
-                <Link
-                  href="/forgot-password"
-                  className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
-                >
-                  Forgot password?
-                </Link>
-              </div>
-              <div className="relative">
-                <input
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Enter your password"
-                  type={showPassword ? 'text' : 'password'}
-                  className="w-full text-sm border border-[#E0DCD4] rounded-xl px-3 py-2.5 pr-11 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none transition-colors"
-                  autoComplete="current-password"
-                />
+              {reason === 'auth-required' && (
+                <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100" role="status">
+                  Please sign in to continue to that page. We’ll take you back after login.
+                </p>
+              )}
+              {reason === 'password-updated' && (
+                <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-sm text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100" role="status">
+                  Your password is updated. Sign in once more with the new password.
+                </p>
+              )}
+
+              <form className="mt-6 space-y-5" onSubmit={(event) => { event.preventDefault(); void login(); }}>
+                <fieldset>
+                  <legend className="text-sm font-semibold text-slate-800 dark:text-slate-100">I’m signing in as</legend>
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {ROLE_OPTIONS.map((role) => {
+                      const Icon = role.icon;
+                      const selected = selectedRole === role.id;
+                      return (
+                        <button
+                          key={role.id}
+                          type="button"
+                          onClick={() => selectRole(role.id)}
+                          aria-label={role.label}
+                          aria-pressed={selected}
+                          className={clsx(
+                            'flex min-h-20 flex-col items-start justify-between rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900',
+                            selected
+                              ? 'border-indigo-500 bg-indigo-50 text-indigo-950 shadow-sm dark:border-indigo-400 dark:bg-indigo-500/15 dark:text-white'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:border-slate-600'
+                          )}
+                        >
+                          <Icon className={clsx('h-4 w-4', selected ? 'text-indigo-700 dark:text-indigo-200' : 'text-slate-500')} aria-hidden="true" />
+                          <span className="text-xs font-bold sm:text-[11px]">{role.shortLabel}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{activeRole.description}</p>
+                </fieldset>
+
+                <div>
+                  <label htmlFor={identifierId} className="text-sm font-semibold text-slate-800 dark:text-slate-100">{activeRole.identifierLabel}</label>
+                  <input
+                    id={identifierId}
+                    value={identifier}
+                    onChange={(event) => setIdentifier(event.target.value)}
+                    placeholder={activeRole.identifierPlaceholder}
+                    className="mt-2 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3.5 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/60 dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/15"
+                    autoComplete="username"
+                    inputMode={selectedRole === 'developer' ? 'email' : 'text'}
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                {selectedRole !== 'developer' && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 dark:border-slate-700 dark:bg-slate-950/35">
+                    <div className="flex items-start gap-2">
+                      <School className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-300" aria-hidden="true" />
+                      <div>
+                        <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">School details <span className="font-normal text-slate-500 dark:text-slate-400">(optional)</span></p>
+                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-slate-400">Use the school code when the same phone number is linked to more than one school.</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      {selectedRole === 'student' ? <div>
+                        <label htmlFor={classId} className="text-xs font-medium text-slate-700 dark:text-slate-200">Class</label>
+                        <select
+                          id={classId}
+                          value={classLevel}
+                          onChange={(event) => setClassLevel(event.target.value as '10' | '12' | '')}
+                          className="mt-1.5 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                        >
+                          <option value="">Any class</option>
+                          <option value="10">Class 10</option>
+                          <option value="12">Class 12</option>
+                        </select>
+                      </div> : null}
+                      <div>
+                        <label htmlFor={schoolCodeId} className="text-xs font-medium text-slate-700 dark:text-slate-200">School code</label>
+                        <input
+                          id={schoolCodeId}
+                          value={schoolCode}
+                          onChange={(event) => setSchoolCode(event.target.value.toUpperCase())}
+                          placeholder="e.g. VID"
+                          maxLength={16}
+                          autoCapitalize="characters"
+                          spellCheck={false}
+                          className="mt-1.5 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm uppercase text-slate-900 outline-none placeholder:normal-case focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between gap-3">
+                    <label htmlFor={passwordId} className="text-sm font-semibold text-slate-800 dark:text-slate-100">Password</label>
+                    {selectedRole === 'teacher' || selectedRole === 'admin' ? (
+                      <Link href="/forgot-password" className="rounded text-xs font-semibold text-indigo-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:text-indigo-200">Forgot password?</Link>
+                    ) : (
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {selectedRole === 'student' ? 'Ask your school admin for access' : 'Contact the platform owner'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative mt-2">
+                    <input
+                      id={passwordId}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="Enter your password"
+                      type={showPassword ? 'text' : 'password'}
+                      className="min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3.5 pr-12 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950/60 dark:text-white dark:focus:border-indigo-400 dark:focus:ring-indigo-500/15"
+                      autoComplete="current-password"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((value) => !value)}
+                      className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-slate-500 transition-colors hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 dark:text-slate-400 dark:hover:text-white"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-pressed={showPassword}
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" aria-hidden="true" /> : <Eye className="h-5 w-5" aria-hidden="true" />}
+                    </button>
+                  </div>
+                </div>
+
                 <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute inset-y-0 right-0 px-3 text-[#6A6580] hover:text-[#373347]"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  type="submit"
+                  disabled={loading || retryAfterSeconds > 0}
+                  className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white shadow-[0_10px_28px_-12px_rgba(79,70,229,0.9)] transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-65 dark:focus-visible:ring-offset-slate-900"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {loading ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Signing you in…</>
+                  ) : retryAfterSeconds > 0 ? (
+                    <>Try again in {retryAfterSeconds}s</>
+                  ) : (
+                    <>Continue to {activeRole.shortLabel} <ArrowRight className="h-4 w-4" aria-hidden="true" /></>
+                  )}
                 </button>
+              </form>
+
+              <div className="min-h-0" aria-live="polite" aria-atomic="true">
+                {error && (
+                  <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm leading-5 text-rose-800 dark:border-rose-400/30 dark:bg-rose-500/10 dark:text-rose-100" role="alert">
+                    {error}
+                  </p>
+                )}
+                {successMsg && (
+                  <p className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-sm text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100" role="status">
+                    <Sparkles className="h-4 w-4" aria-hidden="true" /> {successMsg}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                <Link href="/" className="font-semibold text-slate-700 hover:text-indigo-700 dark:text-slate-200 dark:hover:text-indigo-200">← Back to home</Link>
+                <span>Need access? Ask your school or platform administrator.</span>
               </div>
             </div>
-
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold text-sm px-4 py-2.5 rounded-xl disabled:opacity-50 transition-all shadow-md shadow-indigo-200/50"
-            >
-              {loading ? 'Signing in...' : 'Login'}
-            </button>
-          </form>
-
-          {/* Messages */}
-          {error && (
-            <p className="mt-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
-              {error}
-            </p>
-          )}
-          {successMsg && (
-            <p className="mt-3 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 animate-pulse">
-              {successMsg}
-            </p>
-          )}
-
-          {/* Footer links */}
-          <div className="mt-4 pt-3 border-t border-[#F0EDF4] flex justify-between text-xs text-[#7A7490]">
-            <Link href="/" className="font-medium text-indigo-700 hover:text-indigo-800 transition-colors">
-              ← Back to home
-            </Link>
-            <div className="flex gap-3">
-              <Link href="/student/login" className="hover:text-indigo-600 transition-colors">Student</Link>
-              <Link href="/teacher/login" className="hover:text-indigo-600 transition-colors">Teacher</Link>
-            </div>
-          </div>
+          </section>
         </div>
       </div>
-    </div>
+    </main>
+  );
+}
+
+export default function UnifiedLoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <UnifiedLoginContent />
+    </Suspense>
   );
 }

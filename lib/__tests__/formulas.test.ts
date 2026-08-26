@@ -24,4 +24,11 @@ describe('formula handbook coverage', () => {
     expect(acRms?.pitfallNote.length).toBeGreaterThan(20);
     expect((acRms?.variableGuide.length ?? 0)).toBeGreaterThan(0);
   });
+
+  it('does not confuse accounting ratios with electric current units', () => {
+    const currentRatio = getFormulaEntriesForChapter('c12-acc-4').find((entry) => entry.name === 'Current Ratio');
+    const debtEquity = getFormulaEntriesForChapter('c12-acc-4').find((entry) => entry.name === 'Debt-Equity Ratio');
+    expect(currentRatio?.siUnitHint).toBe('Dimensionless (ratio or index)');
+    expect(debtEquity?.siUnitHint).toBe('Dimensionless (ratio or index)');
+  });
 });

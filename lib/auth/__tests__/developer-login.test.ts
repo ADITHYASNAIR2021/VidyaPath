@@ -25,6 +25,11 @@ describe('isDeveloperLoginIdentifier', () => {
     expect(isDeveloperLoginIdentifier('Developer@Vidyapath')).toBe(true);
     expect(isDeveloperLoginIdentifier('admin@vidyapath')).toBe(false);
   });
+
+  it('does not expose a built-in developer identifier when deployment secrets are absent', () => {
+    delete process.env.DEVELOPER_USERNAME;
+    expect(isDeveloperLoginIdentifier('developer@vidyapath')).toBe(false);
+  });
 });
 
 describe('getDeveloperSessionFromRequestCookies', () => {

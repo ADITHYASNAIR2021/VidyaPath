@@ -1,64 +1,97 @@
-﻿{
+{
   "auditReportVersion": 2,
   "vulnerabilities": {
-    "@serwist/next": {
-      "name": "@serwist/next",
-      "severity": "moderate",
+    "@huggingface/transformers": {
+      "name": "@huggingface/transformers",
+      "severity": "high",
       "isDirect": true,
       "via": [
-        "next"
+        "onnxruntime-node",
+        "sharp"
       ],
       "effects": [],
       "range": "*",
       "nodes": [
-        "node_modules/@serwist/next"
+        "node_modules/@huggingface/transformers"
       ],
       "fixAvailable": false
     },
-    "next": {
-      "name": "next",
-      "severity": "moderate",
-      "isDirect": true,
-      "via": [
-        "postcss"
-      ],
-      "effects": [
-        "@serwist/next"
-      ],
-      "range": ">=9.3.4-canary.0",
-      "nodes": [
-        "node_modules/next"
-      ],
-      "fixAvailable": false
-    },
-    "postcss": {
-      "name": "postcss",
-      "severity": "moderate",
+    "adm-zip": {
+      "name": "adm-zip",
+      "severity": "high",
       "isDirect": false,
       "via": [
         {
-          "source": 1117015,
-          "name": "postcss",
-          "dependency": "postcss",
-          "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
-          "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
-          "severity": "moderate",
+          "source": 1123686,
+          "name": "adm-zip",
+          "dependency": "adm-zip",
+          "title": "adm-zip: Crafted ZIP file triggers 4GB memory allocation",
+          "url": "https://github.com/advisories/GHSA-xcpc-8h2w-3j85",
+          "severity": "high",
           "cwe": [
-            "CWE-79"
+            "CWE-400",
+            "CWE-789"
           ],
           "cvss": {
-            "score": 6.1,
-            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
           },
-          "range": "<8.5.10"
+          "range": "<0.6.0"
         }
       ],
       "effects": [
-        "next"
+        "onnxruntime-node"
       ],
-      "range": "<8.5.10",
+      "range": "<0.6.0",
       "nodes": [
-        "node_modules/next/node_modules/postcss"
+        "node_modules/adm-zip"
+      ],
+      "fixAvailable": false
+    },
+    "onnxruntime-node": {
+      "name": "onnxruntime-node",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "adm-zip"
+      ],
+      "effects": [
+        "@huggingface/transformers"
+      ],
+      "range": "1.22.0-dev.20250415-c18e06d5e3 - 1.29.0-dev.20260811-e415ef9afd",
+      "nodes": [
+        "node_modules/onnxruntime-node"
+      ],
+      "fixAvailable": false
+    },
+    "sharp": {
+      "name": "sharp",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1124066,
+          "name": "sharp",
+          "dependency": "sharp",
+          "title": "sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591",
+          "url": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
+          "severity": "high",
+          "cwe": [
+            "CWE-1395"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<0.35.0"
+        }
+      ],
+      "effects": [
+        "@huggingface/transformers"
+      ],
+      "range": "<0.35.0",
+      "nodes": [
+        "node_modules/sharp"
       ],
       "fixAvailable": false
     }
@@ -67,18 +100,18 @@
     "vulnerabilities": {
       "info": 0,
       "low": 0,
-      "moderate": 3,
-      "high": 0,
+      "moderate": 0,
+      "high": 4,
       "critical": 0,
-      "total": 3
+      "total": 4
     },
     "dependencies": {
-      "prod": 281,
-      "dev": 417,
-      "optional": 89,
-      "peer": 0,
+      "prod": 378,
+      "dev": 370,
+      "optional": 181,
+      "peer": 57,
       "peerOptional": 0,
-      "total": 733
+      "total": 936
     }
   }
 }

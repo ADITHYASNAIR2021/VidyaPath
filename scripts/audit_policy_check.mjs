@@ -61,14 +61,28 @@ const acceptedMap = new Map(
     .filter((entry) => entry && typeof entry.id === 'string')
     .map((entry) => [String(entry.id).toUpperCase(), entry]),
 );
+const acceptedVulnerabilities = Array.isArray(riskRegister.acceptedVulnerabilities)
+  ? riskRegister.acceptedVulnerabilities
+  : [];
+const acceptedVulnerabilityMap = new Map(
+  acceptedVulnerabilities
+    .filter((entry) => entry && typeof entry.package === 'string')
+    .map((entry) => [String(entry.package), entry]),
+);
 
 const vulnerabilities = audit?.vulnerabilities && typeof audit.vulnerabilities === 'object'
   ? Object.values(audit.vulnerabilities)
   : [];
 
 const highOrCritical = [];
+const acceptedNoFixHigh = [];
 const unapprovedModerates = [];
 const expiredAcceptances = [];
+
+function isExpiredAcceptance(acceptance) {
+  const acceptedUntil = new Date(String(acceptance?.acceptedUntil || ''));
+  return Number.isNaN(acceptedUntil.getTime()) || acceptedUntil < new Date();
+}
 
 for (const vuln of vulnerabilities) {
   if (!vuln || typeof vuln !== 'object') continue;
@@ -80,10 +94,32 @@ for (const vuln of vulnerabilities) {
     .filter(Boolean);
 
   if (severity === 'high' || severity === 'critical') {
+    const packageName = String(vuln.name || 'unknown');
+    const acceptance = acceptedVulnerabilityMap.get(packageName);
+    const acceptanceMatches =
+      acceptance &&
+      String(acceptance.severity || '').toLowerCase() === severity &&
+      typeof acceptance.reason === 'string' &&
+      acceptance.reason.trim().length >= 20;
+    const hasNoPublishedFix = vuln.fixAvailable === false;
+
+    if (acceptanceMatches && hasNoPublishedFix) {
+      if (isExpiredAcceptance(acceptance)) {
+        expiredAcceptances.push({
+          id: packageName,
+          package: packageName,
+          acceptedUntil: acceptance.acceptedUntil || 'invalid',
+        });
+      } else {
+        acceptedNoFixHigh.push({ name: packageName, severity });
+      }
+      continue;
+    }
     highOrCritical.push({
-      name: vuln.name || 'unknown',
+      name: packageName,
       severity,
       advisories: advisoryIds,
+      fixAvailable: vuln.fixAvailable,
     });
     continue;
   }
@@ -96,9 +132,7 @@ for (const vuln of vulnerabilities) {
     const acceptance = acceptedMap.get(advisoryId);
     if (!acceptance) continue;
     covered = true;
-    const acceptedUntil = new Date(String(acceptance.acceptedUntil || ''));
-    const now = new Date();
-    if (!(acceptedUntil instanceof Date) || Number.isNaN(acceptedUntil.getTime()) || acceptedUntil < now) {
+    if (isExpiredAcceptance(acceptance)) {
       expiredAcceptances.push({
         id: advisoryId,
         package: vuln.name || 'unknown',
@@ -139,4 +173,6 @@ if (unapprovedModerates.length > 0) {
   );
 }
 
-console.log('[audit-policy] Pass: no high/critical advisories and all moderates are explicitly accepted.');
+console.log(
+  `[audit-policy] Pass: no unaccepted high/critical advisories; ${acceptedNoFixHigh.length} named no-fix high finding(s) have unexpired risk acceptance; all moderates are explicitly accepted.`,
+);

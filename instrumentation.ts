@@ -8,9 +8,9 @@
  *  1. Validate required environment variables - fail fast if misconfigured.
  *  2. Log the startup banner so deployment logs are self-documenting.
  */
-function isLikelyRealNvidiaKey(value: string): boolean {
-  if (!value.startsWith('nvapi-')) return false;
-  return !['placeholder', 'replace', 'changeme', 'your_nvidia'].some((token) =>
+function isLikelyRealGeminiKey(value: string): boolean {
+  if (!value) return false;
+  return !['placeholder', 'replace', 'changeme', 'your_gemini'].some((token) =>
     value.toLowerCase().includes(token),
   );
 }
@@ -44,10 +44,10 @@ export async function register() {
     return;
   }
 
-  const nvidiaKey = (process.env.NVIDIA_API_KEY ?? '').trim();
-  const nvidiaOk = isLikelyRealNvidiaKey(nvidiaKey);
-  if (!nvidiaOk) {
-    console.warn('[VidyaPath] pgvector: NVIDIA_API_KEY missing/invalid, vector retrieval is disabled.');
+  const geminiKey = (process.env.GEMINI_API_KEY ?? '').trim();
+  const geminiOk = isLikelyRealGeminiKey(geminiKey);
+  if (!geminiOk) {
+    console.warn('[VidyaPath] pgvector: GEMINI_API_KEY missing/invalid, vector retrieval is disabled.');
     return;
   }
 
@@ -58,10 +58,28 @@ export async function register() {
     return;
   }
 
+  // Keep remote retrieval off until the asynchronous readiness probe confirms
+  // that the live index covers the corpus shipped with this build.
+  process.env.AI_PGVECTOR_RUNTIME_READY = '0';
+
   // Fire-and-forget readiness probe.
   Promise.resolve()
     .then(async () => {
       try {
+        let expectedRows = 0;
+        try {
+          const [{ readFile }, { join }] = await Promise.all([
+            import('node:fs/promises'),
+            import('node:path'),
+          ]);
+          const manifest = JSON.parse(
+            await readFile(join(process.cwd(), 'lib', 'context', '.rag_count.json'), 'utf8'),
+          ) as { chunks?: number };
+          expectedRows = Number(manifest.chunks) || 0;
+        } catch {
+          // A missing build manifest falls back to the non-empty check below.
+        }
+
         const res = await fetch(`${supabaseUrl}/rest/v1/document_embeddings?select=id&limit=1`, {
           headers: {
             apikey: serviceKey,
@@ -94,6 +112,15 @@ export async function register() {
           return;
         }
 
+        const indexedRows = Number(total);
+        if (expectedRows > 0 && (!Number.isFinite(indexedRows) || indexedRows < expectedRows)) {
+          console.warn(
+            `[VidyaPath] pgvector: partial index (${total}/${expectedRows}); local retrieval remains active. Resume with \`node scripts/ingest_embeddings.mjs --skip-existing\`.`,
+          );
+          return;
+        }
+
+        process.env.AI_PGVECTOR_RUNTIME_READY = '1';
         console.info(`[VidyaPath] pgvector: ready (${total} embeddings indexed).`);
       } catch {
         // Non-fatal network/startup race.

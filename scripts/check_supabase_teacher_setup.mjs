@@ -3,8 +3,15 @@ import path from 'node:path';
 
 const ROOT = process.cwd();
 const REQUIRED_TABLES = [
+  { table: 'schools', select: 'id,school_code,school_name,status' },
+  { table: 'school_admin_profiles', select: 'id,school_id,auth_user_id,phone,must_change_password,status' },
+  { table: 'platform_user_roles', select: 'id,auth_user_id,role,school_id,profile_id,is_active' },
   'teacher_profiles',
   'teacher_scopes',
+  { table: 'class_sections', select: 'id,school_id,class_level,section,class_teacher_id' },
+  { table: 'student_profiles', select: 'id,school_id,roll_no,roll_code,must_change_password,status' },
+  { table: 'student_subject_enrollments', select: 'id,student_id,subject' },
+  { table: 'parent_links', select: 'id,school_id,student_id,phone,status' },
   'teacher_activity',
   'teacher_announcements',
   'teacher_quiz_links',
@@ -59,7 +66,8 @@ function readConfig() {
 }
 
 async function checkTable(config, table) {
-  const endpoint = `${config.url}/rest/v1/${encodeURIComponent(table)}?select=*&limit=1`;
+  const descriptor = typeof table === 'string' ? { table, select: '*' } : table;
+  const endpoint = `${config.url}/rest/v1/${encodeURIComponent(descriptor.table)}?select=${encodeURIComponent(descriptor.select)}&limit=1`;
   const response = await fetch(endpoint, {
     method: 'GET',
     headers: {
@@ -70,11 +78,14 @@ async function checkTable(config, table) {
     },
   });
   const body = await response.text().catch(() => '');
+  const contentRange = response.headers.get('content-range') || '';
+  const countMatch = contentRange.match(/\/(\d+)$/);
   return {
-    table,
+    table: descriptor.table,
     ok: response.ok,
     status: response.status,
     body: body.slice(0, 400),
+    count: countMatch ? Number(countMatch[1]) : undefined,
   };
 }
 
@@ -91,7 +102,7 @@ async function main() {
   let failures = 0;
   for (const result of results) {
     if (result.ok) {
-      console.log(`OK   ${result.table}`);
+      console.log(`OK   ${result.table}${Number.isFinite(result.count) ? ` (rows ${result.count})` : ''}`);
       continue;
     }
     failures += 1;

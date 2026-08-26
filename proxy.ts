@@ -16,6 +16,7 @@ function resolveSessionSecret(): string {
 interface SessionPayload {
   role: 'admin' | 'teacher' | 'student' | 'developer' | 'parent';
   teacherId?: string;
+  profileId?: string;
   studentId?: string;
   studentName?: string;
   rollCode?: string;
@@ -64,6 +65,7 @@ function buildContentSecurityPolicy(nonce: string): string {
   const styleAttrDirective = allowUnsafeInlineStyle
     ? "style-src-attr 'unsafe-inline'"
     : "style-src-attr 'none'";
+  const scriptEvalDirective = process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : '';
 
   return [
     "default-src 'self'",
@@ -76,7 +78,7 @@ function buildContentSecurityPolicy(nonce: string): string {
     "style-src 'self'",
     styleElemDirective,
     styleAttrDirective,
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https: http:`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptEvalDirective} https: http:`,
     `connect-src ${connectSources.join(' ')}`,
     'upgrade-insecure-requests',
   ].join('; ');
@@ -157,6 +159,11 @@ async function parseSignedSessionToken(
     if (!parsed || parsed.role !== expectedRole) return null;
     if (typeof parsed.expiresAt !== 'number' || parsed.expiresAt < Date.now()) return null;
     if (expectedRole === 'teacher' && (!parsed.teacherId || typeof parsed.teacherId !== 'string')) return null;
+    if (
+      (expectedRole === 'admin' || expectedRole === 'teacher') &&
+      parsed.mustChangePassword !== undefined &&
+      typeof parsed.mustChangePassword !== 'boolean'
+    ) return null;
     if (
       expectedRole === 'student' &&
       (!parsed.studentId ||
@@ -283,11 +290,35 @@ export async function proxy(request: NextRequest) {
       { status: 401 }
     ), nonce);
 
+    const passwordChangeRequiredResponse = attachSecurityHeaders(NextResponse.json(
+      {
+        ok: false,
+        errorCode: 'password-change-required',
+        message: 'Replace the one-time password before using this workspace.',
+      },
+      { status: 403 }
+    ), nonce);
+
     if (requiresAdmin && !hasAdminSession) return unauthorizedApiResponse;
     if (requiresDeveloperLike && !hasDeveloperLikeSession) return unauthorizedApiResponse;
     if (requiresTeacher && !hasTeacherSession) return unauthorizedApiResponse;
     if (requiresStudent && !hasStudentSession) return unauthorizedApiResponse;
     if (requiresParent && !hasParentSession) return unauthorizedApiResponse;
+    if (
+      requiresAdmin &&
+      adminSession?.mustChangePassword === true &&
+      !pathname.startsWith('/api/admin/session/')
+    ) return passwordChangeRequiredResponse;
+    if (
+      requiresTeacher &&
+      teacherSession?.mustChangePassword === true &&
+      !pathname.startsWith('/api/teacher/session/')
+    ) return passwordChangeRequiredResponse;
+    if (
+      requiresStudent &&
+      studentSession?.mustChangePassword === true &&
+      !pathname.startsWith('/api/student/session/')
+    ) return passwordChangeRequiredResponse;
     if (
       requiresAnySession &&
       !hasAdminSession &&
@@ -359,6 +390,8 @@ export async function proxy(request: NextRequest) {
   const legacyHasDeveloperSession = !!legacyDeveloperSession;
   const hasParentSession = !!legacyParentSession;
   const studentMustChangePassword = legacyStudentSession?.mustChangePassword === true;
+  const teacherMustChangePassword = legacyTeacherSession?.mustChangePassword === true;
+  const adminMustChangePassword = legacyAdminSession?.mustChangePassword === true;
   const hasDeveloperSession = legacyHasDeveloperSession;
   const hasAdminSession = legacyHasAdminSession;
   const hasTeacherSession = legacyHasTeacherSession;
@@ -375,12 +408,12 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone();
     const nextTarget = request.nextUrl.searchParams.get('next')?.trim() || '';
     const shouldLandDeveloper = hasDeveloperSession || (singleEnvMode && nextTarget.startsWith('/developer'));
-    url.pathname = shouldLandDeveloper ? '/developer' : '/admin';
+    url.pathname = shouldLandDeveloper ? '/developer' : (adminMustChangePassword ? '/admin/first-login' : '/admin');
     return redirectWithSecurityHeaders(url, nonce);
   }
   if (pathname === '/teacher/login' && hasTeacherSession) {
     const url = request.nextUrl.clone();
-    url.pathname = '/teacher';
+    url.pathname = teacherMustChangePassword ? '/teacher/first-login' : '/teacher';
     return redirectWithSecurityHeaders(url, nonce);
   }
   if (pathname === '/student/login' && hasStudentSession && request.nextUrl.searchParams.get('force') !== '1') {
@@ -410,6 +443,17 @@ export async function proxy(request: NextRequest) {
 
   if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
     if (!hasAdminSession) return redirectToLogin(request, '/admin/login', nonce);
+    if (pathname !== '/admin/first-login' && adminMustChangePassword) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin/first-login';
+      url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+      return redirectWithSecurityHeaders(url, nonce);
+    }
+    if (pathname === '/admin/first-login' && !adminMustChangePassword) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin';
+      return redirectWithSecurityHeaders(url, nonce);
+    }
   }
   if (pathname === '/developer/login' && hasDeveloperLikeSession) {
     const url = request.nextUrl.clone();
@@ -433,6 +477,17 @@ export async function proxy(request: NextRequest) {
   }
   if (pathname.startsWith('/teacher') && pathname !== '/teacher/login') {
     if (!hasTeacherSession) return redirectToLogin(request, '/teacher/login', nonce);
+    if (pathname !== '/teacher/first-login' && teacherMustChangePassword) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/teacher/first-login';
+      url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+      return redirectWithSecurityHeaders(url, nonce);
+    }
+    if (pathname === '/teacher/first-login' && !teacherMustChangePassword) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/teacher';
+      return redirectWithSecurityHeaders(url, nonce);
+    }
   }
   if (pathname.startsWith('/student') && pathname !== '/student/login' && pathname !== '/student/first-login') {
     if (!hasStudentSession) {

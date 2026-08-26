@@ -98,9 +98,9 @@ ${c(C.bold, 'Options:')}
   --nvidia-key KEY   Override NVIDIA_API_KEY for OCR/embeddings
 
 ${c(C.bold, 'Embedding priority:')}
-  1. NVIDIA nv-embedqa-e5-v5 (best, requires NVIDIA_API_KEY)
-  2. @xenova/transformers all-MiniLM-L6-v2 (free local ONNX semantic)
-     Install: npm install @xenova/transformers
+  1. @huggingface/transformers all-MiniLM-L6-v2 (free local ONNX semantic)
+  2. NVIDIA nemotron-3-embed-1b (optional NIM fallback)
+     Install: npm install @huggingface/transformers
   3. Hashed bag-of-words (fallback, NOT semantic — avoid in production)
 `);
   process.exit(0);
@@ -219,7 +219,7 @@ function printSummary(totalMs) {
 
 function checkOnnxAvailable() {
   try {
-    const pkgDir = path.join(ROOT, 'node_modules', '@xenova', 'transformers');
+    const pkgDir = path.join(ROOT, 'node_modules', '@huggingface', 'transformers');
     return existsSync(pkgDir);
   } catch {
     return false;
@@ -237,14 +237,14 @@ function printEmbeddingPlan(overrideKey) {
 
   console.log(`\n${c(C.bold, 'Embedding strategy:')}`);
   if (hasNvidia) {
-    console.log(c(C.green, '  ✓ NVIDIA nv-embedqa-e5-v5 (semantic, 1024 dim)'));
+    console.log(c(C.green, '  ✓ NVIDIA nemotron-3-embed-1b (semantic, 2048 dim)'));
   } else {
     console.log(c(C.dim,   '  – NVIDIA: no key (set NVIDIA_API_KEY to enable)'));
     if (hasOnnx) {
-      console.log(c(C.green, '  ✓ @xenova/transformers all-MiniLM-L6-v2 (semantic, 384 dim)'));
+      console.log(c(C.green, '  ✓ @huggingface/transformers all-MiniLM-L6-v2 (semantic, 384 dim)'));
     } else {
-      console.log(c(C.yellow, '  ⚠ @xenova/transformers not installed → hashed-BoW fallback (NOT semantic)'));
-      console.log(c(C.dim,    '    Run: npm install @xenova/transformers'));
+      console.log(c(C.yellow, '  ⚠ @huggingface/transformers not installed → hashed-BoW fallback (NOT semantic)'));
+      console.log(c(C.dim,    '    Run: npm install @huggingface/transformers'));
     }
   }
 }

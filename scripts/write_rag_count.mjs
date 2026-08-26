@@ -11,14 +11,27 @@ import { join } from 'node:path';
 const CONTEXT_DIR = join(import.meta.dirname, '..', 'lib', 'context');
 const FILES = ['chunks.jsonl', 'textbook_chunks.jsonl'];
 
-let total = 0;
+const uniqueIds = new Set();
+const sourceCounts = {};
+let records = 0;
 for (const file of FILES) {
   const fullPath = join(CONTEXT_DIR, file);
   try {
     const content = readFileSync(fullPath, 'utf-8');
-    const count = content.split('\n').filter(Boolean).length;
-    total += count;
-    console.log(`  ${file}: ${count.toLocaleString()} chunks`);
+    let count = 0;
+    for (const line of content.split('\n').filter(Boolean)) {
+      try {
+        const chunk = JSON.parse(line);
+        if (!chunk?.id) continue;
+        count += 1;
+        records += 1;
+        uniqueIds.add(String(chunk.id));
+      } catch {
+        // Malformed records are excluded from the health count.
+      }
+    }
+    sourceCounts[file] = count;
+    console.log(`  ${file}: ${count.toLocaleString()} valid records`);
   } catch {
     // File doesn't exist — skip
   }
@@ -26,8 +39,11 @@ for (const file of FILES) {
 
 const countPath = join(CONTEXT_DIR, '.rag_count.json');
 writeFileSync(countPath, JSON.stringify({
-  chunks: total,
+  chunks: uniqueIds.size,
+  records,
+  duplicates: records - uniqueIds.size,
+  sourceCounts,
   updatedAt: new Date().toISOString(),
 }, null, 2));
 
-console.log(`\n  Wrote .rag_count.json: ${total.toLocaleString()} total chunks (${JSON.stringify({chunks: total}).length} bytes)`);
+console.log(`\n  Wrote .rag_count.json: ${uniqueIds.size.toLocaleString()} unique chunks (${(records - uniqueIds.size).toLocaleString()} duplicate records excluded)`);

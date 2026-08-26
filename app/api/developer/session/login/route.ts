@@ -33,12 +33,6 @@ function getDeveloperCredentials(): { username: string; password: string } | nul
   const username = (process.env.DEVELOPER_USERNAME || '').trim();
   const password = (process.env.DEVELOPER_PASSWORD || '').trim();
   if (username && password) return { username, password };
-  if (process.env.NODE_ENV !== 'production') {
-    return {
-      username: 'developer@vidyapath',
-      password: 'Developer@Vidyapath.org',
-    };
-  }
   return null;
 }
 

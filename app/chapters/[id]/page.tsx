@@ -21,7 +21,7 @@ import {
   FileText,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { ALL_CHAPTERS, getChapterById, getAdjacentChapters } from '@/lib/data';
+import { BOARD_CHAPTERS, getChapterById, getAdjacentChapters } from '@/lib/data';
 import { getChapterCareerMap } from '@/lib/career-catalog';
 import { getPYQData, getFrequencyLabel } from '@/lib/pyq';
 import {
@@ -49,13 +49,13 @@ import AskTeacherButton from '@/components/AskTeacherButton';
 
 // Generate static params for all chapters
 export function generateStaticParams() {
-  return ALL_CHAPTERS.map((ch) => ({ id: ch.id }));
+  return BOARD_CHAPTERS.map((ch) => ({ id: ch.id }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const resolvedParams = await params;
   const chapter = getChapterById(resolvedParams.id);
-  if (!chapter) {
+  if (!chapter || chapter.classLevel === 11) {
     return {
       title: 'Chapter Not Found | VidyaPath',
       description: 'Requested chapter was not found.',
@@ -162,7 +162,7 @@ export default async function ChapterDetailPage({
   const resolvedParams = await params;
   const resolvedSearchParams = await searchParams;
   const chapter = getChapterById(resolvedParams.id);
-  if (!chapter) notFound();
+  if (!chapter || chapter.classLevel === 11) notFound();
 
   const { prev, next } = getAdjacentChapters(resolvedParams.id);
   const style = SUBJECT_STYLES[chapter.subject] ?? SUBJECT_STYLES.Physics;

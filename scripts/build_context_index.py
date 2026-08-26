@@ -346,10 +346,8 @@ def infer_subject(class_level: int, relative_path: str) -> Optional[str]:
     if "physical education" in token:
         return "Physical Education"
 
-    if filtered_candidates:
-        fallback = filtered_candidates[0].replace("_", " ").replace("-", " ").strip()
-        if fallback:
-            return " ".join(word.capitalize() for word in fallback.split())
+    # Unknown folders must not silently become subjects. That previously allowed
+    # vocational and corrupted directory names into the student retrieval corpus.
     return None
 
 
@@ -369,6 +367,21 @@ def parse_pdf_record(dataset_root: Path, file_path: Path, pyq_year_buckets: Set[
 
     subject = infer_subject(class_level, relative_path)
     if not subject:
+        return None
+    supported_subjects = {
+        10: {"Science", "Math", "English Core"},
+        12: {
+            "Physics",
+            "Chemistry",
+            "Biology",
+            "Math",
+            "English Core",
+            "Accountancy",
+            "Business Studies",
+            "Economics",
+        },
+    }
+    if subject not in supported_subjects.get(class_level, set()):
         return None
 
     recency_score = max(0, 12 - max(0, CURRENT_YEAR - year)) * 2.0
@@ -1013,7 +1026,9 @@ def build_index(
             "generatedAt": datetime.utcnow().isoformat() + "Z",
             "datasetKind": "paper",
             "fitzAvailable": FITZ_AVAILABLE,
-            "saveImagesEnabled": save_images,
+            "saveImagesRequested": save_images,
+            "saveImagesEnabled": bool(save_images and FITZ_AVAILABLE),
+            "status": "ready" if FITZ_AVAILABLE else "unavailable_missing_pymupdf",
             "ocrEnabled": bool(nvidia_api_key),
             "totalImages": len(image_manifest_entries),
             "images": image_manifest_entries,

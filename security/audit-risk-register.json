@@ -1,14 +1,32 @@
 {
-  "policyVersion": 1,
-  "lastReviewedAt": "2026-04-30",
-  "notes": "Temporary risk acceptance for moderate advisories blocked by upstream package constraints. Remove entries as fixes become available.",
-  "acceptedAdvisories": [
+  "policyVersion": 2,
+  "lastReviewedAt": "2026-08-26",
+  "notes": "Short-lived risk acceptance for named upstream advisories with no published fix. The audit policy rejects fixable high/critical findings even when listed here.",
+  "acceptedAdvisories": [],
+  "acceptedVulnerabilities": [
     {
-      "id": "GHSA-qx2v-qp2m-jg93",
-      "severity": "moderate",
-      "package": "postcss",
-      "acceptedUntil": "2026-06-30",
-      "reason": "Upstream nested dependency chain through next/@serwist currently reports no direct fixAvailable in this lockfile."
+      "package": "adm-zip",
+      "severity": "high",
+      "acceptedUntil": "2026-09-30",
+      "reason": "No patched adm-zip release is available. Exposure is transitive through ONNX Runtime model packaging; VidyaPath does not accept user-supplied model archives."
+    },
+    {
+      "package": "onnxruntime-node",
+      "severity": "high",
+      "acceptedUntil": "2026-09-30",
+      "reason": "Transitive wrapper for the accepted no-fix adm-zip advisory in the optional local embedding runtime."
+    },
+    {
+      "package": "@huggingface/transformers",
+      "severity": "high",
+      "acceptedUntil": "2026-09-30",
+      "reason": "Transitive wrapper for accepted no-fix ONNX Runtime and sharp advisories; models are fixed by application configuration."
+    },
+    {
+      "package": "sharp",
+      "severity": "high",
+      "acceptedUntil": "2026-09-30",
+      "reason": "No sharp 0.35 patched release is published. Inputs remain constrained by application routes and Next image policy; upgrade immediately when a fix ships."
     }
   ]
 }
