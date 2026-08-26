@@ -14,7 +14,10 @@ RUN npm ci --omit=dev --ignore-scripts
 # ── Build ──
 FROM base AS builder
 COPY . .
-RUN npm ci --ignore-scripts
+# The production build uses development-time tooling such as cross-env,
+# TypeScript, Tailwind, and the Next.js compiler. NODE_ENV is inherited from
+# the base stage, so request these packages explicitly for the builder only.
+RUN npm ci --include=dev --ignore-scripts
 RUN npm run build
 
 # ── Runtime ──
