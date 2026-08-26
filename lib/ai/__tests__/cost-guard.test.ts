@@ -1,18 +1,34 @@
 /**
  * Unit tests for lib/ai/cost-guard.ts
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { checkAiTokenBudget, type TokenBudgetResult } from '@/lib/ai/cost-guard';
 
-const originalLocalRateLimit = process.env.RATE_LIMIT_USE_LOCAL_MEMORY;
+vi.mock('@/lib/supabase-rest', () => {
+  const counters = new Map<string, { value: string; updated_at: string }>();
 
-beforeAll(() => {
-  process.env.RATE_LIMIT_USE_LOCAL_MEMORY = '1';
-});
-
-afterAll(() => {
-  if (originalLocalRateLimit === undefined) delete process.env.RATE_LIMIT_USE_LOCAL_MEMORY;
-  else process.env.RATE_LIMIT_USE_LOCAL_MEMORY = originalLocalRateLimit;
+  return {
+    supabaseSelect: vi.fn(async (_table: string, query: { filters?: Array<{ value: string }> }) => {
+      const key = query.filters?.[0]?.value;
+      const row = key ? counters.get(key) : undefined;
+      return row ? [row] : [];
+    }),
+    supabaseInsert: vi.fn(async (_table: string, row: { key: string; value: string; updated_at: string }) => {
+      counters.set(row.key, { value: row.value, updated_at: row.updated_at });
+      return [row];
+    }),
+    supabaseUpdate: vi.fn(
+      async (
+        _table: string,
+        row: { value: string; updated_at: string },
+        filters: Array<{ value: string }>,
+      ) => {
+        const key = filters[0]?.value;
+        if (key) counters.set(key, row);
+        return [row];
+      },
+    ),
+  };
 });
 
 describe('checkAiTokenBudget', () => {

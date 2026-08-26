@@ -42,7 +42,14 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Start migrated database
-        run: supabase start
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! supabase start --debug 2>&1 | tee supabase-start.log; then
+            detail=$(tail -n 25 supabase-start.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            echo "::error file=supabase/config.toml,line=1,title=Supabase local startup failed::$detail"
+            exit 1
+          fi
 
       - name: Type check
         run: npm run typecheck

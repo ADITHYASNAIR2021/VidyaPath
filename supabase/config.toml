@@ -15,6 +15,13 @@ port = 54322
 shadow_port = 54320
 major_version = 17
 
+[db.seed]
+# Demo credentials and school records must be loaded deliberately. Keeping the
+# destructive demo seed out of automatic resets also makes migration-only CI
+# validation deterministic against a fresh database.
+enabled = false
+sql_paths = ["./seed.sql"]
+
 [db.pooler]
 enabled = false
 port = 54329
