@@ -551,6 +551,18 @@ async function loadContextArtifacts(force = false): Promise<void> {
       try {
         return await fs.readFile(localPath, 'utf-8');
       } catch {
+        // CI and production commits keep large context artifacts compressed.
+        // Load the adjacent .gz file before considering a remote CDN fallback.
+        try {
+          const [{ gunzipSync }, compressed] = await Promise.all([
+            import('node:zlib'),
+            fs.readFile(`${localPath}.gz`),
+          ]);
+          return gunzipSync(compressed).toString('utf-8');
+        } catch {
+          // Local compressed artifact is unavailable — try the configured CDN.
+        }
+
         // Fallback: fetch from CDN if configured (prefer .gz for smaller transfer)
         if (cdnBaseUrl) {
           try {

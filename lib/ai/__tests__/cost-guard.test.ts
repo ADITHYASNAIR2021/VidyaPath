@@ -1,8 +1,19 @@
 /**
  * Unit tests for lib/ai/cost-guard.ts
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { checkAiTokenBudget, type TokenBudgetResult } from '@/lib/ai/cost-guard';
+
+const originalLocalRateLimit = process.env.RATE_LIMIT_USE_LOCAL_MEMORY;
+
+beforeAll(() => {
+  process.env.RATE_LIMIT_USE_LOCAL_MEMORY = '1';
+});
+
+afterAll(() => {
+  if (originalLocalRateLimit === undefined) delete process.env.RATE_LIMIT_USE_LOCAL_MEMORY;
+  else process.env.RATE_LIMIT_USE_LOCAL_MEMORY = originalLocalRateLimit;
+});
 
 describe('checkAiTokenBudget', () => {
   it('rejects requests above AI_MAX_TOKENS_PER_REQUEST (default 4000)', async () => {

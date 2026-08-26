@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
+      - run: npm ci --include=dev
       - run: npm run typecheck
       - run: npm run lint:strict
       - run: npm run test
@@ -55,7 +55,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
+      - run: npm ci --include=dev
       - run: npm run build
       - name: Cache build output
         uses: actions/cache@v4
