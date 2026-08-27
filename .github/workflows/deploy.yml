@@ -108,9 +108,15 @@ jobs:
               exit 0
             fi
             if [ "$status" = "unhealthy" ]; then
+              detail="$(docker inspect --format='{{json .State.Health}}' vp-health-check)"
+              detail="${detail//'%'/'%25'}"
+              echo "::error title=Container became unhealthy::$detail"
               exit 1
             fi
             sleep 5
           done
           echo "Container did not become healthy within 90 seconds."
+          detail="$(docker inspect --format='{{json .State.Health}}' vp-health-check)"
+          detail="${detail//'%'/'%25'}"
+          echo "::error title=Container health check timed out::$detail"
           exit 1
