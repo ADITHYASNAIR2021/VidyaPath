@@ -42,6 +42,7 @@
     "check:auth-matrix": "node scripts/auth_matrix_smoke.mjs",
     "check:auth-suite": "node scripts/auth_role_isolation_suite.mjs",
     "check:route-links": "node scripts/route_link_integrity.mjs",
+    "check:function-sizes": "node scripts/check_function_trace_size.mjs",
     "check:data-quality": "node scripts/check_dataset_quality.mjs",
     "migrate:supabase-state": "node scripts/migrate_state_to_supabase.mjs",
     "migrate:teacher-normalized": "node scripts/migrate_teacher_blob_to_normalized.mjs",

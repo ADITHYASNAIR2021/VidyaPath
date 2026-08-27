@@ -28,6 +28,23 @@ validateBuildEnv();
 const nextConfig = {
   // Sentry source maps for production error tracking
   productionBrowserSourceMaps: process.env.SENTRY_DSN ? true : false,
+  // Serverless routes never execute the offline PDF/index builders or local
+  // ONNX model runtime. Excluding those broad filesystem traces keeps Vercel
+  // functions below the standard 250 MB limit while retaining the compact,
+  // tracked RAG fallbacks in lib/context.
+  outputFileTracingExcludes: {
+    '/api/**': [
+      './dataset/**/*',
+      './scripts/**/*',
+      './node_modules/@huggingface/transformers/**/*',
+      './node_modules/onnxruntime-common/**/*',
+      './node_modules/onnxruntime-node/**/*',
+      './lib/context/chunks.jsonl',
+      './lib/context/chunk_vectors.jsonl',
+      './lib/context/chunk_vectors.jsonl.gz',
+      './lib/context/retrieval_index.json',
+    ],
+  },
   // Limit parallel static-generation workers to prevent OOM on machines
   // with large RAG context files (retrieval_index.json etc.) in lib/context/.
   experimental: {

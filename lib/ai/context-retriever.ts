@@ -309,29 +309,6 @@ function supportsRemoteSemanticEmbeddings(): boolean {
   return persistedEmbeddingKind === 'nvidia-e5' && persistedEmbeddingDim > 0;
 }
 
-function supportsOnnxSemanticEmbeddings(): boolean {
-  return persistedEmbeddingKind === 'onnx-minilm' && persistedEmbeddingDim > 0;
-}
-
-let onnxEmbedPipeline: unknown = null;
-let onnxEmbedPipelineLoading = false;
-
-async function tryLoadOnnxPipeline(): Promise<unknown> {
-  if (onnxEmbedPipeline) return onnxEmbedPipeline;
-  if (onnxEmbedPipelineLoading) return null;
-  onnxEmbedPipelineLoading = true;
-  try {
-    const { pipeline, env } = await import('@huggingface/transformers' as string as any);
-    (env as any).allowLocalModels = false;
-    onnxEmbedPipeline = await (pipeline as Function)('feature-extraction', persistedEmbeddingModel || 'Xenova/all-MiniLM-L6-v2');
-    return onnxEmbedPipeline;
-  } catch {
-    return null;
-  } finally {
-    onnxEmbedPipelineLoading = false;
-  }
-}
-
 async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
   if (supportsRemoteSemanticEmbeddings()) {
     const nvidiaKey = process.env.NVIDIA_API_KEY?.trim();
@@ -356,20 +333,11 @@ async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
       }
     }
   }
-  if (supportsOnnxSemanticEmbeddings()) {
-    try {
-      const pipe = await tryLoadOnnxPipeline();
-      if (pipe) {
-        const output = await (pipe as Function)(text.slice(0, 512), { pooling: 'mean', normalize: true });
-        const embedding = Array.from((output as any).data) as number[];
-        if (embedding.length === persistedEmbeddingDim) {
-          return Float32Array.from(embedding);
-        }
-      }
-    } catch (error) {
-      logger.warn({ err: error }, '[context-retriever] ONNX query embedding failed; falling back to BM25-only retrieval');
-    }
-    // ONNX index present but runtime unavailable — BM25 handles retrieval
+  if (persistedEmbeddingKind === 'onnx-minilm') {
+    // ONNX model execution is intentionally build-time only. Shipping the
+    // transformer runtime in every serverless route adds hundreds of MB and
+    // exceeds Vercel's function limit. Production semantic retrieval uses
+    // pgvector/remote embeddings; BM25 remains the deterministic local fallback.
     return null;
   }
   // Hashed BoW fallback — lexical similarity only, no semantic understanding

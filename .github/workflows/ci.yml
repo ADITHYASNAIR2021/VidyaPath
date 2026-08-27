@@ -130,3 +130,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Check serverless function sizes
+        run: npm run check:function-sizes
