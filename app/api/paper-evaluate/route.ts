@@ -1,3 +1,4 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { ALL_PAPERS } from '@/lib/papers';
 import { getPYQData } from '@/lib/pyq';
@@ -12,7 +13,7 @@ import {
   stripSourceTags,
   type PaperEvaluateResponse,
 } from '@/lib/ai/validators';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -90,14 +91,14 @@ function buildHeuristicEvaluation(payload: PaperEvaluateRequest): PaperEvaluateR
   };
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:paper-evaluate', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:paper-evaluate', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 8,
       blockSeconds: 120,
@@ -124,7 +125,6 @@ export async function POST(req: Request) {
     }
     const body = bodyResult.value as Record<string, unknown>;
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/paper-evaluate',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 1800,
@@ -240,7 +240,6 @@ Return ONLY JSON:
         })),
       };
       await logAiUsage({
-        context,
         endpoint: '/api/paper-evaluate',
         provider: result.provider,
         model: result.model,
@@ -265,3 +264,5 @@ Return ONLY JSON:
     });
   }
 }
+
+export const POST = withAiMetrics('/api/paper-evaluate', handlePost);

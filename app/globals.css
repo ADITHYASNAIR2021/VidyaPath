@@ -665,3 +665,11 @@ h2 { letter-spacing: -0.02em; }
     animation: none !important;
   }
 }
+
+/* Horizontal strips (navbar links) that may scroll on narrow desktops without showing a bar */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

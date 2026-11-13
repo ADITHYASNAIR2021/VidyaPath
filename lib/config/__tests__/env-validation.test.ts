@@ -1,107 +1,60 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { validateEnv } from '@/lib/config/env-validation';
 
-const REQUIRED_KEYS = [
-  'SESSION_SIGNING_SECRET',
-  'TEACHER_PORTAL_KEY',
-  'NEXT_PUBLIC_APP_URL',
-  'DEVELOPER_USERNAME',
-  'DEVELOPER_PASSWORD',
-];
+const AI_KEYS = ['GROQ_API_KEY', 'GEMINI_API_KEY', 'NVIDIA_API_KEY', 'CEREBRAS_API_KEY', 'MISTRAL_API_KEY'];
 
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void) {
   const saved: Record<string, string | undefined> = {};
   for (const key of Object.keys(overrides)) {
     saved[key] = process.env[key];
-    if (overrides[key] === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = overrides[key];
-    }
+    if (overrides[key] === undefined) delete process.env[key];
+    else process.env[key] = overrides[key];
   }
   try {
     fn();
   } finally {
     for (const key of Object.keys(saved)) {
-      if (saved[key] === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = saved[key];
-      }
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
     }
   }
 }
 
-describe('validateEnv — report mode', () => {
-  it('reports missing required keys', () => {
-    const missing = Object.fromEntries(REQUIRED_KEYS.map((k) => [k, undefined]));
-    withEnv(missing, () => {
-      const result = validateEnv('report');
-      expect(result.ok).toBe(false);
-      expect(result.missing).toContain('SESSION_SIGNING_SECRET');
-    });
-  });
-
-  it('returns ok=true when all required keys are set', () => {
-    const full = Object.fromEntries(
-      REQUIRED_KEYS.map((k) => [k, 'test-value-long-enough-32-characters-here'])
-    );
-    withEnv(full, () => {
-      const result = validateEnv('report');
-      expect(result.ok).toBe(true);
-      expect(result.missing).toHaveLength(0);
-    });
-  });
-
-  it('warns when SESSION_SIGNING_SECRET is shorter than 32 chars', () => {
-    withEnv(
-      {
-        SESSION_SIGNING_SECRET: 'short',
-        TEACHER_PORTAL_KEY: 'test-teacher-key',
-        NEXT_PUBLIC_APP_URL: 'https://test.com',
-        DEVELOPER_USERNAME: 'test-dev',
-        DEVELOPER_PASSWORD: 'test-dev-pw',
-      },
-      () => {
-        const result = validateEnv('report');
-        expect(result.ok).toBe(true); // key exists, so not missing
-        const hasShortWarn = result.warnings.some((w) =>
-          w.toLowerCase().includes('shorter than 32')
-        );
-        expect(hasShortWarn).toBe(true);
-      }
-    );
-  });
-});
-
-describe('validateEnv — strict mode', () => {
-  it('throws when SESSION_SIGNING_SECRET is missing', () => {
+describe('validateEnv (public platform)', () => {
+  it('never requires login/session secrets', () => {
     withEnv(
       {
         SESSION_SIGNING_SECRET: undefined,
-        TEACHER_PORTAL_KEY: 'test-teacher-key',
+        TEACHER_PORTAL_KEY: undefined,
+        DEVELOPER_USERNAME: undefined,
+        DEVELOPER_PASSWORD: undefined,
       },
       () => {
-        expect(() => validateEnv('strict')).toThrow(/SESSION_SIGNING_SECRET/);
+        const result = validateEnv('strict');
+        expect(result.ok).toBe(true);
+        expect(result.missing).toHaveLength(0);
       }
     );
   });
 
-  it('does not throw when all required keys are present', () => {
-    const full = Object.fromEntries(
-      REQUIRED_KEYS.map((k) => [k, 'test-value-long-enough-32-characters-here'])
-    );
-    withEnv(full, () => {
-      expect(() => validateEnv('strict')).not.toThrow();
+  it('warns when no AI provider key is configured', () => {
+    withEnv(Object.fromEntries(AI_KEYS.map((key) => [key, undefined])), () => {
+      const result = validateEnv('report');
+      expect(result.warnings.some((w) => w.includes('No AI provider key'))).toBe(true);
     });
   });
 
-  it('throws when SESSION_SIGNING_SECRET is too short', () => {
-    const full = Object.fromEntries(
-      REQUIRED_KEYS.map((k) => [k, 'test-value-long-enough-32-characters-here'])
-    );
-    withEnv({ ...full, SESSION_SIGNING_SECRET: 'too-short' }, () => {
-      expect(() => validateEnv('strict')).toThrow(/at least 32 characters/);
+  it('does not warn about AI when one provider key is set', () => {
+    withEnv({ ...Object.fromEntries(AI_KEYS.map((key) => [key, undefined])), GROQ_API_KEY: 'gsk_test' }, () => {
+      const result = validateEnv('report');
+      expect(result.warnings.some((w) => w.includes('No AI provider key'))).toBe(false);
+    });
+  });
+
+  it('warns when Upstash is not configured', () => {
+    withEnv({ UPSTASH_REDIS_REST_URL: undefined, UPSTASH_REDIS_REST_TOKEN: undefined }, () => {
+      const result = validateEnv('report');
+      expect(result.warnings.some((w) => w.includes('UPSTASH_REDIS_REST_URL'))).toBe(true);
     });
   });
 });

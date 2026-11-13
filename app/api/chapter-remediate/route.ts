@@ -1,3 +1,4 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
@@ -12,7 +13,7 @@ import {
   type ChapterRemediateDay,
   type ChapterRemediateResponse,
 } from '@/lib/ai/validators';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -104,14 +105,14 @@ function alignFocus(focus: string, chapterTitle: string, chapterTopics: string[]
   return chapterTopics[0] || chapterTitle;
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:chapter-remediate', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:chapter-remediate', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 10,
       blockSeconds: 120,
@@ -147,7 +148,6 @@ export async function POST(req: Request) {
       });
     }
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/chapter-remediate',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 1600,
@@ -245,7 +245,6 @@ Return ONLY JSON:
         expectedScoreLift: stripSourceTags(data.expectedScoreLift || fallback.expectedScoreLift),
       };
       await logAiUsage({
-        context,
         endpoint: '/api/chapter-remediate',
         provider: result.provider,
         model: result.model,
@@ -270,3 +269,5 @@ Return ONLY JSON:
     });
   }
 }
+
+export const POST = withAiMetrics('/api/chapter-remediate', handlePost);

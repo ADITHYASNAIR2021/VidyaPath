@@ -1,3 +1,4 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { ALL_CHAPTERS } from '@/lib/data';
@@ -6,10 +7,8 @@ import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getContextPack, type ContextPack } from '@/lib/ai/context-retriever';
 import { buildEvidenceBundle, buildStudentPracticeSignal } from '@/lib/ai/evidence-ux';
 import { generateTaskJson, type ChatMessage } from '@/lib/ai/generator';
-import { getRecentQuestionHistory } from '@/lib/ai/question-history';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
-import { trackAiQuestion } from '@/lib/analytics-store';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -41,6 +40,63 @@ const tutorResponseSchema = z.object({
 });
 
 type TutorResponse = z.infer<typeof tutorResponseSchema>;
+
+function clip(value: unknown, max: number): string {
+  if (typeof value === 'string') return value.trim().slice(0, max);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value).slice(0, max);
+  if (Array.isArray(value)) return value.map((item) => clip(item, max)).filter(Boolean).join(' ').slice(0, max);
+  return '';
+}
+
+/** Turns a nested object/array answer into readable text (models sometimes nest the answer). */
+function flattenToText(value: unknown, max: number, depth = 0): string {
+  if (value === null || value === undefined || depth > 4) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return clip(value, max);
+  if (Array.isArray(value)) {
+    return value.map((item) => flattenToText(item, max, depth + 1)).filter(Boolean).map((line) => `- ${line}`).join('\n').slice(0, max);
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => {
+        const text = flattenToText(item, max, depth + 1);
+        if (!text) return '';
+        const label = key.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+        return `**${label}:** ${text}`;
+      })
+      .filter(Boolean)
+      .join('\n\n')
+      .slice(0, max);
+  }
+  return '';
+}
+
+/**
+ * Models often return valid tutoring JSON that is slightly off-spec (5 bullet points,
+ * a long explanation, a missing optional field). Normalise it so only a missing/empty
+ * answer is treated as a failure.
+ */
+function coerceTutorResponse(value: unknown): TutorResponse | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const answer = flattenToText(raw.answer ?? raw.response ?? raw.message, 8000);
+  if (!answer) return null;
+  const whyRaw = Array.isArray(raw.whyThisAnswer) ? raw.whyThisAnswer : raw.whyThisAnswer ? [raw.whyThisAnswer] : [];
+  const whyThisAnswer = whyRaw.map((item) => clip(item, 260)).filter(Boolean).slice(0, 4);
+  const candidate = {
+    offTopic: raw.offTopic === true || raw.offTopic === 'true',
+    offTopicMessage: clip(raw.offTopicMessage, 320),
+    answer,
+    whyThisAnswer: whyThisAnswer.length > 0 ? whyThisAnswer : ['Based on the NCERT chapter content for this topic.'],
+    diagnoseMistake: clip(raw.diagnoseMistake, 500) || 'Check whether the core definition and its conditions are clear.',
+    explanation: clip(raw.explanation, 2000) || answer.slice(0, 2000),
+    easierQuestion: clip(raw.easierQuestion, 500) || 'Can you state the key definition from this topic in one line?',
+    similarQuestion: clip(raw.similarQuestion, 500) || 'Try one more NCERT in-text question on the same concept.',
+    examQuestion: clip(raw.examQuestion, 700) || 'Attempt a 3-mark board question on this concept from a previous year paper.',
+    revisitPlan: clip(raw.revisitPlan, 400) || 'Revisit this topic tomorrow and again before your next test.',
+  };
+  const parsed = tutorResponseSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
 
 function buildCurriculum(): string {
   const lines: string[] = [];
@@ -89,7 +145,19 @@ OFF-TOPIC HANDLING
 - In that case: offTopicMessage should be one warm sentence, answer should still be a short redirect to what you can help with, and the teaching fields should stay useful but brief.
 
 OUTPUT
-- Return only valid JSON.
+- Return only valid JSON with exactly these keys (all values are plain strings except where noted):
+{
+  "offTopic": false,
+  "offTopicMessage": "",
+  "answer": "the full answer for the student (markdown allowed)",
+  "whyThisAnswer": ["1 to 4 short reasons or evidence cues"],
+  "diagnoseMistake": "likely confusion behind the question",
+  "explanation": "a slightly deeper explanation",
+  "easierQuestion": "an easier practice question",
+  "similarQuestion": "a similar practice question",
+  "examQuestion": "a board-style 3-5 mark question",
+  "revisitPlan": "when/why to revisit"
+}
 - No markdown fences.
 - No prose before or after the JSON object.`;
 
@@ -158,14 +226,14 @@ ${pyq ? `PYQ signal: asked in ${pyq.yearsAsked.length} years (${[...pyq.yearsAsk
 Prioritize this chapter when the question is aligned with it.`;
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   const requestId = getRequestId(req);
   try {
-    const { context, response } = await requireInteractiveAuth(req);
+    const { response } = await requirePublicAiAccess(req);
     if (response) return response;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:chat', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:chat', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 24,
       blockSeconds: 120,
@@ -193,7 +261,6 @@ export async function POST(req: NextRequest) {
 
     const payload = bodyResult.value as Record<string, unknown>;
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/ai-tutor',
       projectedInputText: JSON.stringify(payload),
       projectedOutputTokens: 2600,
@@ -264,14 +331,14 @@ export async function POST(req: NextRequest) {
           usedPgvector: false,
         };
 
-    const recentHistory =
-      context?.role === 'student' && chapterContext?.chapterId
-        ? await getRecentQuestionHistory({
-            authUserId: context.authUserId,
-            chapterId: chapterContext.chapterId,
-            limit: 8,
-          })
-        : { recentHashes: [], recentQuestions: [], attempted: 0, accuracyRate: null, weakQuestions: [] };
+    // No accounts: practice history lives on the student's device, so the tutor
+    // starts every conversation without server-side history.
+    const recentHistory = {
+      attempted: 0,
+      accuracyRate: null,
+      weakQuestions: [] as string[],
+      recentQuestions: [] as string[],
+    };
     const practiceSignal = buildStudentPracticeSignal({
       attempted: recentHistory.attempted,
       accuracyRate: recentHistory.accuracyRate,
@@ -298,11 +365,8 @@ Recent asked questions: ${recentHistory.recentQuestions.slice(0, 3).join(' | ') 
       messages,
       temperature: 0.3,
       maxOutputTokens: 2600,
-      validate: (value): value is TutorResponse => tutorResponseSchema.safeParse(value).success,
+      validate: (value): value is TutorResponse => coerceTutorResponse(value) !== null,
       qualityMeta: {
-        schoolId: context?.schoolId,
-        authUserId: context?.authUserId,
-        role: context?.role,
         subject: chapterContext?.subject,
         chapterId: chapterContext?.chapterId,
         endpoint: '/api/ai-tutor',
@@ -317,18 +381,11 @@ Recent asked questions: ${recentHistory.recentQuestions.slice(0, 3).join(' | ') 
     });
 
     const evidence = buildEvidenceBundle({ contextPack, chapterContext });
-    const tutor = generated.data;
+    const tutor = coerceTutorResponse(generated.data) ?? generated.data;
     const isOffTopic = tutor.offTopic === true;
     const message = isOffTopic ? tutor.offTopicMessage || tutor.answer : tutor.answer;
 
-    if (chapterContext?.chapterId) {
-      trackAiQuestion(chapterContext.chapterId).catch(() => {
-        // best-effort analytics only
-      });
-    }
-
     await logAiUsage({
-      context,
       endpoint: '/api/ai-tutor',
       provider: generated.result.provider,
       model: generated.result.model,
@@ -343,8 +400,6 @@ Recent asked questions: ${recentHistory.recentQuestions.slice(0, 3).join(' | ') 
       event: 'ai-tutor-response',
       requestId,
       endpoint: '/api/ai-tutor',
-      role: context?.role,
-      schoolId: context?.schoolId,
       statusCode: 200,
     });
 
@@ -399,7 +454,10 @@ Recent asked questions: ${recentHistory.recentQuestions.slice(0, 3).join(' | ') 
       requestId,
       endpoint: '/api/ai-tutor',
       statusCode: 502,
+      details: { error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500) },
     });
     return fallbackError(error, requestId);
   }
 }
+
+export const POST = withAiMetrics('/api/ai-tutor', handlePost);

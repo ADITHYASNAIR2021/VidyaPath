@@ -1,5 +1,6 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { z } from 'zod';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { dataJson, errorJson, getRequestId } from '@/lib/http/api-response';
 import { bodyReasonToStatus, parseAndValidateJsonBody } from '@/lib/http/request-body';
 import { recordAiQualityFeedback } from '@/lib/ai/quality-store';
@@ -14,9 +15,9 @@ const feedbackSchema = z.object({
   note: z.string().trim().max(1000).optional(),
 });
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
-  const { context, response } = await requireInteractiveAuth(req);
+  const { response } = await requirePublicAiAccess(req);
   if (response) return response;
   const bodyResult = await parseAndValidateJsonBody(req, 12 * 1024, feedbackSchema);
   if (!bodyResult.ok) {
@@ -30,9 +31,6 @@ export async function POST(req: Request) {
   }
   try {
     await recordAiQualityFeedback({
-      schoolId: context?.schoolId,
-      authUserId: context?.authUserId,
-      role: context?.role as 'student' | 'teacher' | 'admin' | 'developer' | undefined,
       task: (bodyResult.value.task as
         | 'chat'
         | 'flashcards'
@@ -61,3 +59,5 @@ export async function POST(req: Request) {
     });
   }
 }
+
+export const POST = withAiMetrics('/api/ai/quality-feedback', handlePost);

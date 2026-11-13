@@ -3,78 +3,48 @@
 import { useState, useEffect } from 'react';
 import { PenLine, Save, Check } from 'lucide-react';
 import { useDebounce } from 'use-debounce';
+import { useChapterNotesStore } from '@/lib/store';
 
+/** Private per-chapter notes, saved only in this browser (no account needed). */
 export default function ChapterNotes({ chapterId }: { chapterId: string }) {
+  const saveNote = useChapterNotesStore((state) => state.saveNote);
   const [notes, setNotes] = useState('');
-  const [debouncedNotes] = useDebounce(notes, 1000);
+  const [debouncedNotes] = useDebounce(notes, 800);
   const [saved, setSaved] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [canCloudSync, setCanCloudSync] = useState(false);
-  const [cloudReady, setCloudReady] = useState(false);
 
-  // Load local notes first, then hydrate from server if student session is active.
   useEffect(() => {
-    let active = true;
-    async function load() {
-      setMounted(true);
-      const localKey = `notes-${chapterId}`;
-      const localStored = localStorage.getItem(localKey);
-      if (localStored) setNotes(localStored);
-
+    const stored = useChapterNotesStore.getState().notes[chapterId]?.content;
+    if (typeof stored === 'string') {
+      setNotes(stored);
+    } else {
+      // Migrate notes written by older versions (plain localStorage key per chapter).
       try {
-        const sessionRes = await fetch('/api/student/session/me', { cache: 'no-store' });
-        if (!sessionRes.ok) {
-          if (active) {
-            setCanCloudSync(false);
-            setCloudReady(true);
-          }
-          return;
-        }
-        if (!active) return;
-        setCanCloudSync(true);
-        const noteRes = await fetch(`/api/student/notes?chapterId=${encodeURIComponent(chapterId)}`, { cache: 'no-store' });
-        const notePayload = await noteRes.json().catch(() => null);
-        const noteData =
-          notePayload && typeof notePayload === 'object' && 'data' in (notePayload as Record<string, unknown>)
-            ? ((notePayload as { data?: { content?: string } }).data ?? null)
-            : (notePayload as { content?: string } | null);
-        if (noteRes.ok && noteData && typeof noteData.content === 'string') {
-          const remoteContent = noteData.content;
-          if (remoteContent.trim().length > 0 && remoteContent !== localStored) {
-            setNotes(remoteContent);
-            localStorage.setItem(localKey, remoteContent);
-          }
+        const legacy = localStorage.getItem(`notes-${chapterId}`);
+        if (legacy) {
+          setNotes(legacy);
+          saveNote(chapterId, legacy);
+          localStorage.removeItem(`notes-${chapterId}`);
         }
       } catch {
-        if (active) setCanCloudSync(false);
-      } finally {
-        if (active) setCloudReady(true);
+        // Storage can be unavailable in private mode.
       }
     }
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [chapterId]);
+    setMounted(true);
+  }, [chapterId, saveNote]);
 
-  // Save local notes always; sync to cloud if authenticated student session is present.
   useEffect(() => {
-    if (!mounted || !cloudReady) return;
-    localStorage.setItem(`notes-${chapterId}`, debouncedNotes);
-    if (canCloudSync) {
-      fetch('/api/student/notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chapterId, content: debouncedNotes }),
-      }).catch(() => undefined);
-    }
+    if (!mounted) return;
+    const current = useChapterNotesStore.getState().notes[chapterId]?.content ?? '';
+    if (current === debouncedNotes) return;
+    saveNote(chapterId, debouncedNotes);
     setSaved(true);
     const timeout = setTimeout(() => setSaved(false), 2000);
     return () => clearTimeout(timeout);
-  }, [debouncedNotes, chapterId, mounted, canCloudSync, cloudReady]);
+  }, [debouncedNotes, chapterId, mounted, saveNote]);
 
-  if (!mounted) return null; // Hydration fix
+  if (!mounted) return null;
 
   return (
     <div className="bg-[#FFFDF3] rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
@@ -107,8 +77,9 @@ export default function ChapterNotes({ chapterId }: { chapterId: string }) {
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder="Note down important points, formulas, or reminders for this chapter here. Your notes are saved automatically to your device..."
+        placeholder="Note down important points, formulas, or reminders for this chapter. Notes are saved automatically on this device — no account needed."
         rows={expanded ? 10 : 3}
+        aria-label="My notes for this chapter"
         className="w-full p-4 bg-transparent resize-none focus:outline-none text-[#4A4A6A] leading-relaxed"
       />
     </div>

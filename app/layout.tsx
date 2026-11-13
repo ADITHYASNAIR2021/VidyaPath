@@ -4,14 +4,12 @@ import { Fraunces, DM_Sans, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import Navbar from '@/components/Navbar';
 import MobileBottomNav from '@/components/MobileBottomNav';
-import FloatingAIButton from '@/components/FloatingAIButton';
-import FloatingPomodoro from '@/components/FloatingPomodoro';
 import PrivacyAnalytics from '@/components/PrivacyAnalytics';
-import UxTelemetry from '@/components/UxTelemetry';
 import SiteFooter from '@/components/SiteFooter';
 import AppMainShell from '@/components/AppMainShell';
 import { ThemeProvider } from '@/components/ThemeProvider';
-import PwaInstallPrompt from '@/components/PwaInstallPrompt';
+import StudentOverlays from '@/components/StudentOverlays';
+import { getSiteUrl } from '@/lib/site-url';
 
 const fraunces = Fraunces({
   subsets: ['latin'],
@@ -31,7 +29,7 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL?.trim() || 'https://sreyas-vidyapath.vercel.app';
+const BASE_URL = getSiteUrl();
 
 export const viewport: Viewport = {
   themeColor: [
@@ -150,14 +148,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             Skip to main content
           </a>
           <PrivacyAnalytics />
-          <UxTelemetry />
           <Navbar />
           <AppMainShell>{children}</AppMainShell>
           <SiteFooter />
           <MobileBottomNav />
-          <PwaInstallPrompt />
-          <FloatingPomodoro />
-          <FloatingAIButton />
+          <StudentOverlays />
         </ThemeProvider>
       </body>
     </html>

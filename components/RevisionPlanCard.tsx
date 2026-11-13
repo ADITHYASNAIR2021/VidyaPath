@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { CalendarDays, Loader2, Target } from 'lucide-react';
 
 interface PlanWeek {
@@ -17,29 +16,9 @@ interface RevisionPlanCardProps {
 }
 
 export default function RevisionPlanCard({ classLevel, weakChapterIds }: RevisionPlanCardProps) {
-  const [studentAiEnabled, setStudentAiEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [planWeeks, setPlanWeeks] = useState<PlanWeek[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    fetch('/api/auth/session', { cache: 'no-store' })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => null);
-        const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
-          ? payload.data as Record<string, unknown>
-          : payload as Record<string, unknown> | null;
-        const role = typeof data?.role === 'string' ? data.role : '';
-        if (active) setStudentAiEnabled(['student', 'teacher', 'admin', 'developer'].includes(role));
-      })
-      .catch(() => {
-        if (active) setStudentAiEnabled(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   async function generatePlan() {
     setLoading(true);
@@ -65,26 +44,6 @@ export default function RevisionPlanCard({ classLevel, weakChapterIds }: Revisio
     } finally {
       setLoading(false);
     }
-  }
-
-  if (studentAiEnabled === false) {
-    return (
-      <div className="rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <h2 className="flex items-center gap-2 font-fraunces text-base font-bold text-navy-700 dark:text-slate-100">
-          <CalendarDays className="w-4 h-4 text-indigo-500" />
-          Adaptive Revision Plan
-        </h2>
-        <p className="mt-2 text-sm text-[#4A4A6A] dark:text-slate-300">
-          Revision AI is available only for logged-in student accounts.
-        </p>
-        <Link
-          href="/login?portal=student&next=/dashboard"
-          className="mt-3 inline-flex items-center rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
-        >
-          Login
-        </Link>
-      </div>
-    );
   }
 
   return (

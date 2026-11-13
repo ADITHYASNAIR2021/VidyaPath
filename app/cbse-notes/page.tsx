@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { ALL_CHAPTERS } from '@/lib/data';
-import { getStudentSessionFromRequestCookies } from '@/lib/auth/guards';
 import { chapterNotesSlug, slugify } from '@/lib/seo-notes';
 
 const allChapters = ALL_CHAPTERS
@@ -11,16 +10,13 @@ const allChapters = ALL_CHAPTERS
     return a.chapterNumber - b.chapterNumber;
   });
 
-export const dynamic = 'force-dynamic';
-
 export const metadata = {
   title: 'CBSE Notes by Chapter | VidyaPath',
   description:
     'Class 10 and Class 12 CBSE chapter-wise notes, high-yield topics, PYQ trends, formula focus, and revision strategy.',
 };
 
-export default async function CbseNotesIndexPage() {
-  const studentSession = await getStudentSessionFromRequestCookies().catch(() => null);
+export default function CbseNotesIndexPage() {
   const chapters = allChapters;
 
   return (
@@ -35,11 +31,6 @@ export default async function CbseNotesIndexPage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-8">
-        {studentSession?.studentId && (
-          <p className="mb-4 text-xs font-semibold text-indigo-700">
-            Showing full notes library. Use class and subject paths to navigate quickly.
-          </p>
-        )}
         <div className="grid md:grid-cols-2 gap-4">
           {chapters.map((chapter) => {
             const subjectSlug = slugify(chapter.subject);

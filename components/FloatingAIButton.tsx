@@ -1,13 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { isAuthExperiencePath } from '@/lib/ui/layout-shell';
 import clsx from 'clsx';
 import {
   Loader2,
-  Lock,
   MessageCircle,
   RefreshCw,
   Send,
@@ -22,8 +18,6 @@ interface Message {
   isOffTopic?: boolean;
 }
 
-type AuthRole = 'student' | 'teacher' | 'admin' | 'developer' | 'anonymous' | 'loading';
-
 const QUICK = [
   "What is Ohm's Law?",
   "Explain Newton's laws",
@@ -32,32 +26,9 @@ const QUICK = [
   'How to score 90+ in boards?',
 ];
 
-function LoginCta() {
-  return (
-    <div className="space-y-2">
-      <p className="text-xs text-[#4A4A6A]">
-        Login with any account to unlock VidyaAI tools.
-      </p>
-      <div className="grid grid-cols-1 gap-2">
-        <Link
-          href="/login"
-          className="rounded-lg bg-indigo-600 px-3 py-2 text-center text-xs font-semibold text-white hover:bg-indigo-700"
-        >
-          Login
-        </Link>
-      </div>
-    </div>
-  );
-}
-
 export default function FloatingAIButton() {
-  const pathname = usePathname();
-  const isExamRoute = pathname.startsWith('/exam/');
-  const isAuthRoute = isAuthExperiencePath(pathname);
 
   const [open, setOpen] = useState(false);
-  const [showLockModal, setShowLockModal] = useState(false);
-  const [authRole, setAuthRole] = useState<AuthRole>('loading');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -74,31 +45,6 @@ export default function FloatingAIButton() {
       setTimeout(() => inputRef.current?.focus(), 80);
     }
   }, [open]);
-
-  useEffect(() => {
-    let active = true;
-    setAuthRole('loading');
-    fetch('/api/auth/session', { cache: 'no-store', credentials: 'include' })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => null);
-        const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
-          ? payload.data as Record<string, unknown>
-          : payload as Record<string, unknown> | null;
-        const role = typeof data?.role === 'string' ? data.role : 'anonymous';
-        if (!active) return;
-        if (role === 'student' || role === 'teacher' || role === 'admin' || role === 'developer') {
-          setAuthRole(role);
-          return;
-        }
-        setAuthRole('anonymous');
-      })
-      .catch(() => {
-        if (active) setAuthRole('anonymous');
-      });
-    return () => {
-      active = false;
-    };
-  }, [pathname]);
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
@@ -120,9 +66,8 @@ export default function FloatingAIButton() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setError(
-          res.status === 429
-            ? 'VidyaAI is busy. Wait 30 seconds and try again.'
-            : data.message || data.error || 'Something went wrong.'
+          data.message ||
+            (res.status === 429 ? 'VidyaAI is busy. Wait 30 seconds and try again.' : data.error || 'Something went wrong.')
         );
         return;
       }
@@ -153,73 +98,31 @@ export default function FloatingAIButton() {
     }
   }
 
-  if (isAuthRoute || isExamRoute) return null;
-
-  const isAnonymous = authRole === 'anonymous';
-  const isAuthenticated = authRole === 'student' || authRole === 'teacher' || authRole === 'admin' || authRole === 'developer';
 
   return (
     <>
       <button
-        onClick={() => {
-          if (isAnonymous) {
-            setShowLockModal(true);
-            return;
-          }
-          if (isAuthenticated) {
-            setOpen((current) => !current);
-          }
-        }}
+        onClick={() => setOpen((current) => !current)}
         type="button"
         className={clsx(
           'fixed bottom-20 right-4 md:bottom-6 md:right-6 z-[150]',
           'h-14 w-14 rounded-2xl shadow-lg transition-all duration-200',
           'flex items-center justify-center',
-          isAnonymous
-            ? 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200'
-            : open
-              ? 'bg-navy-700 text-white scale-95'
-              : 'bg-saffron-500 text-white hover:bg-saffron-600 hover:scale-105 active:scale-95'
+          open
+            ? 'bg-navy-700 text-white scale-95'
+            : 'bg-saffron-500 text-white hover:bg-saffron-600 hover:scale-105 active:scale-95'
         )}
-        aria-label={isAnonymous ? 'Login required for VidyaAI' : open ? 'Close VidyaAI chat' : 'Open VidyaAI chat'}
+        aria-label={open ? 'Close VidyaAI chat' : 'Open VidyaAI chat'}
         aria-expanded={open}
       >
-        {authRole === 'loading' ? (
-          <Loader2 className="h-5 w-5 animate-spin" />
-        ) : isAnonymous ? (
-          <Lock className="h-5 w-5" />
-        ) : open ? (
+        {open ? (
           <X className="h-6 w-6" />
         ) : (
           <Zap className="h-6 w-6" />
         )}
       </button>
 
-      {showLockModal && (
-        <div className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-[#E8E4DC] bg-white p-5 shadow-2xl">
-            <div className="mb-3 flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-                <Lock className="h-4 w-4" />
-              </div>
-              <h3 className="font-fraunces text-lg font-bold text-navy-700">VidyaAI Locked</h3>
-            </div>
-            <p className="mb-3 text-sm text-[#4A4A6A]">
-              AI features are available only after login.
-            </p>
-            <LoginCta />
-            <button
-              type="button"
-              onClick={() => setShowLockModal(false)}
-              className="mt-4 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-semibold text-[#4A4A6A] hover:bg-gray-50"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-
-      {open && isAuthenticated && (
+      {open && (
         <div className="fixed bottom-36 right-4 z-[149] w-[calc(100vw-2rem)] max-w-sm animate-fade-in md:bottom-24 md:right-6">
           <div className="flex max-h-[480px] flex-col overflow-hidden rounded-2xl border border-[#E8E4DC] bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-saffron-500 to-saffron-600 px-4 py-3">

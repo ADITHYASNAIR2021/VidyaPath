@@ -1,11 +1,12 @@
 import { MetadataRoute } from 'next';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { chapterNotesSlug, slugify } from '@/lib/seo-notes';
+import { getSiteUrl } from '@/lib/site-url';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = 'https://sreyas-vidyapath.vercel.com';
+  const baseUrl = getSiteUrl();
 
-  const chapterUrls = ALL_CHAPTERS.map((chapter) => ({
+  const chapterUrls = ALL_CHAPTERS.filter((chapter) => chapter.classLevel !== 11).map((chapter) => ({
     url: `${baseUrl}/chapters/${chapter.id}`,
     lastModified: new Date(),
     changeFrequency: 'weekly' as const,
@@ -21,7 +22,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.78,
     }));
 
-  const routes = ['', '/chapters', '/papers', '/career', '/bookmarks', '/dashboard', '/formulas', '/concept-web', '/cbse-notes'].map((route) => ({
+  const routes = ['', '/chapters', '/ai-tools', '/mock-exam', '/revision', '/review', '/papers', '/formulas', '/concept-web', '/cbse-notes', '/career', '/dashboard'].map((route) => ({
     url: `${baseUrl}${route}`,
     lastModified: new Date(),
     changeFrequency: 'daily' as const,

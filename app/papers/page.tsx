@@ -11,7 +11,7 @@ import {
   filterPapers, getPaperStats,
   type PaperEntry, type PaperType,
 } from '@/lib/papers';
-import { fetchClientStudentSession } from '@/lib/client-student-session';
+import { useStudentProfileStore } from '@/lib/store';
 
 // ── Design tokens ────────────────────────────────────────────
 const SUBJECT_COLORS: Record<string, { bg: string; text: string; light: string; ring: string }> = {
@@ -189,42 +189,11 @@ export default function PapersPage() {
   const [activeType, setActiveType] = useState<PaperType | 'all'>('all');
   const [activeSubject, setActiveSubject] = useState('All');
   const [viewMode, setViewMode] = useState<'grid' | 'year'>('year');
-  const [studentSession, setStudentSession] = useState<{
-    isStudent: boolean;
-    classLevel?: 10 | 12;
-  }>({
-    isStudent: false,
-  });
-  const [sessionLoaded, setSessionLoaded] = useState(false);
-
+  // Preselect the class saved via "My class" (local only).
+  const profileClassLevel = useStudentProfileStore((state) => state.classLevel);
   useEffect(() => {
-    let active = true;
-    fetchClientStudentSession()
-      .then((session) => {
-        if (!active) return;
-        if (!session?.studentId) {
-          setStudentSession({ isStudent: false });
-          return;
-        }
-        if (session.classLevel === 10 || session.classLevel === 12) {
-          setActiveClass(session.classLevel);
-        }
-        setStudentSession({
-          isStudent: true,
-          classLevel: session.classLevel,
-        });
-      })
-      .catch(() => {
-        if (!active) return;
-        setStudentSession({ isStudent: false });
-      })
-      .finally(() => {
-        if (active) setSessionLoaded(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (profileClassLevel) setActiveClass(profileClassLevel);
+  }, [profileClassLevel]);
   // Derive available subjects for selected class
   const classPapers = useMemo(
     () => filterPapers({ classLevel: activeClass }),
@@ -374,11 +343,6 @@ export default function PapersPage() {
         </motion.div>
 
         {/* ── Results summary ── */}
-        {sessionLoaded && studentSession.isStudent && studentSession.classLevel === 12 && (
-          <p className="mb-4 text-xs font-semibold text-indigo-700">
-            Showing complete Class 12 paper library. Use subject filters to narrow down.
-          </p>
-        )}
         <div className="flex items-center justify-between mb-5">
           <p className="text-sm text-[#8A8AAA]">
             <span className="font-semibold text-navy-700">{filtered.length}</span> papers found

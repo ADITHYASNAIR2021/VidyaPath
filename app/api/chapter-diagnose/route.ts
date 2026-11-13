@@ -1,3 +1,4 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
@@ -11,7 +12,7 @@ import {
   isChapterDiagnoseResponse,
   type ChapterDiagnoseResponse,
 } from '@/lib/ai/validators';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -130,14 +131,14 @@ function normalizeTaskTypes(taskTypes: string[], fallback: string[]): string[] {
   return deduped.length > 0 ? deduped : fallback;
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:chapter-diagnose', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:chapter-diagnose', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 10,
       blockSeconds: 120,
@@ -173,7 +174,6 @@ export async function POST(req: Request) {
       });
     }
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/chapter-diagnose',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 1200,
@@ -262,7 +262,6 @@ Return ONLY JSON:
         recommendedTaskTypes: normalizeTaskTypes(data.recommendedTaskTypes, fallback.recommendedTaskTypes),
       };
       await logAiUsage({
-        context,
         endpoint: '/api/chapter-diagnose',
         provider: result.provider,
         model: result.model,
@@ -287,3 +286,5 @@ Return ONLY JSON:
     });
   }
 }
+
+export const POST = withAiMetrics('/api/chapter-diagnose', handlePost);

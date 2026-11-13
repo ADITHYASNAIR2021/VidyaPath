@@ -1,36 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import {
-  BookOpen,
-  FileText,
-  Compass,
-  GraduationCap,
-  Menu,
-  X,
-  Bookmark,
-  Target,
-  Calculator,
-  Home,
-  Terminal,
-  Users,
-  ShieldCheck,
-  Wrench,
-  LogOut,
-  Zap,
-  Upload,
-  BarChart2,
-} from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { GraduationCap, Menu, X } from 'lucide-react';
 import clsx from 'clsx';
 import CommandPalette from '@/components/CommandPalette';
+import ClassPicker from '@/components/ClassPicker';
 import { useTheme } from '@/components/ThemeProvider';
-import type { PlatformRole } from '@/lib/auth/roles';
-import { isAuthExperiencePath, isPortalPath, isSharedRoleShellPath, isStudentShellPath } from '@/lib/ui/layout-shell';
-import { clearClientAuthSessionCache, fetchClientAuthSession } from '@/lib/client-auth-session';
-import { clearClientStudentSessionCache } from '@/lib/client-student-session';
-import RoleSwitcher from '@/components/auth/RoleSwitcher';
+import { PRIMARY_NAV, STUDY_TOOLS_NAV, isNavItemActive, type NavItem } from '@/lib/ui/nav-links';
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -54,183 +32,34 @@ function ThemeToggle() {
   );
 }
 
-type ActiveRole = PlatformRole;
-
-interface SessionState {
-  role: ActiveRole;
-  authenticated: boolean;
-  displayName?: string;
+function NavLink({ item, pathname, onClick }: { item: NavItem; pathname: string; onClick?: () => void }) {
+  const Icon = item.icon;
+  const isActive = isNavItemActive(pathname, item.href);
+  return (
+    <Link
+      href={item.href}
+      onClick={onClick}
+      className={clsx(
+        'flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap',
+        isActive
+          ? 'bg-saffron-50 text-saffron-700 shadow-sm dark:bg-saffron-900/30 dark:text-saffron-300'
+          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-soft)] hover:text-[var(--color-text)]'
+      )}
+    >
+      <Icon className="w-4 h-4 shrink-0" />
+      {item.label}
+    </Link>
+  );
 }
 
-/* ── Role meta (badge colour + label) ─────────────────────────────────── */
-const ROLE_META: Record<Exclude<ActiveRole, 'anonymous'>, { label: string; chip: string }> = {
-  student:   { label: 'Student',   chip: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  teacher:   { label: 'Teacher',   chip: 'bg-indigo-50  text-indigo-700  border-indigo-200'  },
-  admin:     { label: 'Admin',     chip: 'bg-amber-50   text-amber-700   border-amber-200'   },
-  developer: { label: 'Developer', chip: 'bg-violet-50  text-violet-700  border-violet-200'  },
-};
-
-/* ── Nav links per role ───────────────────────────────────────────────── */
-function getNavLinks(role: ActiveRole) {
-  switch (role) {
-    case 'student':
-      return [
-        { href: '/',           label: 'Home',       icon: Home       },
-        { href: '/chapters',   label: 'Chapters',   icon: BookOpen   },
-        { href: '/dashboard',  label: 'Dashboard',  icon: Target     },
-        { href: '/papers',     label: 'Papers',     icon: FileText   },
-        { href: '/formulas',   label: 'Formula Hub', icon: Calculator },
-        { href: '/bookmarks',  label: 'Bookmarks',  icon: Bookmark   },
-      ];
-
-    case 'teacher':
-      return [
-        { href: '/',           label: 'Home',           icon: Home     },
-        { href: '/teacher',    label: 'Teacher Desk',   icon: Users    },
-        { href: '/chapters',   label: 'Chapters',       icon: BookOpen },
-        { href: '/formulas',   label: 'Formula Hub',    icon: Calculator },
-        { href: '/papers',     label: 'Papers',         icon: FileText },
-      ];
-
-    case 'admin':
-      return [
-        { href: '/',                    label: 'Home',           icon: Home       },
-        { href: '/admin',               label: 'Admin Console',  icon: ShieldCheck },
-        { href: '/admin/roster-import', label: 'Roster Import',  icon: Upload     },
-        { href: '/chapters',            label: 'Chapters',       icon: BookOpen   },
-        { href: '/formulas',            label: 'Formula Hub',    icon: Calculator },
-      ];
-
-    case 'developer':
-      return [
-        { href: '/',                    label: 'Home',           icon: Home       },
-        { href: '/developer',           label: 'Dev Console',    icon: Wrench     },
-        { href: '/developer/schools',   label: 'Schools',        icon: GraduationCap },
-        { href: '/developer/usage',     label: 'Usage',          icon: BarChart2  },
-        { href: '/developer/audit',     label: 'Audit',          icon: ShieldCheck },
-        { href: '/api-lab',             label: 'API Lab',        icon: Terminal   },
-        { href: '/chapters',            label: 'Chapters',       icon: BookOpen   },
-      ];
-
-    default: // anonymous
-      return [
-        { href: '/',          label: 'Home',      icon: Home        },
-        { href: '/chapters',  label: 'Chapters',  icon: BookOpen    },
-        { href: '/formulas',  label: 'Formula Hub', icon: Calculator  },
-        { href: '/papers',    label: 'Papers',    icon: FileText    },
-        { href: '/career',    label: 'Career',    icon: Compass     },
-      ];
-  }
-}
-
-/* ── Logout endpoints ─────────────────────────────────────────────────── */
-async function callLogout(role: ActiveRole) {
-  const urls: Partial<Record<ActiveRole, string>> = {
-    student:   '/api/student/session/logout',
-    teacher:   '/api/teacher/session/logout',
-    admin:     '/api/admin/session/logout',
-    developer: '/api/developer/session/logout',
-  };
-  const url = urls[role];
-  if (url) await fetch(url, { method: 'POST', credentials: 'include' }).catch(() => undefined);
-}
-
-/* ── Component ────────────────────────────────────────────────────────── */
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [session, setSession] = useState<SessionState>({ role: 'anonymous', authenticated: false });
-  const [loggingOut, setLoggingOut] = useState(false);
   const pathname = usePathname();
-  const router = useRouter();
-  const isExamRoute = pathname.startsWith('/exam/assignment/');
-  const isAuthRoute = isAuthExperiencePath(pathname);
-  const isPortalRoute = isPortalPath(pathname);
-  const isRoleSidebarMode = session.authenticated && (
-    (session.role === 'student' && isStudentShellPath(pathname)) ||
-    (session.role !== 'student' && session.role !== 'anonymous' && isSharedRoleShellPath(pathname))
-  );
-  const navLinks = useMemo(() => getNavLinks(session.role), [session.role]);
-  const roleMeta = session.role !== 'anonymous' ? ROLE_META[session.role] : null;
-
-  useEffect(() => {
-    let active = true;
-    fetchClientAuthSession()
-      .then((data) => {
-        if (!active) return;
-        const role = data.role as ActiveRole;
-        setSession({
-          role,
-          authenticated: !!data.authenticated && role !== 'anonymous',
-          displayName: data.displayName,
-        });
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, [pathname]);
-
-  async function logout() {
-    if (session.role === 'anonymous') return;
-    setLoggingOut(true);
-    try {
-      await callLogout(session.role);
-    } finally {
-      clearClientAuthSessionCache();
-      clearClientStudentSessionCache();
-      setLoggingOut(false);
-      setMobileOpen(false);
-      setSession({ role: 'anonymous', authenticated: false });
-      router.replace('/');
-      router.refresh();
-    }
-  }
-
-  /* Sidebar routes — dedicated role shell handles navigation */
-  if (isAuthRoute || isPortalRoute || isRoleSidebarMode) return null;
-
-  /* Exam mode — minimal nav */
-  if (isExamRoute) {
-    return (
-      <nav className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-surface)]/88 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="h-14 flex items-center justify-between">
-            <Link href="/" className="font-fraunces text-lg font-bold text-[var(--color-text)]">
-              Vidya<span className="text-saffron-500">Path</span>
-            </Link>
-            <span className="ui-chip text-xs font-semibold px-2.5 py-1 rounded-full">
-              Proctored Exam Mode
-            </span>
-          </div>
-        </div>
-      </nav>
-    );
-  }
-
-  const NavLink = ({ href, label, icon: Icon, onClick }: { href: string; label: string; icon: React.ElementType; onClick?: () => void }) => {
-    const hrefPath = href.split('?')[0];
-    const isActive = hrefPath === '/' ? pathname === '/' : pathname.startsWith(hrefPath);
-    return (
-      <Link
-        href={href}
-        onClick={onClick}
-        className={clsx(
-          'flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200',
-          isActive
-            ? 'bg-saffron-50 text-saffron-700 shadow-sm dark:bg-saffron-900/30 dark:text-saffron-300'
-            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-soft)] hover:text-[var(--color-text)]'
-        )}
-      >
-        <Icon className="w-4 h-4 shrink-0" />
-        {label}
-      </Link>
-    );
-  };
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-surface)]/82 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="h-16 flex items-center justify-between gap-4">
-
-          {/* Brand */}
           <Link href="/" className="flex items-center gap-2 group shrink-0" onClick={() => setMobileOpen(false)}>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-saffron-500 via-amber-500 to-blue-600 text-white shadow-[0_8px_20px_rgba(232,81,26,0.32)]">
               <GraduationCap className="w-5 h-5" />
@@ -239,68 +68,30 @@ export default function Navbar() {
               <div className="font-fraunces text-xl font-bold text-[var(--color-text)]">
                 Vidya<span className="ui-gradient-text">Path</span>
               </div>
-              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Board prep toolkit</div>
+              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">Free · No login</div>
             </div>
           </Link>
 
-          {/* Desktop nav links */}
-          <div className="glass-nav hidden max-w-[60vw] items-center gap-1 overflow-x-auto rounded-2xl p-1 lg:flex">
-            {navLinks.map(({ href, label, icon }) => (
-              <NavLink key={href} href={href} label={label} icon={icon} />
+          <div className="glass-nav no-scrollbar hidden max-w-[62vw] items-center gap-1 overflow-x-auto rounded-2xl p-1 lg:flex">
+            {PRIMARY_NAV.map((item) => (
+              <NavLink key={item.href} item={item} pathname={pathname} />
             ))}
           </div>
 
-          {/* Desktop right area */}
           <div className="hidden lg:flex items-center gap-2 shrink-0">
+            <ClassPicker />
             <ThemeToggle />
             <CommandPalette />
-
-            {session.authenticated ? (
-              <div className="flex items-center gap-2">
-                <RoleSwitcher />
-                {/* Role + name badge */}
-                {roleMeta && (
-                  <span className={clsx('inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold', roleMeta.chip)}>
-                    {session.role === 'developer' && <Wrench className="w-3 h-3" />}
-                    {session.role === 'admin'     && <ShieldCheck className="w-3 h-3" />}
-                    {session.role === 'teacher'   && <Users className="w-3 h-3" />}
-                    {session.role === 'student'   && <GraduationCap className="w-3 h-3" />}
-                    {session.displayName ? session.displayName : roleMeta.label}
-                  </span>
-                )}
-                {/* AI access badge for non-students */}
-                {(session.role === 'teacher' || session.role === 'admin' || session.role === 'developer') && (
-                  <span className="inline-flex items-center gap-1 rounded-xl border border-saffron-200 dark:border-saffron-800 bg-saffron-50 dark:bg-saffron-900/20 px-2 py-1.5 text-[11px] font-semibold text-saffron-700 dark:text-saffron-300">
-                    <Zap className="w-3 h-3" />
-                    AI
-                  </span>
-                )}
-                <button
-                  onClick={logout}
-                  disabled={loggingOut}
-                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/35 transition-colors disabled:opacity-60"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  {loggingOut ? 'Signing out...' : 'Logout'}
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <Link href="/login" className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-900/35 transition-colors">
-                  Login
-                </Link>
-              </div>
-            )}
           </div>
 
-          {/* Mobile right area */}
           <div className="lg:hidden flex items-center gap-2">
             <ThemeToggle />
             <CommandPalette />
             <button
-              onClick={() => setMobileOpen((o) => !o)}
+              onClick={() => setMobileOpen((open) => !open)}
               className="rounded-xl p-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-soft)]"
               aria-label="Toggle navigation menu"
+              aria-expanded={mobileOpen}
             >
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -308,52 +99,22 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Mobile drawer */}
       {mobileOpen && (
         <div className="glass-nav lg:hidden border-t border-[var(--color-border)]">
           <div className="px-4 py-3 space-y-1">
-
-            {/* Role badge (mobile) */}
-            {session.authenticated && roleMeta && (
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <div className={clsx('inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold', roleMeta.chip)}>
-                  {session.displayName ? session.displayName : roleMeta.label}
-                  {(session.role === 'teacher' || session.role === 'admin' || session.role === 'developer') && (
-                    <span className="ml-1 inline-flex items-center gap-0.5 text-saffron-600 dark:text-saffron-400"><Zap className="w-3 h-3" />AI</span>
-                  )}
-                </div>
-                <RoleSwitcher />
-              </div>
-            )}
-
-            {navLinks.map(({ href, label, icon }) => (
-              <NavLink key={href} href={href} label={label} icon={icon} onClick={() => setMobileOpen(false)} />
+            <ClassPicker variant="full" className="mb-3" />
+            {PRIMARY_NAV.map((item) => (
+              <NavLink key={item.href} item={item} pathname={pathname} onClick={() => setMobileOpen(false)} />
             ))}
-
-            {session.authenticated ? (
-              <button
-                onClick={logout}
-                disabled={loggingOut}
-                className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm font-semibold px-3 py-2.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 disabled:opacity-60"
-              >
-                <LogOut className="w-4 h-4" />
-                {loggingOut ? 'Signing out...' : 'Logout'}
-              </button>
-            ) : (
-              <div className="pt-2">
-                <Link
-                  href="/login"
-                  onClick={() => setMobileOpen(false)}
-                  className="block text-sm font-semibold text-center px-3 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-200"
-                >
-                  Login
-                </Link>
-              </div>
-            )}
+            <p className="px-3 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+              Study tools
+            </p>
+            {STUDY_TOOLS_NAV.map((item) => (
+              <NavLink key={item.href} item={item} pathname={pathname} onClick={() => setMobileOpen(false)} />
+            ))}
           </div>
         </div>
       )}
     </nav>
   );
 }
-

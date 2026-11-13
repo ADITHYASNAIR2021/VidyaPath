@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getChapterById } from '@/lib/data';
@@ -16,7 +17,7 @@ import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
 import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
 import { getContentSafetyBlock } from '@/lib/ai/content-safety';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -105,14 +106,14 @@ function isQuestionStronglyGrounded(item: MCQItem): boolean {
   return false;
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:quiz', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:quiz', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 20,
       blockSeconds: 120,
@@ -139,7 +140,6 @@ export async function POST(req: Request) {
     }
     const body = parsedBody.value as Record<string, unknown>;
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/generate-quiz',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 4000,
@@ -174,7 +174,6 @@ export async function POST(req: Request) {
       ? (await getGroundedPYQData(chapterId)) ?? getPYQData(chapterId)
       : null;
     const recentHistory = await getRecentQuestionHistory({
-      authUserId: context?.authUserId,
       chapterId: chapter?.id ?? (chapterId || undefined),
       limit: 10,
     });
@@ -326,13 +325,11 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
       contextSnippets: contextPack.snippets,
     });
     await recordGeneratedQuestions({
-      authUserId: context?.authUserId,
       chapterId: chapter?.id ?? (chapterId || undefined),
       subject,
       questions: annotated,
     });
     await logAiUsage({
-      context,
       endpoint: '/api/generate-quiz',
       provider: result.provider,
       model: result.model,
@@ -373,3 +370,5 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
     });
   }
 }
+
+export const POST = withAiMetrics('/api/generate-quiz', handlePost);

@@ -2,26 +2,31 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
   Target, Trophy, BrainCircuit, Activity, BookOpen, ChevronRight,
   TrendingUp, Zap, CheckCircle2, Clock, Star, Award, BarChart2,
-  Atom, FlaskConical, Leaf, Calculator, FileText, Briefcase, LineChart, Users, Link2,
+  Atom, FlaskConical, Leaf, Calculator, FileText, Briefcase, LineChart, Flame,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { ALL_CHAPTERS } from '@/lib/data';
 import type { Subject } from '@/lib/data';
 import { STREAM_LABELS, getSubjectsForAcademicTrack, type AcademicStream } from '@/lib/academic-taxonomy';
-import { useProgressStore, useBookmarkStore } from '@/lib/store';
+import {
+  useProgressStore,
+  useBookmarkStore,
+  useStudentProfileStore,
+  useStudyActivityStore,
+  computeStudyStreak,
+  getChapterDeck,
+  useFlashcardDeckStore,
+} from '@/lib/store';
 import { getPaperStats } from '@/lib/papers';
 import { getPYQData } from '@/lib/pyq';
 import { buildLearningProfile, rankWeakChapters, type LearningProfile } from '@/lib/learning-profile';
 import RevisionPlanCard from '@/components/RevisionPlanCard';
 import DashboardChapterCoach from '@/components/DashboardChapterCoach';
-import { fetchClientStudentSession } from '@/lib/client-student-session';
-import { useServerProgressSync } from '@/lib/hooks/useServerProgressSync';
-import EnableNotificationsButton from '@/components/EnableNotificationsButton';
+import ClassPicker from '@/components/ClassPicker';
 
 // ── SVG Progress Ring ─────────────────────────────────────────
 function ProgressRing({
@@ -120,126 +125,35 @@ function ClassBar({ cls, studied, total }: { cls: number; studied: number; total
   );
 }
 
-interface StudentSessionSnapshot {
-  studentName: string;
-  classLevel: 10 | 12;
-  section?: string;
-  mustChangePassword?: boolean;
-  stream?: AcademicStream;
-  enrolledSubjects: Subject[];
-}
-
-interface TeacherAssignmentSnapshot {
-  packId: string;
-  title: string;
-  chapterId: string;
-  subject: string;
-  classLevel: 10 | 12;
-  section?: string;
-  dueDate?: string;
-  teacherName?: string;
-  shareUrl?: string;
-  questionCount: number;
-  estimatedTimeMinutes: number;
-}
-
-interface TeacherQuizLinkSnapshot {
-  chapterId: string;
-  url: string;
-  subject: string;
-  classLevel: 10 | 12;
-  section?: string;
-}
-
-interface TeacherAnnouncementSnapshot {
-  id: string;
-  title: string;
-  body: string;
-  subject: string;
-  classLevel: 10 | 12;
-  section?: string;
-}
-
-interface DashboardAttendanceSummary {
-  percentage: number;
-  total: number;
-}
-
-interface DashboardResourceItem {
-  id: string;
-  title: string;
-  createdAt: string;
-  type: 'pdf' | 'link' | 'video' | 'image';
-}
-
-interface DashboardEventItem {
-  id: string;
-  title: string;
-  eventDate: string;
-  type: 'exam' | 'assignment_due' | 'holiday' | 'meeting' | 'other';
-}
-
-interface DashboardGradeItem {
-  submissionId: string;
-  subject: string;
-  score: number;
-  createdAt: string;
-}
-
-interface DashboardTimetableSlot {
-  dayOfWeek: number;
-  periodNo: number;
-  subject: string;
-  startTime?: string;
-  endTime?: string;
-}
-
-interface DashboardSchoolAnnouncement {
-  id: string;
-  title: string;
-  body: string;
-  createdAt: string;
-}
-
 // ── Main page ─────────────────────────────────────────────────
 export default function DashboardPage() {
-  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [quizzesTaken, setQuizzesTaken] = useState(0);
   const [avgQuizScore, setAvgQuizScore] = useState(0);
   const [cardsDue, setCardsDue] = useState(0);
   const [weakProfiles, setWeakProfiles] = useState<LearningProfile[]>([]);
-  const [studentSession, setStudentSession] = useState<StudentSessionSnapshot | null>(null);
-  const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignmentSnapshot[]>([]);
-  const [teacherQuizLinks, setTeacherQuizLinks] = useState<TeacherQuizLinkSnapshot[]>([]);
-  const [teacherAnnouncements, setTeacherAnnouncements] = useState<TeacherAnnouncementSnapshot[]>([]);
-  const [attendanceSummary, setAttendanceSummary] = useState<DashboardAttendanceSummary | null>(null);
-  const [resourceFeed, setResourceFeed] = useState<DashboardResourceItem[]>([]);
-  const [eventFeed, setEventFeed] = useState<DashboardEventItem[]>([]);
-  const [gradeFeed, setGradeFeed] = useState<DashboardGradeItem[]>([]);
-  const [todayTimetable, setTodayTimetable] = useState<DashboardTimetableSlot[]>([]);
-  const [schoolAnnouncements, setSchoolAnnouncements] = useState<DashboardSchoolAnnouncement[]>([]);
   const { studiedChapterIds } = useProgressStore();
   const { bookmarkedChapterIds } = useBookmarkStore();
-  useServerProgressSync();
+  const profileClassLevel = useStudentProfileStore((state) => state.classLevel);
+  const profileStream = useStudentProfileStore((state) => state.stream);
+  const activeDays = useStudyActivityStore((state) => state.activeDays);
+  const streak = useMemo(() => computeStudyStreak(activeDays), [activeDays]);
+  // Local "My class" choice (null until the student picks one, or before hydration).
+  const studentClassLevel = mounted ? profileClassLevel : null;
+  const studentStream: AcademicStream | undefined = mounted && profileStream ? profileStream : undefined;
   const eligibleChapters = useMemo(() => ALL_CHAPTERS.filter((c) => c.classLevel !== 11), []);
   const allowedSubjectSet = useMemo(() => {
-    if (!studentSession) return null;
-    if (studentSession.enrolledSubjects.length > 0) {
-      return new Set<Subject>(studentSession.enrolledSubjects);
-    }
-    return new Set<Subject>(
-      getSubjectsForAcademicTrack(studentSession.classLevel, studentSession.stream) as Subject[]
-    );
-  }, [studentSession]);
+    if (!studentClassLevel) return null;
+    return new Set<Subject>(getSubjectsForAcademicTrack(studentClassLevel, studentStream) as Subject[]);
+  }, [studentClassLevel, studentStream]);
   const visibleChapters = useMemo(
     () =>
       eligibleChapters.filter((chapter) => {
-        if (studentSession?.classLevel && chapter.classLevel !== studentSession.classLevel) return false;
+        if (studentClassLevel && chapter.classLevel !== studentClassLevel) return false;
         if (allowedSubjectSet && !allowedSubjectSet.has(chapter.subject)) return false;
         return true;
       }),
-    [eligibleChapters, allowedSubjectSet, studentSession?.classLevel]
+    [eligibleChapters, allowedSubjectSet, studentClassLevel]
   );
   const chapterById = useMemo(() => new Map(visibleChapters.map((chapter) => [chapter.id, chapter])), [visibleChapters]);
 
@@ -271,32 +185,13 @@ export default function DashboardPage() {
   const totalChapters = visibleChapters.length;
   const studiedCount = studiedChapterIds.filter((id) => chapterById.has(id)).length;
   const overallPct = totalChapters > 0 ? Math.round((studiedCount / totalChapters) * 100) : 0;
-  const dashboardStream = useMemo<AcademicStream | undefined>(() => {
-    if (!studentSession) return undefined;
-    if (studentSession.stream) return studentSession.stream;
-    if (studentSession.classLevel === 10) return undefined;
-    const subjectSet = new Set(teacherAssignments.map((item) => item.subject));
-    const hasCommerce = ['Accountancy', 'Business Studies', 'Economics'].some((subject) => subjectSet.has(subject));
-    const hasPhysics = subjectSet.has('Physics');
-    const hasChemistry = subjectSet.has('Chemistry');
-    const hasBiology = subjectSet.has('Biology');
-    const hasMath = subjectSet.has('Math');
-    const hasCoreScience = hasPhysics && hasChemistry;
-    if (hasCommerce && (hasCoreScience || hasBiology || hasMath)) return undefined;
-    if (hasCommerce) return 'commerce';
-    if (hasCoreScience && hasBiology && !hasMath) return 'pcb';
-    if (hasCoreScience && hasMath && !hasBiology) return 'pcm';
-    if (hasCoreScience && hasBiology && hasMath) return undefined;
-    if (hasCoreScience && hasMath) return 'pcm';
-    if (hasCoreScience && hasBiology) return 'pcb';
-    return undefined;
-  }, [studentSession, teacherAssignments]);
+  const dashboardStream = studentStream;
   const dashboardTrack = dashboardStream ? STREAM_LABELS[dashboardStream] : 'General';
   const orderedSubjects = useMemo(() => {
     const allSubjects = Object.keys(SUBJECT_META) as Array<keyof typeof SUBJECT_META>;
     const visibleSet = new Set(visibleChapters.map((chapter) => chapter.subject));
     const priority: Array<keyof typeof SUBJECT_META> = (() => {
-      if (studentSession?.classLevel === 10) {
+      if (studentClassLevel === 10) {
         return ['Physics', 'Chemistry', 'Biology', 'Math', 'English Core'];
       }
       if (dashboardStream === 'commerce') {
@@ -311,15 +206,15 @@ export default function DashboardPage() {
       return ['English Core', 'Physics', 'Chemistry', 'Math', 'Biology', 'Accountancy', 'Business Studies', 'Economics'];
     })();
     return [...new Set([...priority, ...allSubjects])].filter((subject) => visibleSet.has(subject));
-  }, [dashboardStream, studentSession, visibleChapters]);
+  }, [dashboardStream, studentClassLevel, visibleChapters]);
   const plannerClassLevel = useMemo<10 | 12>(() => {
-    if (studentSession?.classLevel === 10 || studentSession?.classLevel === 12) {
-      return studentSession.classLevel;
+    if (studentClassLevel === 10 || studentClassLevel === 12) {
+      return studentClassLevel;
     }
     const class10Weak = weakProfiles.filter((profile) => chapterById.get(profile.chapterId)?.classLevel === 10).length;
     const class12Weak = weakProfiles.filter((profile) => chapterById.get(profile.chapterId)?.classLevel === 12).length;
     return class10Weak > class12Weak ? 10 : 12;
-  }, [chapterById, studentSession?.classLevel, weakProfiles]);
+  }, [chapterById, studentClassLevel, weakProfiles]);
   const plannerWeakChapterIds = useMemo(
     () =>
       weakProfiles
@@ -329,302 +224,6 @@ export default function DashboardPage() {
   );
   const topWeakProfile = weakProfiles[0] ?? null;
   const topWeakChapter = topWeakProfile ? chapterById.get(topWeakProfile.chapterId) : undefined;
-
-  useEffect(() => {
-    let active = true;
-    fetchClientStudentSession()
-      .then((session) => {
-        if (!session?.studentId || !session.classLevel || !session.studentName) return null;
-        return {
-          studentName: session.studentName,
-          classLevel: session.classLevel,
-          section: session.section,
-          mustChangePassword: session.mustChangePassword === true,
-          stream: session.stream,
-          enrolledSubjects: session.enrolledSubjects,
-        } as StudentSessionSnapshot;
-      })
-      .then((session) => {
-        if (!active || !session) return;
-        setStudentSession(session);
-      })
-      .catch(() => {
-        if (active) setStudentSession(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (studentSession?.mustChangePassword) {
-      router.replace('/student/first-login');
-    }
-  }, [router, studentSession?.mustChangePassword]);
-
-  useEffect(() => {
-    if (!studentSession) {
-      setTeacherAssignments([]);
-      setTeacherQuizLinks([]);
-      setTeacherAnnouncements([]);
-      return;
-    }
-    let active = true;
-    const params = new URLSearchParams({
-      classLevel: String(studentSession.classLevel),
-    });
-    if (studentSession.section) params.set('section', studentSession.section);
-    fetch(`/api/teacher?${params.toString()}`, { cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        const payload = await response.json().catch(() => null);
-        const data = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
-          ? payload.data as Record<string, unknown>
-          : payload as Record<string, unknown> | null;
-        if (!data || !data.scopeFeed || typeof data.scopeFeed !== 'object') return null;
-        return data.scopeFeed as Record<string, unknown>;
-      })
-      .then((scopeFeed) => {
-        if (!active || !scopeFeed) return;
-        const assignmentPacks = Array.isArray(scopeFeed.assignmentPacks)
-          ? scopeFeed.assignmentPacks
-          : [];
-        const quizLinks = Array.isArray(scopeFeed.quizLinks)
-          ? scopeFeed.quizLinks
-          : [];
-        const announcements = Array.isArray(scopeFeed.announcements)
-          ? scopeFeed.announcements
-          : [];
-
-        const nextAssignments = assignmentPacks
-          .map((item): TeacherAssignmentSnapshot | null => {
-            if (!item || typeof item !== 'object') return null;
-            const record = item as Record<string, unknown>;
-            const classLevelRaw = Number(record.classLevel);
-            if (classLevelRaw !== 10 && classLevelRaw !== 12) return null;
-            const packId = typeof record.packId === 'string' ? record.packId.trim() : '';
-            const title = typeof record.title === 'string' ? record.title.trim() : '';
-            const chapterId = typeof record.chapterId === 'string' ? record.chapterId.trim() : '';
-            const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
-            if (!packId || !title || !chapterId || !subject) return null;
-            return {
-              packId,
-              title,
-              chapterId,
-              subject,
-              classLevel: classLevelRaw,
-              section: typeof record.section === 'string' ? record.section.trim() || undefined : undefined,
-              dueDate: typeof record.dueDate === 'string' ? record.dueDate.trim() || undefined : undefined,
-              teacherName: typeof record.teacherName === 'string' ? record.teacherName.trim() || undefined : undefined,
-              shareUrl: typeof record.shareUrl === 'string' ? record.shareUrl.trim() || undefined : undefined,
-              questionCount: Number.isFinite(Number(record.questionCount)) ? Number(record.questionCount) : 0,
-              estimatedTimeMinutes: Number.isFinite(Number(record.estimatedTimeMinutes)) ? Number(record.estimatedTimeMinutes) : 0,
-            };
-          })
-          .filter((item): item is TeacherAssignmentSnapshot => !!item)
-          .slice(0, 6);
-
-        const nextQuizLinks = quizLinks
-          .map((item): TeacherQuizLinkSnapshot | null => {
-            if (!item || typeof item !== 'object') return null;
-            const record = item as Record<string, unknown>;
-            const classLevelRaw = Number(record.classLevel);
-            if (classLevelRaw !== 10 && classLevelRaw !== 12) return null;
-            const chapterId = typeof record.chapterId === 'string' ? record.chapterId.trim() : '';
-            const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
-            const url = typeof record.url === 'string' ? record.url.trim() : '';
-            if (!chapterId || !subject || !url) return null;
-            return {
-              chapterId,
-              subject,
-              url,
-              classLevel: classLevelRaw,
-              section: typeof record.section === 'string' ? record.section.trim() || undefined : undefined,
-            };
-          })
-          .filter((item): item is TeacherQuizLinkSnapshot => !!item)
-          .slice(0, 6);
-
-        const nextAnnouncements = announcements
-          .map((item): TeacherAnnouncementSnapshot | null => {
-            if (!item || typeof item !== 'object') return null;
-            const record = item as Record<string, unknown>;
-            const classLevelRaw = Number(record.classLevel);
-            if (classLevelRaw !== 10 && classLevelRaw !== 12) return null;
-            const id = typeof record.id === 'string' ? record.id.trim() : '';
-            const title = typeof record.title === 'string' ? record.title.trim() : '';
-            const body = typeof record.body === 'string' ? record.body.trim() : '';
-            const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
-            if (!id || !title || !subject) return null;
-            return {
-              id,
-              title,
-              body,
-              subject,
-              classLevel: classLevelRaw,
-              section: typeof record.section === 'string' ? record.section.trim() || undefined : undefined,
-            };
-          })
-          .filter((item): item is TeacherAnnouncementSnapshot => !!item)
-          .slice(0, 6);
-        setTeacherAssignments(nextAssignments);
-        setTeacherQuizLinks(nextQuizLinks);
-        setTeacherAnnouncements(nextAnnouncements);
-      })
-      .catch(() => {
-        if (!active) return;
-        setTeacherAssignments([]);
-        setTeacherQuizLinks([]);
-        setTeacherAnnouncements([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [studentSession]);
-
-  useEffect(() => {
-    if (!studentSession) {
-      setAttendanceSummary(null);
-      setResourceFeed([]);
-      setEventFeed([]);
-      setGradeFeed([]);
-      setTodayTimetable([]);
-      setSchoolAnnouncements([]);
-      return;
-    }
-    let active = true;
-    Promise.all([
-      fetch('/api/student/attendance?days=120', { cache: 'no-store' }).then(async (res) => (res.ok ? res.json() : null)).catch(() => null),
-      fetch('/api/student/resources?limit=6', { cache: 'no-store' }).then(async (res) => (res.ok ? res.json() : null)).catch(() => null),
-      fetch('/api/student/calendar?limit=6', { cache: 'no-store' }).then(async (res) => (res.ok ? res.json() : null)).catch(() => null),
-      fetch('/api/student/grades', { cache: 'no-store' }).then(async (res) => (res.ok ? res.json() : null)).catch(() => null),
-      fetch('/api/student/timetable', { cache: 'no-store' }).then(async (res) => (res.ok ? res.json() : null)).catch(() => null),
-      fetch('/api/student/announcements?limit=5', { cache: 'no-store' }).then(async (res) => (res.ok ? res.json() : null)).catch(() => null),
-    ])
-      .then(([attendancePayload, resourcesPayload, eventsPayload, gradesPayload, timetablePayload, announcementsPayload]) => {
-        if (!active) return;
-        const attendanceData = attendancePayload && typeof attendancePayload === 'object' && 'data' in attendancePayload
-          ? (attendancePayload as { data: Record<string, unknown> }).data
-          : (attendancePayload as Record<string, unknown> | null);
-        if (attendanceData && Number.isFinite(Number(attendanceData.percentage))) {
-          setAttendanceSummary({
-            percentage: Number(attendanceData.percentage),
-            total: Number(attendanceData.total || 0),
-          });
-        } else {
-          setAttendanceSummary(null);
-        }
-
-        const resourcesData = resourcesPayload && typeof resourcesPayload === 'object' && 'data' in resourcesPayload
-          ? (resourcesPayload as { data: Record<string, unknown> }).data
-          : (resourcesPayload as Record<string, unknown> | null);
-        const resources = Array.isArray(resourcesData?.resources) ? resourcesData.resources : [];
-        setResourceFeed(
-          resources
-            .map((item) => (item && typeof item === 'object' ? item as Record<string, unknown> : null))
-            .filter((item): item is Record<string, unknown> => !!item)
-            .map((item) => ({
-              id: String(item.id || ''),
-              title: String(item.title || 'Resource'),
-              createdAt: String(item.createdAt || ''),
-              type: (item.type === 'pdf' || item.type === 'video' || item.type === 'image' ? item.type : 'link') as DashboardResourceItem['type'],
-            }))
-            .filter((item) => item.id)
-            .slice(0, 4)
-        );
-
-        const eventsData = eventsPayload && typeof eventsPayload === 'object' && 'data' in eventsPayload
-          ? (eventsPayload as { data: Record<string, unknown> }).data
-          : (eventsPayload as Record<string, unknown> | null);
-        const events = Array.isArray(eventsData?.events) ? eventsData.events : [];
-        setEventFeed(
-          events
-            .map((item) => (item && typeof item === 'object' ? item as Record<string, unknown> : null))
-            .filter((item): item is Record<string, unknown> => !!item)
-            .map((item) => ({
-              id: String(item.id || ''),
-              title: String(item.title || 'Event'),
-              eventDate: String(item.eventDate || ''),
-              type: (item.type === 'exam' || item.type === 'assignment_due' || item.type === 'holiday' || item.type === 'meeting' ? item.type : 'other') as DashboardEventItem['type'],
-            }))
-            .filter((item) => item.id)
-            .slice(0, 4)
-        );
-
-        const gradesData = gradesPayload && typeof gradesPayload === 'object' && 'data' in gradesPayload
-          ? (gradesPayload as { data: Record<string, unknown> }).data
-          : (gradesPayload as Record<string, unknown> | null);
-        const grades = Array.isArray(gradesData?.grades) ? gradesData.grades : [];
-        setGradeFeed(
-          grades
-            .map((item) => (item && typeof item === 'object' ? item as Record<string, unknown> : null))
-            .filter((item): item is Record<string, unknown> => !!item)
-            .map((item) => ({
-              submissionId: String(item.submissionId || ''),
-              subject: String(item.subject || ''),
-              score: Number(item.score || 0),
-              createdAt: String(item.createdAt || ''),
-            }))
-            .filter((item) => item.submissionId)
-            .slice(0, 4)
-        );
-
-        const timetableData = timetablePayload && typeof timetablePayload === 'object' && 'data' in timetablePayload
-          ? (timetablePayload as { data: Record<string, unknown> }).data
-          : (timetablePayload as Record<string, unknown> | null);
-        const slots = Array.isArray(timetableData?.slots) ? timetableData.slots : [];
-        const weekday = (() => {
-          const raw = new Date().getDay();
-          return raw === 0 ? 7 : raw;
-        })();
-        setTodayTimetable(
-          slots
-            .map((item) => (item && typeof item === 'object' ? item as Record<string, unknown> : null))
-            .filter((item): item is Record<string, unknown> => !!item)
-            .map((item) => ({
-              dayOfWeek: Number(item.dayOfWeek || 0),
-              periodNo: Number(item.periodNo || 0),
-              subject: String(item.subject || ''),
-              startTime: typeof item.startTime === 'string' ? item.startTime : undefined,
-              endTime: typeof item.endTime === 'string' ? item.endTime : undefined,
-            }))
-            .filter((item) => item.dayOfWeek === weekday && item.subject)
-            .sort((a, b) => a.periodNo - b.periodNo)
-            .slice(0, 5)
-        );
-
-        const announcementsData = announcementsPayload && typeof announcementsPayload === 'object' && 'data' in announcementsPayload
-          ? (announcementsPayload as { data: Record<string, unknown> }).data
-          : (announcementsPayload as Record<string, unknown> | null);
-        const announcements = Array.isArray(announcementsData?.announcements) ? announcementsData.announcements : [];
-        setSchoolAnnouncements(
-          announcements
-            .map((item) => (item && typeof item === 'object' ? item as Record<string, unknown> : null))
-            .filter((item): item is Record<string, unknown> => !!item)
-            .map((item) => ({
-              id: String(item.id || ''),
-              title: String(item.title || 'School update'),
-              body: String(item.body || ''),
-              createdAt: String(item.createdAt || ''),
-            }))
-            .filter((item) => item.id)
-            .slice(0, 3)
-        );
-      })
-      .catch(() => {
-        if (!active) return;
-        setAttendanceSummary(null);
-        setResourceFeed([]);
-        setEventFeed([]);
-        setGradeFeed([]);
-        setTodayTimetable([]);
-        setSchoolAnnouncements([]);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [studentSession]);
 
   // Recent studied (last 5)
   const recentStudied = useMemo(() => {
@@ -655,8 +254,9 @@ export default function DashboardPage() {
       const parsedScore = Number(score);
       const quizScore = Number.isFinite(parsedScore) && parsedScore > 0 ? parsedScore : null;
       let chapterDue = 0;
-      if (ch.flashcards) {
-        for (let idx = 0; idx < ch.flashcards.length; idx++) {
+      const deck = getChapterDeck(ch.id, ch.flashcards, useFlashcardDeckStore.getState().decks);
+      if (deck.length > 0) {
+        for (let idx = 0; idx < deck.length; idx++) {
           const s = localStorage.getItem(`fsrs-[${ch.id}]-${idx}`);
           if (s) {
             try {
@@ -713,19 +313,23 @@ export default function DashboardPage() {
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div>
               <div className="text-white/70 text-sm font-medium mb-1">
-                {studentSession?.studentName ? `Welcome back, ${studentSession.studentName}` : 'Welcome back'}
+                {streak.current > 0 ? 'Welcome back' : 'Welcome to VidyaPath'}
               </div>
-              <h1 className="font-fraunces text-3xl sm:text-4xl font-bold leading-tight">My Dashboard</h1>
+              <h1 className="font-fraunces text-3xl sm:text-4xl font-bold leading-tight">My Progress</h1>
               <p className="text-white/75 mt-1.5 text-sm max-w-xl">
-                {studentSession
-                  ? `Class ${studentSession.classLevel}${studentSession.section ? ` - Section ${studentSession.section}` : ''} personalized learning view.`
-                  : 'Track progress, weak zones, and teacher-assigned study flow.'}
+                {studentClassLevel
+                  ? `Class ${studentClassLevel} personalised view. Saved only on this device — no account needed.`
+                  : 'Track progress and weak zones. Everything is saved only on this device — no account needed.'}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <div className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white/90">
                   Focus track: {dashboardTrack}
                 </div>
-                <EnableNotificationsButton />
+                <div className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white/90">
+                  <Flame className="h-3.5 w-3.5 text-amber-300" />
+                  {streak.current > 0 ? `${streak.current}-day streak` : 'Start a streak today'}
+                  {streak.longest > streak.current ? ` · best ${streak.longest}` : ''}
+                </div>
               </div>
             </div>
             {/* Overall ring */}
@@ -785,11 +389,11 @@ export default function DashboardPage() {
                 Progress by Class
               </h2>
               <div className="space-y-5">
-                {studentSession?.classLevel ? (
+                {studentClassLevel ? (
                   <ClassBar
-                    cls={studentSession.classLevel}
-                    studied={subjectProgress.byClass[studentSession.classLevel]?.studied ?? 0}
-                    total={subjectProgress.byClass[studentSession.classLevel]?.total ?? 0}
+                    cls={studentClassLevel}
+                    studied={subjectProgress.byClass[studentClassLevel]?.studied ?? 0}
+                    total={subjectProgress.byClass[studentClassLevel]?.total ?? 0}
                   />
                 ) : (
                   <>
@@ -833,6 +437,8 @@ export default function DashboardPage() {
           {/* ── RIGHT 1/3 ── */}
           <div className="space-y-5">
 
+            {!studentClassLevel && <ClassPicker variant="full" />}
+
             {/* Motivational card */}
             <div className="bg-gradient-to-br from-saffron-500 to-saffron-600 text-white rounded-2xl p-5">
               <Zap className="w-7 h-7 text-white/80 mb-3" />
@@ -851,155 +457,6 @@ export default function DashboardPage() {
                 <BookOpen className="w-4 h-4" /> Browse Chapters
               </Link>
             </div>
-
-            {(teacherAssignments.length > 0 || teacherQuizLinks.length > 0 || teacherAnnouncements.length > 0) && (
-              <div className="ui-surface rounded-2xl p-5">
-                <h2 className="font-fraunces text-base font-bold text-navy-700 dark:text-slate-100 mb-3 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-indigo-500" />
-                  Personalized by Teachers
-                </h2>
-                {teacherAssignments.length > 0 && (
-                  <div className="space-y-2">
-                    {teacherAssignments.slice(0, 3).map((pack) => (
-                      <Link
-                        key={pack.packId}
-                        href={pack.shareUrl || `/practice/assignment/${pack.packId}`}
-                        className="block rounded-xl border border-indigo-100 dark:border-indigo-700/70 bg-indigo-50 dark:bg-indigo-950/35 px-3 py-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
-                      >
-                        <p className="text-xs font-semibold text-indigo-900 dark:text-indigo-200 truncate">{pack.title}</p>
-                        <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
-                          {pack.subject} - {pack.questionCount}Q - {pack.estimatedTimeMinutes} min
-                          {pack.teacherName ? ` - ${pack.teacherName}` : ''}
-                        </p>
-                        {pack.dueDate && (
-                          <p className="text-[11px] text-indigo-700/80 dark:text-indigo-300/90">Due: {pack.dueDate}</p>
-                        )}
-                      </Link>
-                    ))}
-                  </div>
-                )}
-                {teacherQuizLinks.length > 0 && (
-                  <div className={teacherAssignments.length > 0 ? 'mt-3 space-y-2' : 'space-y-2'}>
-                    {teacherQuizLinks.slice(0, 3).map((quiz, index) => (
-                      <a
-                        key={`${quiz.chapterId}-${index}`}
-                        href={quiz.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block rounded-xl border border-cyan-100 dark:border-cyan-700/70 bg-cyan-50 dark:bg-cyan-950/35 px-3 py-2 hover:bg-cyan-100 dark:hover:bg-cyan-900/45"
-                      >
-                        <p className="text-xs font-semibold text-cyan-900 dark:text-cyan-200 truncate">
-                          {chapterById.get(quiz.chapterId)?.title || quiz.subject} Quiz
-                        </p>
-                        <p className="text-[11px] text-cyan-700 dark:text-cyan-300 flex items-center gap-1">
-                          <Link2 className="w-3 h-3" />
-                          Open quiz link
-                        </p>
-                      </a>
-                    ))}
-                  </div>
-                )}
-                {teacherAnnouncements.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {teacherAnnouncements.slice(0, 2).map((notice) => (
-                      <div key={notice.id} className="rounded-xl border border-amber-100 dark:border-amber-700/70 bg-amber-50 dark:bg-amber-950/35 px-3 py-2">
-                        <p className="text-xs font-semibold text-amber-900 dark:text-amber-200 truncate">{notice.title}</p>
-                        <p className="text-[11px] text-amber-800 dark:text-amber-300 truncate">{notice.body}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {(attendanceSummary || resourceFeed.length > 0 || eventFeed.length > 0 || gradeFeed.length > 0 || todayTimetable.length > 0 || schoolAnnouncements.length > 0) && (
-              <div className="ui-surface rounded-2xl p-5">
-                <h2 className="font-fraunces text-base font-bold text-navy-700 dark:text-slate-100 mb-3 flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-indigo-500" />
-                  School Ops Snapshot
-                </h2>
-
-                {attendanceSummary && (
-                  <div className="mb-3 rounded-xl border border-emerald-100 dark:border-emerald-700/70 bg-emerald-50 dark:bg-emerald-950/35 px-3 py-2">
-                    <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">
-                      Attendance: {attendanceSummary.percentage}% ({attendanceSummary.total} marked days)
-                    </p>
-                  </div>
-                )}
-
-                {todayTimetable.length > 0 && (
-                  <div className="mb-3">
-                    <p className="text-xs font-semibold text-[#4A4A6A] dark:text-slate-200 mb-1">Today&apos;s Schedule</p>
-                    <div className="space-y-1.5">
-                      {todayTimetable.map((slot) => (
-                        <div key={`${slot.dayOfWeek}-${slot.periodNo}-${slot.subject}`} className="rounded-lg border border-indigo-100 dark:border-indigo-700/70 bg-indigo-50 dark:bg-indigo-950/30 px-2.5 py-1.5">
-                          <p className="text-[11px] font-semibold text-indigo-900 dark:text-indigo-200">P{slot.periodNo}: {slot.subject}</p>
-                          {(slot.startTime || slot.endTime) && (
-                            <p className="text-[10px] text-indigo-700 dark:text-indigo-300">{slot.startTime || '--'} - {slot.endTime || '--'}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {eventFeed.length > 0 && (
-                  <div className="mb-3">
-                    <p className="text-xs font-semibold text-[#4A4A6A] dark:text-slate-200 mb-1">Upcoming Events</p>
-                    <div className="space-y-1.5">
-                      {eventFeed.map((event) => (
-                        <div key={event.id} className="rounded-lg border border-amber-100 dark:border-amber-700/70 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5">
-                          <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-200">{event.title}</p>
-                          <p className="text-[10px] text-amber-700 dark:text-amber-300">{new Date(event.eventDate).toLocaleDateString()}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {resourceFeed.length > 0 && (
-                  <div className="mb-3">
-                    <p className="text-xs font-semibold text-[#4A4A6A] dark:text-slate-200 mb-1">New Resources</p>
-                    <div className="space-y-1.5">
-                      {resourceFeed.map((resource) => (
-                        <div key={resource.id} className="rounded-lg border border-cyan-100 dark:border-cyan-700/70 bg-cyan-50 dark:bg-cyan-950/30 px-2.5 py-1.5">
-                          <p className="text-[11px] font-semibold text-cyan-900 dark:text-cyan-200 truncate">{resource.title}</p>
-                          <p className="text-[10px] text-cyan-700 dark:text-cyan-300">{resource.type.toUpperCase()}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {gradeFeed.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-[#4A4A6A] dark:text-slate-200 mb-1">Latest Grades</p>
-                    <div className="space-y-1.5">
-                      {gradeFeed.map((grade) => (
-                        <div key={grade.submissionId} className="rounded-lg border border-rose-100 dark:border-rose-700/70 bg-rose-50 dark:bg-rose-950/30 px-2.5 py-1.5 flex items-center justify-between">
-                          <span className="text-[11px] font-semibold text-rose-900 dark:text-rose-200">{grade.subject}</span>
-                          <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300">{grade.score}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {schoolAnnouncements.length > 0 && (
-                  <div className="mt-3">
-                    <p className="text-xs font-semibold text-[#4A4A6A] dark:text-slate-200 mb-1">School Announcements</p>
-                    <div className="space-y-1.5">
-                      {schoolAnnouncements.map((notice) => (
-                        <div key={notice.id} className="rounded-lg border border-indigo-100 dark:border-indigo-700/70 bg-indigo-50 dark:bg-indigo-950/30 px-2.5 py-1.5">
-                          <p className="text-[11px] font-semibold text-indigo-900 dark:text-indigo-200 truncate">{notice.title}</p>
-                          <p className="text-[10px] text-indigo-700 dark:text-indigo-300 truncate">{notice.body}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Suggested chapters (bookmarked, not studied) */}
             {suggested.length > 0 && (

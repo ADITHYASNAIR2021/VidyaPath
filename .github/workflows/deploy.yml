@@ -12,14 +12,6 @@ jobs:
     timeout-minutes: 25
     env:
       NODE_ENV: test
-      SESSION_SIGNING_SECRET: ci-deploy-secret-32chars-minimum-required-001
-      ADMIN_PORTAL_KEY: ci-admin-key
-      TEACHER_PORTAL_KEY: ci-teacher-key
-      DEVELOPER_USERNAME: ci-dev
-      DEVELOPER_PASSWORD: ci-dev-pw
-      NEXT_PUBLIC_SUPABASE_URL: https://ci-example.supabase.co
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
-      SUPABASE_SERVICE_ROLE_KEY: ci-service-key
       NEXT_PUBLIC_APP_URL: https://ci-example.com
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +23,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint:strict
       - run: npm run test
-      - run: npm run test:security-guards
 
   build:
     name: Build
@@ -40,15 +31,7 @@ jobs:
     timeout-minutes: 20
     env:
       NODE_ENV: production
-      SESSION_SIGNING_SECRET: ci-build-secret-32chars-minimum-required-001
-      TEACHER_PORTAL_KEY: ci-teacher-key
-      DEVELOPER_USERNAME: ci-dev
-      DEVELOPER_PASSWORD: ci-dev-pw
-      NEXT_PUBLIC_SUPABASE_URL: https://ci-example.supabase.co
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
-      SUPABASE_SERVICE_ROLE_KEY: ci-service-key
       NEXT_PUBLIC_APP_URL: https://ci-example.com
-      STRICT_ENV_VALIDATION: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -93,12 +76,6 @@ jobs:
           docker run -d --name vp-health-check \
             -p 3000:3000 \
             -e NODE_ENV=production \
-            -e SESSION_SIGNING_SECRET=ci-docker-session-secret-32chars-minimum-001 \
-            -e TEACHER_PORTAL_KEY=test-key \
-            -e DEVELOPER_USERNAME=test \
-            -e DEVELOPER_PASSWORD=test \
-            -e NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co \
-            -e NEXT_PUBLIC_SUPABASE_ANON_KEY=test \
             -e NEXT_PUBLIC_APP_URL=https://example.com \
             vidyapath:latest
           trap 'docker inspect --format="{{json .State.Health}}" vp-health-check || true; docker logs vp-health-check || true; docker rm -f vp-health-check || true' EXIT

@@ -1,6 +1,7 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { getContextPack, type ContextTask } from '@/lib/ai/context-retriever';
 import { getChapterById } from '@/lib/data';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -21,14 +22,14 @@ const ALLOWED_TASKS: ContextTask[] = [
   'chapter-remediate',
 ];
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:context-pack', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:context-pack', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 40,
       blockSeconds: 120,
@@ -117,7 +118,6 @@ export async function POST(req: Request) {
       retrieval: contextPack.retrievalMeta ?? null,
     };
     await logAiUsage({
-      context,
       endpoint: '/api/context-pack',
       provider: contextPack.usedPgvector ? 'gemini-pgvector' : 'local-retriever',
       model: contextPack.usedPgvector ? 'gemini-embedding-001' : 'context-index',
@@ -137,3 +137,5 @@ export async function POST(req: Request) {
     });
   }
 }
+
+export const POST = withAiMetrics('/api/context-pack', handlePost);

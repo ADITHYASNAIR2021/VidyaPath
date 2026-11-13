@@ -7,8 +7,6 @@ import Fuse from 'fuse.js';
 import { Calculator, Filter, Search } from 'lucide-react';
 import { getAllFormulaEntries, type FormulaEntry } from '@/lib/formulas';
 import { FORMULA_SOURCE_DOCS } from '@/lib/formula-handbook';
-import { fetchClientAuthSession } from '@/lib/client-auth-session';
-import PushNotificationToggle from '@/components/PushNotificationToggle';
 import AccessibleFormula from '@/components/AccessibleFormula';
 
 const SUBJECTS = [
@@ -51,27 +49,10 @@ export default function FormulasPage() {
   const [selectedSubject, setSelectedSubject] = useState<(typeof SUBJECTS)[number]>('All');
   const [selectedClass, setSelectedClass] = useState<(typeof CLASSES)[number]>('All');
   const [jeeOnly, setJeeOnly] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const searchParams = useSearchParams();
   const router = useRouter();
 
   const activeView: ActiveView = searchParams.get('view') === 'chapters' ? 'chapters' : 'cards';
-
-  useEffect(() => {
-    let active = true;
-    fetchClientAuthSession()
-      .then((authSession) => {
-        if (!active) return;
-        setIsAuthenticated(authSession.role !== 'anonymous');
-      })
-      .catch(() => {
-        if (!active) return;
-        setIsAuthenticated(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const subjectChoices = useMemo(() => SUBJECTS, []);
   const totalChaptersCovered = useMemo(
@@ -213,11 +194,6 @@ export default function FormulasPage() {
               <div className="mt-1 text-2xl font-bold">{sourceDocCount}</div>
             </div>
           </div>
-          {isAuthenticated && (
-            <div className="mt-3">
-              <PushNotificationToggle />
-            </div>
-          )}
         </div>
       </div>
 
@@ -327,16 +303,6 @@ export default function FormulasPage() {
         <p className="mb-4 text-xs text-[#8A8AAA] dark:text-gray-400">
           Long equations stay swipeable on mobile, and this page now doubles as the chapter-organized equation map too.
         </p>
-        {!isAuthenticated && (
-          <div className="mb-4 flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-2.5 text-sm dark:border-indigo-800 dark:bg-indigo-950/30">
-            <span className="text-indigo-700 dark:text-indigo-200">
-              Login to track progress, bookmarks, and revision activity.
-            </span>
-            <Link href="/login" className="ml-auto flex-shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700">
-              Login
-            </Link>
-          </div>
-        )}
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
           <div className="min-w-0">

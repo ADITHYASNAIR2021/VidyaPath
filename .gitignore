@@ -53,3 +53,6 @@ lib/context/.rag_count.json
 public/sw.js.map
 __pycache__/
 *.py[cod]
+
+# Runtime state written by the server (AI quality log, question history)
+lib/runtime/*.json
