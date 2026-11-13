@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { readStateFromSupabase, writeStateToSupabase } from '@/lib/persistence/supabase-state';
 
 export type AiTask =
   | 'chat'
@@ -86,7 +85,6 @@ interface AiQualityState {
   feedback: AiQualityFeedback[];
 }
 
-const STATE_KEY = 'ai_quality_v1';
 const RUNTIME_DIR = path.join(process.cwd(), 'lib', 'runtime');
 const STATE_PATH = path.join(RUNTIME_DIR, 'ai-quality.json');
 const MAX_RECORDS = 5000;
@@ -151,14 +149,6 @@ function bucketDate(iso: string): string {
 }
 
 async function readState(): Promise<AiQualityState> {
-  const remote = await readStateFromSupabase<AiQualityState>(STATE_KEY);
-  if (remote) {
-    return {
-      updatedAt: remote.updatedAt ?? new Date().toISOString(),
-      records: Array.isArray(remote.records) ? remote.records : [],
-      feedback: Array.isArray(remote.feedback) ? remote.feedback : [],
-    };
-  }
   try {
     const raw = await fs.readFile(STATE_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as AiQualityState;
@@ -173,8 +163,6 @@ async function readState(): Promise<AiQualityState> {
 }
 
 async function writeState(next: AiQualityState): Promise<void> {
-  const remoteOk = await writeStateToSupabase(STATE_KEY, next);
-  if (remoteOk) return;
   try {
     await fs.mkdir(RUNTIME_DIR, { recursive: true });
     await fs.writeFile(STATE_PATH, JSON.stringify(next, null, 2), 'utf-8');

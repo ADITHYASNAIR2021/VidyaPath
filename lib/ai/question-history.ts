@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { readStateFromSupabase, writeStateToSupabase } from '@/lib/persistence/supabase-state';
 
 interface GeneratedQuestionHistoryItem {
   id: string;
@@ -50,7 +49,6 @@ interface QuestionOutcomeInput {
   correct: boolean;
 }
 
-const STATE_KEY = 'ai_question_history_v1';
 const RUNTIME_DIR = path.join(process.cwd(), 'lib', 'runtime');
 const STATE_PATH = path.join(RUNTIME_DIR, 'ai-question-history.json');
 const MAX_GENERATED = 12000;
@@ -73,14 +71,6 @@ function normalizeStem(question: string): string {
 }
 
 async function readState(): Promise<QuestionHistoryState> {
-  const remote = await readStateFromSupabase<QuestionHistoryState>(STATE_KEY);
-  if (remote) {
-    return {
-      updatedAt: remote.updatedAt ?? new Date().toISOString(),
-      generated: Array.isArray(remote.generated) ? remote.generated : [],
-      performance: Array.isArray(remote.performance) ? remote.performance : [],
-    };
-  }
   try {
     const raw = await fs.readFile(STATE_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as QuestionHistoryState;
@@ -97,8 +87,6 @@ async function readState(): Promise<QuestionHistoryState> {
 async function writeState(next: QuestionHistoryState): Promise<void> {
   // Do not cache in memoryState — concurrent requests from different users would
   // read each other's stale writes. Always write-through to persistent store only.
-  const remoteOk = await writeStateToSupabase(STATE_KEY, next);
-  if (remoteOk) return;
   try {
     await fs.mkdir(RUNTIME_DIR, { recursive: true });
     await fs.writeFile(STATE_PATH, JSON.stringify(next, null, 2), 'utf-8');

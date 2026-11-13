@@ -1,6 +1,8 @@
 # VidyaPath
 
-VidyaPath is a free, open-source CBSE learning platform for Class 10 and 12. It provides AI-generated quizzes, adaptive tests, chapter drills, flashcards, and revision plans grounded in NCERT textbooks and past board exam papers.
+VidyaPath is a free, open-source CBSE learning platform for Class 10 and 12. It provides AI-generated quizzes, mock exams, chapter drills, flashcards, and revision plans grounded in NCERT textbooks and past board exam papers.
+
+**No login, no database.** Any student can open the site and start studying. Personal progress (class, bookmarks, notes, flashcards, streaks, mock-exam history) is stored only in the student's browser. AI endpoints are public and protected by per-IP limits plus a global daily token budget (`lib/ai/public-access.ts`, `lib/ai/cost-guard.ts`).
 
 **Who is this guide for?** Anyone — even if you have never set up a Next.js or AI project before. Every step below is explained with a reason.
 
@@ -24,12 +26,11 @@ VidyaPath is a free, open-source CBSE learning platform for Class 10 and 12. It 
 6. [Download Datasets from Hugging Face](#download-datasets)
 7. [Build Chunks and Context Artifacts](#build-chunks)
 8. [Image OCR (Optional but Recommended)](#image-ocr)
-9. [Supabase Setup](#supabase-setup)
-10. [Ingest Embeddings into Supabase](#ingest-embeddings)
-11. [Run the App](#run-the-app)
-12. [AI Pipeline — What Was Built](#ai-pipeline)
-13. [Useful Commands](#useful-commands)
-14. [Troubleshooting](#troubleshooting)
+9. [Run the App](#run-the-app)
+10. [Deploying publicly](#deploying-publicly)
+11. [AI Pipeline — What Was Built](#ai-pipeline)
+12. [Useful Commands](#useful-commands)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -128,28 +129,33 @@ cp .env.example .env.local
 
 Then open `.env.local` and fill in your values. Here is what each variable does:
 
-### Required — App Security
+Nothing is strictly required: chapters, notes, papers and formulas work with zero configuration. AI features need at least one provider key.
+
+### Recommended — Site URL and shared rate limits
 
 ```env
-SESSION_SIGNING_SECRET=replace_with_long_random_secret_min_32_chars
-TEACHER_PORTAL_KEY=replace_with_teacher_secret
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-DEVELOPER_USERNAME=developer@example.org
-DEVELOPER_PASSWORD=replace_with_a_strong_unique_password
+NEXT_PUBLIC_APP_URL=https://your-domain.example
+# Free Upstash Redis (https://upstash.com). Without it, AI rate limits and the
+# daily AI budget are enforced per server instance only.
+UPSTASH_REDIS_REST_URL=https://...upstash.io
+UPSTASH_REDIS_REST_TOKEN=...
 ```
 
-Generate a random secret: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
-
-### Required — Supabase Database
+### Developer console (optional, recommended)
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+# 24+ random chars. Enables /developer: live provider/model checks, AI usage & budget,
+# endpoint tester, RAG index status. Students never need it.
+DEVELOPER_DASHBOARD_KEY=...
 ```
 
-Get these from your Supabase project → Settings → API.
+### Public AI usage limits (optional tuning)
+
+```env
+AI_PUBLIC_DAILY_REQUESTS_PER_IP=120     # AI calls per IP per day across all AI tools
+AI_DAILY_TOKEN_BUDGET_GLOBAL=1000000    # Tokens per day for the whole site; AI pauses until midnight UTC when spent
+AI_MAX_TOKENS_PER_REQUEST=4000          # Hard cap per AI request
+```
 
 ### AI Providers — At Least One Required
 
@@ -186,9 +192,8 @@ AI_REQUEST_TIMEOUT_MS=30000
 # Requires NVIDIA_API_KEY and improves retrieval quality significantly
 AI_ENABLE_NVIDIA_RERANK=1
 
-# Enable pgvector semantic retrieval from Supabase document_embeddings table
-# Requires GEMINI_API_KEY for query embedding and a populated embeddings table
-AI_ENABLE_PGVECTOR_RAG=1
+# Serve large RAG files (chunks.jsonl etc.) from a static host instead of the bundle
+CONTEXT_CDN_URL=https://your-static-host.example/context
 ```
 
 ---
@@ -340,66 +345,6 @@ OCR chunks are stored with `"sourceType": "image-ocr"` and receive a score bonus
 
 ---
 
-## Supabase Setup
-
-### Create a Supabase project
-
-1. Go to https://supabase.com and create a free project
-2. Wait for it to initialize (~2 minutes)
-3. Copy the project URL and keys into `.env.local` (see [Environment Setup](#environment-setup))
-
-### Link and push migrations
-
-```bash
-# Install Supabase CLI (once)
-npm install -g supabase
-
-# Log in
-npx supabase login
-
-# Link to your project (find your ref in Supabase dashboard URL)
-npx supabase link --project-ref YOUR_PROJECT_REF
-
-# Push all database migrations
-npm run db:push
-```
-
-### Seed with demo data (optional)
-
-If you want to test with pre-made students, teachers, and classes:
-
-```bash
-npm run db:reset-full
-```
-
-**Warning:** This clears all existing data in the database. Only use on a fresh project.
-
----
-
-## Ingest Embeddings
-
-This step takes the chunks you built and stores high-dimensional Gemini embeddings in Supabase for semantic search. It requires:
-- `GEMINI_API_KEY` set
-- `AI_ENABLE_PGVECTOR_RAG=1` set
-- Database migrations pushed
-
-```bash
-node scripts/ingest_embeddings.mjs --skip-existing --batch-size 32
-```
-
-- `--skip-existing` skips chunks already in the DB (safe to re-run)
-- `--batch-size 32` controls how many chunks are embedded per API call
-- `--verify` compares live row IDs with the current corpus and reports exact coverage
-- `--async-batch` uses Gemini Batch API for a paid project and is the practical option for a full rebuild
-
-This upserts rows into `public.document_embeddings` (1024-dimensional, normalized `gemini-embedding-001` vectors). Once populated, the app uses pgvector for retrieval instead of local hash embeddings.
-
-Gemini Batch API is not available on the free tier. Standard free-tier ingestion is resumable, but its daily quota is too small for a one-day rebuild of the full corpus. Enable billing in Google AI Studio before using `--async-batch`; otherwise run the standard command over multiple quota-reset days. Do not mix embedding models: changing models requires re-embedding the entire table.
-
-**Skip this step** if you don't have a Gemini embedding key. The local retrieval index remains active, and startup automatically keeps pgvector disabled until the live row count covers the corpus manifest.
-
----
-
 ## Run the App
 
 Development server (hot reload):
@@ -416,6 +361,18 @@ Production build (check for errors before deploying):
 npm run build
 npm run start
 ```
+
+---
+
+## Deploying publicly
+
+1. Deploy to Vercel (or any Node host / the included `Dockerfile`). No database to provision.
+2. Set at least one AI key, `NEXT_PUBLIC_APP_URL`, the Upstash pair, `DEVELOPER_DASHBOARD_KEY`, and `CONTEXT_CDN_URL` (the board-paper chunk file is not in git — host `lib/context/chunks.jsonl.gz` on any static host).
+   After deploying, open `/developer` → **Check providers** and **Run all** to confirm every model and endpoint works.
+3. Pick an `AI_DAILY_TOKEN_BUDGET_GLOBAL` you are happy to pay for. When it is spent, students see a friendly "AI resets tomorrow" message and everything non-AI keeps working.
+4. Optional: set `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (or Umami) for cookieless, anonymous usage analytics.
+
+Old portal URLs (`/student/*`, `/teacher/*`, `/admin/*`, `/login`, …) permanently redirect to the matching public page.
 
 ---
 
@@ -475,7 +432,7 @@ After questions are generated, a second lightweight Groq call (llama-3.1-8b-inst
 
 | File | Purpose |
 |------|---------|
-| `lib/ai/context-retriever.ts` | HyDE expansion, MMR, source-diverse retrieval, pgvector + local fallback |
+| `lib/ai/context-retriever.ts` | HyDE expansion, MMR, source-diverse local hybrid retrieval |
 | `lib/ai/subject-prompts.ts` | Subject-specific system prompt rules |
 | `lib/ai/pyq-examples.ts` | Few-shot board-exam example questions per subject |
 | `lib/ai/question-verifier.ts` | Self-verification pass via Groq |
@@ -483,7 +440,8 @@ After questions are generated, a second lightweight Groq call (llama-3.1-8b-inst
 | `lib/ai/generator.ts` | Multi-provider LLM fallback chain with timeouts |
 | `lib/ai/model-routing.ts` | Provider and model registry |
 | `lib/ai/variation.ts` | Diversity keys to avoid repeated question patterns |
-| `lib/ai/token-budget.ts` | Per-user AI usage limits |
+| `lib/ai/public-access.ts` | Per-IP daily AI cap for anonymous users |
+| `lib/ai/token-budget.ts` | Global daily AI token budget (via `cost-guard.ts`) |
 | `lib/pyq.ts` | PYQ frequency data (years asked, important topics, avg marks) |
 | `lib/pyq-grounded.ts` | Grounded PYQ data for improved topic weighting |
 | `scripts/build_context_index.py` | PDF → semantic chunks with optional image OCR |
@@ -503,17 +461,7 @@ npm run lint            # ESLint
 npm run typecheck       # TypeScript type check (no emit)
 npm run test            # Run test suite
 npm run check:ci        # Typecheck + strict lint + tests
-npm run test:security-guards
 npm run check:route-links
-
-# Live auth checks (run the app first)
-npm run check:auth-matrix
-npm run check:auth-suite
-
-# Database
-npm run db:push         # Push Supabase migrations
-npm run db:clear        # Clear all app data (keeps schema)
-npm run db:reset-full   # Clear + seed with demo data
 
 # Context / RAG Pipeline
 npm run build:context   # Build chunks from CBSE papers
@@ -521,9 +469,6 @@ npm run build:textbooks # Build chunks from NCERT textbooks
 npm run clean:chunks    # Deduplicate chunk files
 npm run build:vectors   # Build local hash embeddings
 npm run verify:context  # Verify artifact integrity
-
-# Embeddings ingestion
-node scripts/ingest_embeddings.mjs --skip-existing --batch-size 32
 ```
 
 ---
@@ -534,21 +479,8 @@ node scripts/ingest_embeddings.mjs --skip-existing --batch-size 32
 Run `python -m huggingface_hub.commands.huggingface_cli auth login` instead.
 Or: `pip install -U "huggingface_hub[cli]"` then open a new terminal.
 
-**`document_embeddings table is empty` warning at startup**
-The app still works using local hash embeddings. To populate pgvector:
-```bash
-node scripts/ingest_embeddings.mjs --skip-existing --batch-size 32
-```
-
-**`Cannot find project ref` during `db:push`**
-```bash
-npx supabase login
-npx supabase link --project-ref YOUR_PROJECT_REF
-npm run db:push
-```
-
-**pgvector warning at startup even after migration**
-Set `AI_ENABLE_PGVECTOR_RAG=0` in `.env.local` to disable it and use local retrieval only.
+**AI says "You've used today's AI quota"**
+The per-IP daily cap (`AI_PUBLIC_DAILY_REQUESTS_PER_IP`) was reached. Raise it, or wait until tomorrow. Shared networks (schools) may need a higher value.
 
 **No questions generated / empty quiz**
 - Check that `lib/context/chunks.jsonl` exists and has data: `wc -l lib/context/chunks.jsonl`
@@ -571,7 +503,6 @@ Cerebras API keys must start with `csk-`. Get one at https://cloud.cerebras.ai
 
 ## Additional Internal Docs
 
-- `docs/FUNCTION_USAGE_GUIDE.md` — API route reference
-- `docs/FUNCTION_TO_FUNCTION_MAPPING.md` — internal module dependencies
 - `docs/AI_MODEL_ROUTING.md` — provider selection logic in detail
-- `docs/OPERATOR_RUNBOOK.md` — production operations guide
+- `docs/rag-indexing-playbook.md` — rebuilding the RAG index
+- `docs/PUBLIC_STUDENT_MODE_REPORT.md` — why and how the LMS was removed

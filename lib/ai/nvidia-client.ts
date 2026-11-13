@@ -103,11 +103,17 @@ function normalizeMessageContent(content: unknown): string {
 
 const NVIDIA_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS) || 30_000;
 
+/**
+ * The timeout covers the whole exchange (headers and body). The body is buffered inside
+ * the deadline so a provider that stalls mid-stream cannot hang a student's request.
+ */
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), NVIDIA_REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const body = await response.arrayBuffer();
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   } finally {
     clearTimeout(timeoutId);
   }

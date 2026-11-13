@@ -27,151 +27,111 @@ const CONTEXT_TASKS: ContextTask[] = [
 ];
 
 const REGISTERED_MODELS: LlmModelConfig[] = [
+  // Chat models verified live on 2026-11-13 via the developer console provider check.
+  // Providers retire models often — re-check at /developer → Providers and update this list.
   {
-    alias: 'G4',
-    provider: 'nvidia',
-    mode: 'chat',
-    model: 'google/gemma-3n-e4b-it',
-    description: 'General multilingual multimodal model for tutoring and generation.',
-    defaultParams: { temperature: 0.2, top_p: 0.7, max_tokens: 8192 },
-  },
-  {
-    alias: 'M27',
-    provider: 'nvidia',
-    mode: 'chat',
-    model: 'minimaxai/minimax-m2.7',
-    description: 'Strong for code and complex office-style tasks.',
-    defaultParams: { temperature: 0.4, top_p: 0.95, max_tokens: 16384 },
-  },
-  {
-    alias: 'GLM5',
-    provider: 'nvidia',
-    mode: 'chat',
-    model: 'z-ai/glm5',
-    description: 'Long-context reasoning and agentic task execution.',
-    defaultParams: {
-      temperature: 0.4,
-      top_p: 1,
-      max_tokens: 32000,
-      chat_template_kwargs: { enable_thinking: true, clear_thinking: false },
-    },
-  },
-  {
-    alias: 'K2',
-    provider: 'nvidia',
-    mode: 'chat',
-    model: 'moonshotai/kimi-k2.5',
-    description: 'General chat/comprehension model with optional thinking traces.',
-    defaultParams: {
-      temperature: 1,
-      top_p: 1,
-      max_tokens: 16384,
-      chat_template_kwargs: { thinking: true },
-    },
-  },
-  {
-    alias: 'CODE',
-    provider: 'nvidia',
-    mode: 'chat',
-    model: 'google/gemma-4-31b-it',
-    description: 'Coding-focused generation assistant.',
-    defaultParams: { temperature: 0.35, top_p: 0.95, max_tokens: 32000 },
-  },
-  {
-    alias: 'GEMINI_25_PRO',
+    alias: 'GEMINI_35_FLASH_LITE',
     provider: 'gemini',
     mode: 'chat',
-    model: 'gemini-2.5-pro',
-    description: 'Advanced reasoning model for complex chapter grounding and quality checks.',
-    defaultParams: { temperature: 0.15, topP: 0.9, maxOutputTokens: 3200 },
+    model: 'gemini-3.5-flash-lite',
+    description: 'Fast multimodal Gemini model; primary for grounded generation.',
+    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 2400 },
+  },
+  {
+    alias: 'GEMINI_31_FLASH_LITE',
+    provider: 'gemini',
+    mode: 'chat',
+    model: 'gemini-3.1-flash-lite',
+    description: 'Fast Gemini fallback.',
+    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 2400 },
+  },
+  {
+    alias: 'GEMINI_FLASH_LITE_LATEST',
+    provider: 'gemini',
+    mode: 'chat',
+    model: 'gemini-flash-lite-latest',
+    description: 'Rolling alias to the newest Gemini Flash-Lite.',
+    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 2400 },
+  },
+  {
+    alias: 'GEMINI_35_FLASH',
+    provider: 'gemini',
+    mode: 'chat',
+    model: 'gemini-3.5-flash',
+    description: 'Higher-quality Gemini Flash (slower; thinking model).',
+    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 3000 },
   },
   {
     alias: 'GEMINI_25_FLASH',
     provider: 'gemini',
     mode: 'chat',
     model: 'gemini-2.5-flash',
-    description: 'Best price-performance Gemini model for grounded generation.',
-    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 2200 },
+    description: 'Gemini 2.5 Flash (separate free-tier quota pool).',
+    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 2400 },
   },
   {
     alias: 'GEMINI_25_FLASH_LITE',
     provider: 'gemini',
     mode: 'chat',
     model: 'gemini-2.5-flash-lite',
-    description: 'Low-latency Gemini model for high-throughput generation.',
-    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 1800 },
-  },
-  {
-    alias: 'GEMINI_FLASH',
-    provider: 'gemini',
-    mode: 'chat',
-    model: 'gemini-2.0-flash',
-    description: 'Low-latency Gemini model for tutoring/generation fallback.',
-    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 1800 },
-  },
-  {
-    alias: 'GEMINI_15_FLASH',
-    provider: 'gemini',
-    mode: 'chat',
-    model: 'gemini-1.5-flash',
-    description: 'Secondary Gemini fallback.',
-    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 1800 },
+    description: 'Gemini 2.5 Flash-Lite (separate free-tier quota pool).',
+    defaultParams: { temperature: 0.2, topP: 0.9, maxOutputTokens: 2400 },
   },
   {
     alias: 'GROQ_GPT_OSS_120B',
     provider: 'groq',
     mode: 'chat',
     model: 'openai/gpt-oss-120b',
-    description: 'Groq flagship open-weight reasoning model.',
-    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2200 },
+    description: 'Groq flagship open-weight reasoning model (free tier rejects very large prompts with 413).',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2400 },
   },
   {
-    alias: 'GROQ_QWEN3_32B',
+    alias: 'GROQ_QWEN38_27B',
     provider: 'groq',
     mode: 'chat',
-    model: 'qwen/qwen3-32b',
-    description: 'Groq strong multilingual reasoning model.',
-    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2200 },
+    model: 'qwen/qwen3.8-27b',
+    description: 'Groq fast multilingual model.',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2400 },
   },
   {
-    alias: 'GROQ_LLAMA_70B',
+    alias: 'GROQ_GPT_OSS_20B',
     provider: 'groq',
     mode: 'chat',
-    model: 'llama-3.3-70b-versatile',
-    description: 'Groq high-quality fallback.',
-    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 1600 },
+    model: 'openai/gpt-oss-20b',
+    description: 'Groq small reasoning model; fast fallback.',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2400 },
   },
   {
-    alias: 'GROQ_LLAMA_8B',
-    provider: 'groq',
+    alias: 'MISTRAL_MINISTRAL_14B',
+    provider: 'mistral',
     mode: 'chat',
-    model: 'llama-3.1-8b-instant',
-    description: 'Groq fast fallback.',
-    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 1600 },
-  },
-  {
-    alias: 'CEREBRAS_SCOUT',
-    provider: 'cerebras',
-    mode: 'chat',
-    model: 'llama-4-scout-17b-16e-instruct',
-    description: 'Cerebras ultra-fast Scout model — free tier, 1000+ tok/s, ideal for quick generation.',
-    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2048 },
-  },
-  {
-    alias: 'CEREBRAS_70B',
-    provider: 'cerebras',
-    mode: 'chat',
-    model: 'llama-3.3-70b',
-    description: 'Cerebras 70B — free tier, high quality at high speed.',
-    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2048 },
+    model: 'ministral-14b-latest',
+    description: 'Mistral Ministral 14B — free tier.',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2400 },
   },
   {
     alias: 'MISTRAL_SMALL',
     provider: 'mistral',
     mode: 'chat',
     model: 'mistral-small-latest',
-    description: 'Mistral Small — free tier, strong multilingual reasoning.',
+    description: 'Mistral Small — free tier is heavily rate-limited.',
     defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2048 },
+  },
+  {
+    alias: 'NVIDIA_NEMOTRON_LIGHTNING',
+    provider: 'nvidia',
+    mode: 'chat',
+    model: 'nvidia/nemotron-3.5-lightning-30b-a3b',
+    description: 'NVIDIA hosted Nemotron (fast; may emit reasoning before the answer).',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2400 },
+  },
+  {
+    alias: 'CEREBRAS_GPT_OSS_120B',
+    provider: 'cerebras',
+    mode: 'chat',
+    model: 'gpt-oss-120b',
+    description: 'Cerebras gpt-oss-120b (requires a Cerebras account with billing).',
+    defaultParams: { temperature: 0.2, top_p: 0.9, max_tokens: 2400 },
   },
   {
     alias: 'RERANK_V2',
@@ -214,17 +174,19 @@ const REGISTERED_MODELS: LlmModelConfig[] = [
   },
 ];
 
+const FAST_JSON_CHAIN = ['GEMINI_35_FLASH_LITE', 'GROQ_GPT_OSS_120B', 'GEMINI_31_FLASH_LITE', 'GROQ_QWEN38_27B', 'MISTRAL_MINISTRAL_14B', 'GEMINI_FLASH_LITE_LATEST', 'GEMINI_25_FLASH_LITE', 'GEMINI_25_FLASH', 'GROQ_GPT_OSS_20B', 'NVIDIA_NEMOTRON_LIGHTNING', 'MISTRAL_SMALL', 'CEREBRAS_GPT_OSS_120B', 'GEMINI_35_FLASH'];
+
 const DEFAULT_TASK_MODEL_ALIASES: Record<ContextTask, string[]> = {
-  chat: ['G4', 'M27', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'GROQ_GPT_OSS_120B', 'CEREBRAS_70B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B', 'GROQ_LLAMA_8B', 'GEMINI_FLASH', 'GEMINI_15_FLASH'],
-  flashcards: ['G4', 'GLM5', 'GEMINI_25_FLASH', 'CEREBRAS_SCOUT', 'GEMINI_25_FLASH_LITE', 'GROQ_GPT_OSS_120B', 'CEREBRAS_70B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'GROQ_LLAMA_70B'],
-  mcq: ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
-  'adaptive-test': ['GLM5', 'G4', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
-  'revision-plan': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
-  'paper-evaluate': ['GLM5', 'M27', 'G4', 'GEMINI_25_PRO', 'GEMINI_25_FLASH', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
-  'chapter-pack': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
-  'chapter-drill': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
-  'chapter-diagnose': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
-  'chapter-remediate': ['G4', 'GLM5', 'GEMINI_25_FLASH', 'GEMINI_25_PRO', 'CEREBRAS_70B', 'GROQ_GPT_OSS_120B', 'MISTRAL_SMALL', 'GROQ_QWEN3_32B', 'CEREBRAS_SCOUT', 'GROQ_LLAMA_70B'],
+  chat: ['GEMINI_35_FLASH_LITE', 'GEMINI_31_FLASH_LITE', 'GROQ_QWEN38_27B', 'GROQ_GPT_OSS_120B', 'MISTRAL_MINISTRAL_14B', 'GEMINI_FLASH_LITE_LATEST', 'GEMINI_25_FLASH_LITE', 'GEMINI_25_FLASH', 'GROQ_GPT_OSS_20B', 'NVIDIA_NEMOTRON_LIGHTNING', 'MISTRAL_SMALL', 'CEREBRAS_GPT_OSS_120B', 'GEMINI_35_FLASH'],
+  flashcards: FAST_JSON_CHAIN,
+  mcq: FAST_JSON_CHAIN,
+  'adaptive-test': FAST_JSON_CHAIN,
+  'revision-plan': FAST_JSON_CHAIN,
+  'paper-evaluate': FAST_JSON_CHAIN,
+  'chapter-pack': FAST_JSON_CHAIN,
+  'chapter-drill': FAST_JSON_CHAIN,
+  'chapter-diagnose': FAST_JSON_CHAIN,
+  'chapter-remediate': FAST_JSON_CHAIN,
 };
 
 const MODEL_BY_ALIAS = new Map(REGISTERED_MODELS.map((model) => [model.alias.toUpperCase(), model]));
@@ -291,6 +253,10 @@ export function getTaskChatModelCandidates(task: ContextTask): LlmModelConfig[] 
   return aliases
     .map((alias) => getModelConfig(alias))
     .filter((model): model is LlmModelConfig => !!model && model.mode === 'chat');
+}
+
+export function listContextTasks(): ContextTask[] {
+  return [...CONTEXT_TASKS];
 }
 
 export function listRegisteredModels(): LlmModelConfig[] {

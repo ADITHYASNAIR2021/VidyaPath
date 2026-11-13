@@ -1,5 +1,5 @@
-import type { RequestAuthContext } from '@/lib/auth/guards';
-import { recordTokenUsageEvent } from '@/lib/platform-rbac-db';
+import { logger } from '@/lib/logger';
+import { recordAiTokens } from '@/lib/ai/usage-metrics';
 
 function estimateTokensFromText(text: string): number {
   const normalized = text.trim();
@@ -7,8 +7,8 @@ function estimateTokensFromText(text: string): number {
   return Math.max(1, Math.round(normalized.length / 4));
 }
 
+/** Structured log line per AI call (picked up by the hosting provider's log drain). */
 export async function logAiUsage(input: {
-  context: RequestAuthContext | null;
   endpoint: string;
   provider?: string;
   model?: string;
@@ -33,17 +33,20 @@ export async function logAiUsage(input: {
       ? Math.max(0, Math.round(input.totalTokens))
       : promptTokens + completionTokens;
 
-  await recordTokenUsageEvent({
-    schoolId: input.context?.schoolId,
-    authUserId: input.context?.authUserId,
-    role: input.context?.role,
-    endpoint: input.endpoint,
-    provider: input.provider || 'unknown',
-    model: input.model,
-    requestId: input.requestId,
-    promptTokens,
-    completionTokens,
-    totalTokens,
-    estimated: input.estimated ?? true,
-  });
+  recordAiTokens({ endpoint: input.endpoint, provider: input.provider || 'unknown', model: input.model, totalTokens });
+
+  logger.info(
+    {
+      event: 'ai_usage',
+      endpoint: input.endpoint,
+      provider: input.provider || 'unknown',
+      model: input.model,
+      requestId: input.requestId,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      estimated: input.estimated ?? true,
+    },
+    'ai usage'
+  );
 }

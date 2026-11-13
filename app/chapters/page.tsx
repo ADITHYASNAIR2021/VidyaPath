@@ -20,10 +20,10 @@ import Fuse from 'fuse.js';
 import { BOARD_CHAPTERS } from '@/lib/data';
 import type { Subject, ClassLevel } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
-import { fetchClientStudentSession } from '@/lib/client-student-session';
 import ChapterCard from '@/components/ChapterCard';
 import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
-import { useProgressStore } from '@/lib/store';
+import { useProgressStore, useStudentProfileStore } from '@/lib/store';
+import { trackAnalyticsEvent } from '@/lib/client-analytics';
 
 const SUBJECTS: { label: string; value: Subject | 'All'; icon: React.ElementType }[] = [
   { label: 'All', value: 'All', icon: SlidersHorizontal },
@@ -79,60 +79,18 @@ function ChaptersContent() {
   const [selectedSubject, setSelectedSubject] = useState<Subject | 'All'>(
     SUBJECTS.find((s) => s.value === initialSubject) ? initialSubject : 'All'
   );
-  const [sessionLoaded, setSessionLoaded] = useState(false);
-  const [studentSession, setStudentSession] = useState<{
-    isStudent: boolean;
-    classLevel?: ClassLevel;
-  }>({
-    isStudent: false,
-  });
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const trackedNoResultQueries = useRef(new Set<string>());
   const { studiedChapterIds } = useProgressStore();
 
+  // Preselect the student's class (saved locally via "My class") unless the URL chose one.
+  const profileClassLevel = useStudentProfileStore((state) => state.classLevel);
   useEffect(() => {
-    let active = true;
-    fetchClientStudentSession()
-      .then((session) => {
-        if (!active) return;
-        if (session?.studentId) {
-          const sessionClass = session.classLevel === 10 || session.classLevel === 12
-            ? session.classLevel
-            : undefined;
-          if (sessionClass) {
-            setSelectedClass(sessionClass);
-          }
-          setStudentSession({
-            isStudent: true,
-            classLevel: sessionClass,
-          });
-        } else {
-          setStudentSession({
-            isStudent: false,
-          });
-        }
-      })
-      .catch(() => {
-        if (!active) return;
-        setStudentSession({
-          isStudent: false,
-        });
-      })
-      .finally(() => {
-        if (active) setSessionLoaded(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [initialClass]);
+    if (!initialClass && profileClassLevel) setSelectedClass(profileClassLevel);
+  }, [initialClass, profileClassLevel]);
 
-  const classTabs = useMemo(() => {
-    if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
-      return CLASSES.filter((item) => item.value === studentSession.classLevel);
-    }
-    return CLASSES;
-  }, [studentSession.classLevel, studentSession.isStudent]);
+  const classTabs = CLASSES;
 
   const availableSubjects = useMemo(() => {
     const classScoped = BOARD_CHAPTERS.filter((chapter) => selectedClass === 0 || chapter.classLevel === selectedClass);
@@ -195,10 +153,6 @@ function ChaptersContent() {
 
   const filtered = useMemo(() => {
     const base = BOARD_CHAPTERS.filter((ch) => {
-      if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
-        if (ch.classLevel !== studentSession.classLevel) return false;
-      }
-      if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(ch.subject)) return false;
       if (selectedClass !== 0 && ch.classLevel !== selectedClass) return false;
       if (selectedSubject !== 'All' && ch.subject !== selectedSubject) return false;
       return true;
@@ -209,38 +163,11 @@ function ChaptersContent() {
 
     const filteredBySearch = base.filter((chapter) => searchOrder.has(chapter.id));
     return filteredBySearch.sort((a, b) => (searchOrder.get(a.id) ?? 9999) - (searchOrder.get(b.id) ?? 9999));
-  }, [deferredSearchQuery, searchOrder, selectedClass, selectedSubject, studentSession.classLevel, studentSession.isStudent]);
+  }, [deferredSearchQuery, searchOrder, selectedClass, selectedSubject]);
 
-  const headerScope = useMemo(() => {
-    if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
-      return `Class ${studentSession.classLevel} chapter library with PYQ insights, NCERT links, and guided practice.`;
-    }
-    return 'Class 10 and Class 12 chapter library with PYQ insights, NCERT links, and guided practice.';
-  }, [studentSession.classLevel, studentSession.isStudent]);
-
-  const headerTotalChapters = useMemo(() => {
-    if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
-      return BOARD_CHAPTERS.filter((chapter) => {
-        if (chapter.classLevel !== studentSession.classLevel) return false;
-        if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(chapter.subject)) return false;
-        return true;
-      }).length;
-    }
-    return BOARD_CHAPTERS.length;
-  }, [studentSession.classLevel, studentSession.isStudent]);
-
-  const studiedInScopeCount = useMemo(() => {
-    const allowedIds = new Set(
-      BOARD_CHAPTERS.filter((chapter) => {
-        if (studentSession.isStudent && (studentSession.classLevel === 10 || studentSession.classLevel === 12)) {
-          if (chapter.classLevel !== studentSession.classLevel) return false;
-          if (studentSession.classLevel === 10 && !CLASS10_PUBLIC_SUBJECTS.has(chapter.subject)) return false;
-        }
-        return true;
-      }).map((chapter) => chapter.id)
-    );
-    return studiedChapterIds.filter((id) => allowedIds.has(id)).length;
-  }, [studiedChapterIds, studentSession.classLevel, studentSession.isStudent]);
+  const headerScope = 'Class 10 and Class 12 chapter library with PYQ insights, NCERT links, and guided practice.';
+  const headerTotalChapters = BOARD_CHAPTERS.length;
+  const studiedInScopeCount = studiedChapterIds.length;
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -248,14 +175,7 @@ function ChaptersContent() {
     const key = `${selectedClass}|${selectedSubject}|${query.toLowerCase()}`;
     if (trackedNoResultQueries.current.has(key)) return;
     trackedNoResultQueries.current.add(key);
-    fetch('/api/analytics/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ eventName: 'search_no_result', query }),
-      keepalive: true,
-    }).catch(() => {
-      // best-effort only
-    });
+    trackAnalyticsEvent({ eventName: 'search_no_result', query });
   }, [filtered.length, searchQuery, selectedClass, selectedSubject]);
 
   const getPyqSearchInsight = (chapterId: string) => {
@@ -396,7 +316,7 @@ function ChaptersContent() {
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedClass(studentSession.classLevel === 10 || studentSession.classLevel === 12 ? studentSession.classLevel : 0);
+                    setSelectedClass(0);
                     setSelectedSubject('All');
                     setSearchQuery('');
                   }}
@@ -406,13 +326,6 @@ function ChaptersContent() {
                 </button>
               )}
             </div>
-            {sessionLoaded && studentSession.isStudent && (
-              <p className="mb-4 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-                {studentSession.classLevel === 10
-                  ? `Showing Class 10 core subjects: ${Array.from(CLASS10_PUBLIC_SUBJECTS).join(', ')}.`
-                  : 'Showing complete Class 12 chapter library. Use subject filters to narrow down.'}
-              </p>
-            )}
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filtered.map((chapter, i) => {
                 const pyqInsight = getPyqSearchInsight(chapter.id);

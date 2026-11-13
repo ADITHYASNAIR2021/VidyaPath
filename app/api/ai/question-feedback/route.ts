@@ -1,20 +1,21 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { recordQuestionOutcomes } from '@/lib/ai/question-history';
 import { recordAiQualityFeedback } from '@/lib/ai/quality-store';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { logger } from '@/lib/logger';
 import { questionFeedbackRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:question-feedback', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:question-feedback', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 30,
       blockSeconds: 120,
@@ -42,16 +43,12 @@ export async function POST(req: Request) {
 
     const payload = bodyResult.value;
     await recordQuestionOutcomes({
-      authUserId: context?.authUserId,
       chapterId: payload.chapterId,
       results: payload.results,
     });
 
     if (payload.issueType || payload.retrievalMiss === true || payload.hallucinationFlag === true) {
       await recordAiQualityFeedback({
-        schoolId: context?.schoolId,
-        authUserId: context?.authUserId,
-        role: context?.role,
         task: payload.task ?? 'unknown',
         chapterId: payload.chapterId,
         subject: payload.subject,
@@ -90,3 +87,5 @@ export async function POST(req: Request) {
     });
   }
 }
+
+export const POST = withAiMetrics('/api/ai/question-feedback', handlePost);

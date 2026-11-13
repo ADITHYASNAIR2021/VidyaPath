@@ -2,13 +2,53 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Search, Command, Book, ExternalLink } from 'lucide-react';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Fuse from 'fuse.js';
 import { ALL_CHAPTERS } from '@/lib/data';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const searchData = [
+  {
+    type: 'page',
+    id: 'ai-tools',
+    title: 'AI Study Hub',
+    subtitle: 'AI quizzes, flashcards, chapter diagnosis, image solver',
+    topics: 'ai quiz flashcards test generate practice doubt solver photo',
+    url: '/ai-tools',
+  },
+  {
+    type: 'page',
+    id: 'mock-exam',
+    title: 'Mock Exam',
+    subtitle: 'Timed board-style MCQ paper',
+    topics: 'mock exam test paper timed practice',
+    url: '/mock-exam',
+  },
+  {
+    type: 'page',
+    id: 'revision',
+    title: 'Revision Planner',
+    subtitle: 'Week-by-week plan from weak chapters',
+    topics: 'revision plan schedule weak chapters',
+    url: '/revision',
+  },
+  {
+    type: 'page',
+    id: 'review',
+    title: 'Flashcard Review',
+    subtitle: 'Spaced repetition across chapters',
+    topics: 'flashcards srs spaced repetition review due',
+    url: '/review',
+  },
+  {
+    type: 'page',
+    id: 'notes',
+    title: 'My Notes',
+    subtitle: 'Your private chapter notes',
+    topics: 'notes my notes write',
+    url: '/notes',
+  },
   {
     type: 'page',
     id: 'formulas',
@@ -52,12 +92,9 @@ export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const router = useRouter();
-  const pathname = usePathname();
-  const isExamRoute = pathname.startsWith('/exam/assignment/');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isExamRoute) return;
     const down = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
@@ -68,7 +105,7 @@ export default function CommandPalette() {
 
     document.addEventListener('keydown', down);
     return () => document.removeEventListener('keydown', down);
-  }, [isExamRoute]);
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -79,10 +116,6 @@ export default function CommandPalette() {
   }, [open]);
 
   const results = query ? fuse.search(query).map((entry) => entry.item).slice(0, 5) : searchData.slice(0, 4);
-
-  if (isExamRoute) {
-    return null;
-  }
 
   return (
     <>

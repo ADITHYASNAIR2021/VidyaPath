@@ -4,34 +4,29 @@ type TelemetryPayload = {
   eventName: string;
   chapterId?: string;
   query?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, string | number | boolean>;
 };
 
-const TRACK_ENDPOINT = '/api/analytics/track';
+type PlausibleFn = (event: string, options?: { props?: Record<string, string | number | boolean> }) => void;
+type UmamiTracker = { track: (event: string, data?: Record<string, string | number | boolean>) => void };
 
-function postWithBeacon(payload: TelemetryPayload): boolean {
-  if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') return false;
+/**
+ * Cookieless, account-free product analytics. Forwards custom events to Plausible
+ * or Umami when their script is configured (see PrivacyAnalytics); otherwise a no-op.
+ * Never sends personal data.
+ */
+export function trackAnalyticsEvent(payload: TelemetryPayload): void {
+  if (typeof window === 'undefined' || !payload?.eventName) return;
+  const props: Record<string, string | number | boolean> = { ...(payload.metadata ?? {}) };
+  if (payload.chapterId) props.chapterId = payload.chapterId;
+  if (payload.query) props.query = payload.query.slice(0, 80);
+
   try {
-    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-    return navigator.sendBeacon(TRACK_ENDPOINT, blob);
+    const plausible = (window as unknown as { plausible?: PlausibleFn }).plausible;
+    if (typeof plausible === 'function') plausible(payload.eventName, { props });
+    const umami = (window as unknown as { umami?: UmamiTracker }).umami;
+    if (umami && typeof umami.track === 'function') umami.track(payload.eventName, props);
   } catch {
-    return false;
+    // best-effort analytics; never block UX
   }
 }
-
-export function trackAnalyticsEvent(payload: TelemetryPayload): void {
-  if (typeof window === 'undefined') return;
-  if (!payload?.eventName) return;
-
-  if (postWithBeacon(payload)) return;
-
-  void fetch(TRACK_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    keepalive: true,
-  }).catch(() => {
-    // best-effort analytics; never block UX
-  });
-}
-

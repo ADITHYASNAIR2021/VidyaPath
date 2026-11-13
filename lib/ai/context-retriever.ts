@@ -22,6 +22,7 @@ import {
   type RetrievalSourceType,
 } from '@/lib/ai/retrieval-index';
 import { logger } from '@/lib/logger';
+import { sharedState } from '@/lib/runtime/shared-state';
 
 export type ContextTask =
   | 'chat'
@@ -131,27 +132,42 @@ const INDEX_PATHS = [
 ];
 const DATASET_ROOT = path.join(process.cwd(), 'dataset', 'cbse_papers');
 const INDEX_SCRIPT = path.join(process.cwd(), 'scripts', 'build_context_index.py');
-const CACHE_TTL_MS = 10 * 60 * 1000;
+// Artifacts never change while the server runs; only retry periodically if the load came back empty.
+const EMPTY_RETRY_MS = 5 * 60 * 1000;
 const EMBEDDING_DIM = 192;
 const DEFAULT_NVIDIA_EMBED_MODEL = 'nvidia/nemotron-3-embed-1b';
 const DEFAULT_NVIDIA_RERANK_MODEL = 'nvidia/llama-nemotron-rerank-1b-v2';
 const VECTOR_INDEX_PATH = path.join(CONTEXT_DIR, 'chunk_vectors.jsonl');
 const RETRIEVAL_INDEX_PATH = path.join(CONTEXT_DIR, 'retrieval_index.json');
-const PGVECTOR_UNAVAILABLE_COOLDOWN_MS = 5 * 60 * 1000;
 const DEFAULT_LOCAL_CANDIDATE_POOL = 48;
-const DEFAULT_PGVECTOR_CANDIDATE_POOL = 36;
 
-let cacheLoadedAt = 0;
-let cachedChunks: ContextChunk[] = [];
-let cachedIndex: ChapterIndexPayload = {};
-let cachedRetrievalIndex: RetrievalIndex | null = null;
-const chunkEmbeddingCache = new Map<string, Float32Array>();
-const persistedEmbeddingCache = new Map<string, Float32Array>();
-let persistedEmbeddingDim = EMBEDDING_DIM;
-let persistedEmbeddingKind: 'hashed-bow' | 'nvidia-e5' | 'onnx-minilm' = 'hashed-bow';
-let persistedEmbeddingModel = 'local-hashed-bow';
-let pgvectorUnavailableUntilMs = 0;
-let pgvectorMissingHintLogged = false;
+// RAG artifacts are static for the lifetime of a deployment. Keep a single copy per server
+// process (shared by every API route) instead of one copy per route bundle.
+interface RagCache {
+  loadedAt: number;
+  loading: Promise<void> | null;
+  chunks: ContextChunk[];
+  index: ChapterIndexPayload;
+  retrievalIndex: RetrievalIndex | null;
+  chunkEmbeddings: Map<string, Float32Array>;
+  persistedEmbeddings: Map<string, Float32Array>;
+  embeddingDim: number;
+  embeddingKind: 'hashed-bow' | 'nvidia-e5' | 'onnx-minilm';
+  embeddingModel: string;
+}
+
+const rag = sharedState<RagCache>('rag-cache', () => ({
+  loadedAt: 0,
+  loading: null,
+  chunks: [],
+  index: {},
+  retrievalIndex: null,
+  chunkEmbeddings: new Map(),
+  persistedEmbeddings: new Map(),
+  embeddingDim: EMBEDDING_DIM,
+  embeddingKind: 'hashed-bow',
+  embeddingModel: 'local-hashed-bow',
+}));
 
 function normalizeSubject(classLevel: number, subject: string): string {
   const s = subject.trim().toLowerCase();
@@ -306,7 +322,7 @@ function buildLocalEmbedding(text: string): Float32Array {
 }
 
 function supportsRemoteSemanticEmbeddings(): boolean {
-  return persistedEmbeddingKind === 'nvidia-e5' && persistedEmbeddingDim > 0;
+  return rag.embeddingKind === 'nvidia-e5' && rag.embeddingDim > 0;
 }
 
 async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
@@ -317,11 +333,11 @@ async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
         const { createNvidiaEmbeddings } = await import('@/lib/ai/nvidia-client');
         const [embedding] = await createNvidiaEmbeddings({
           apiKey: nvidiaKey,
-          model: persistedEmbeddingModel || DEFAULT_NVIDIA_EMBED_MODEL,
+          model: rag.embeddingModel || DEFAULT_NVIDIA_EMBED_MODEL,
           input: [text],
           inputType: 'query',
         });
-        if (Array.isArray(embedding) && embedding.length === persistedEmbeddingDim) {
+        if (Array.isArray(embedding) && embedding.length === rag.embeddingDim) {
           return Float32Array.from(embedding);
         }
         logger.warn('[context-retriever] NVIDIA embedding returned unexpected shape; falling back');
@@ -333,7 +349,7 @@ async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
       }
     }
   }
-  if (persistedEmbeddingKind === 'onnx-minilm') {
+  if (rag.embeddingKind === 'onnx-minilm') {
     // ONNX model execution is intentionally build-time only. Shipping the
     // transformer runtime in every serverless route adds hundreds of MB and
     // exceeds Vercel's function limit. Production semantic retrieval uses
@@ -430,7 +446,7 @@ function isCorruptedFontText(text: string): boolean {
 
 function inferChapterIdFromSource(sourcePath: string): string | undefined {
   const normalized = canonicalizeSourcePath(sourcePath);
-  const chapters = cachedIndex.chapters ?? {};
+  const chapters = rag.index.chapters ?? {};
   for (const [chapterId, sources] of Object.entries(chapters)) {
     if (sources.map((item) => canonicalizeSourcePath(item)).includes(normalized)) return chapterId;
   }
@@ -507,8 +523,18 @@ function mergeIndexPayload(base: ChapterIndexPayload, incoming: ChapterIndexPayl
 
 async function loadContextArtifacts(force = false): Promise<void> {
   const now = Date.now();
-  if (!force && now - cacheLoadedAt < CACHE_TTL_MS) return;
-  cacheLoadedAt = now;
+  const fresh = rag.loadedAt > 0 && (rag.chunks.length > 0 ? true : now - rag.loadedAt < EMPTY_RETRY_MS);
+  if (!force && fresh) return;
+  // Concurrent first requests share one load instead of each parsing ~100 MB of JSON.
+  if (rag.loading) return rag.loading;
+  rag.loading = loadContextArtifactsNow(now).finally(() => {
+    rag.loading = null;
+  });
+  return rag.loading;
+}
+
+async function loadContextArtifactsNow(now: number): Promise<void> {
+  rag.loadedAt = now;
 
   const cdnBaseUrl = (process.env.CONTEXT_CDN_URL || '').trim().replace(/\/+$/, '');
 
@@ -558,7 +584,7 @@ async function loadContextArtifacts(force = false): Promise<void> {
     ]);
 
     const seen = new Set<string>();
-    cachedChunks = chunkPayloads
+    rag.chunks = chunkPayloads
       .flatMap((payload) => payload.split('\n'))
       .map((line) => line.trim())
       .filter(Boolean)
@@ -600,11 +626,11 @@ async function loadContextArtifacts(force = false): Promise<void> {
         seen.add(dedupeKey);
         return true;
       });
-    chunkEmbeddingCache.clear();
-    persistedEmbeddingCache.clear();
-    persistedEmbeddingDim = EMBEDDING_DIM;
-    persistedEmbeddingKind = 'hashed-bow';
-    persistedEmbeddingModel = 'local-hashed-bow';
+    rag.chunkEmbeddings.clear();
+    rag.persistedEmbeddings.clear();
+    rag.embeddingDim = EMBEDDING_DIM;
+    rag.embeddingKind = 'hashed-bow';
+    rag.embeddingModel = 'local-hashed-bow';
     if (vectorPayload.trim().length > 0) {
       for (const rawLine of vectorPayload.split('\n')) {
         const line = rawLine.trim();
@@ -619,11 +645,11 @@ async function loadContextArtifacts(force = false): Promise<void> {
           if (!parsed.id || !Array.isArray(parsed.embedding)) continue;
           if (parsed.embedding.length === 0) continue;
           const vec = new Float32Array(parsed.embedding);
-          persistedEmbeddingCache.set(parsed.id, vec);
-          if (persistedEmbeddingCache.size === 1) {
-            persistedEmbeddingDim = vec.length;
-            persistedEmbeddingKind = parsed.embeddingKind === 'nvidia-e5' ? 'nvidia-e5' : parsed.embeddingKind === 'onnx-minilm' ? 'onnx-minilm' : 'hashed-bow';
-            persistedEmbeddingModel = parsed.embeddingModel?.trim() || (persistedEmbeddingKind === 'nvidia-e5' ? DEFAULT_NVIDIA_EMBED_MODEL : persistedEmbeddingKind === 'onnx-minilm' ? 'Xenova/all-MiniLM-L6-v2' : 'local-hashed-bow');
+          rag.persistedEmbeddings.set(parsed.id, vec);
+          if (rag.persistedEmbeddings.size === 1) {
+            rag.embeddingDim = vec.length;
+            rag.embeddingKind = parsed.embeddingKind === 'nvidia-e5' ? 'nvidia-e5' : parsed.embeddingKind === 'onnx-minilm' ? 'onnx-minilm' : 'hashed-bow';
+            rag.embeddingModel = parsed.embeddingModel?.trim() || (rag.embeddingKind === 'nvidia-e5' ? DEFAULT_NVIDIA_EMBED_MODEL : rag.embeddingKind === 'onnx-minilm' ? 'Xenova/all-MiniLM-L6-v2' : 'local-hashed-bow');
           }
         } catch {
           continue;
@@ -631,7 +657,7 @@ async function loadContextArtifacts(force = false): Promise<void> {
       }
     }
 
-    cachedIndex = indexPayloads.reduce<ChapterIndexPayload>((acc, raw) => {
+    rag.index = indexPayloads.reduce<ChapterIndexPayload>((acc, raw) => {
       try {
         const parsed = JSON.parse(raw.replace(/^\uFEFF/, '')) as ChapterIndexPayload;
         return mergeIndexPayload(acc, parsed);
@@ -640,29 +666,29 @@ async function loadContextArtifacts(force = false): Promise<void> {
       }
     }, {});
 
-    cachedRetrievalIndex = null;
+    rag.retrievalIndex = null;
     if (retrievalIndexPayload.trim().length > 0) {
       try {
         const parsed = JSON.parse(retrievalIndexPayload.replace(/^\uFEFF/, '')) as RetrievalIndex;
         if (Array.isArray(parsed.docs) && parsed.docs.length > 0) {
-          cachedRetrievalIndex = parsed;
+          rag.retrievalIndex = parsed;
         }
       } catch {
-        cachedRetrievalIndex = null;
+        rag.retrievalIndex = null;
       }
     }
-    if (!cachedRetrievalIndex) {
-      cachedRetrievalIndex = buildRetrievalIndex(cachedChunks, (chapterId) => getChapterById(chapterId));
+    if (!rag.retrievalIndex) {
+      rag.retrievalIndex = buildRetrievalIndex(rag.chunks, (chapterId) => getChapterById(chapterId));
     }
   } catch (error) {
     logger.error({ err: error }, '[context-retriever] Failed to load context artifacts');
-    cachedChunks = [];
-    cachedIndex = {};
-    cachedRetrievalIndex = null;
+    rag.chunks = [];
+    rag.index = {};
+    rag.retrievalIndex = null;
   }
 
   // ── Degraded-mode warning: if no chunks loaded, log it clearly ──
-  if (cachedChunks.length === 0) {
+  if (rag.chunks.length === 0) {
     logger.warn(
       '[context-retriever] No context chunks loaded — RAG retrieval is degraded. ' +
       'Run `npm run build:rag` to rebuild context files. ' +
@@ -675,15 +701,15 @@ async function loadContextArtifacts(force = false): Promise<void> {
 
 export function getRetrievalStats() {
   return {
-    chunkCount: cachedChunks.length,
-    chapterCount: Object.keys(cachedIndex).length,
-    hasVectors: persistedEmbeddingCache.size > 0,
-    hasRetrievalIndex: !!cachedRetrievalIndex,
-    embeddingKind: persistedEmbeddingKind,
-    embeddingDim: persistedEmbeddingDim,
-    embeddingModel: persistedEmbeddingModel,
-    degraded: cachedChunks.length === 0,
-    lastLoadedAt: cacheLoadedAt,
+    chunkCount: rag.chunks.length,
+    chapterCount: Object.keys(rag.index).length,
+    hasVectors: rag.persistedEmbeddings.size > 0,
+    hasRetrievalIndex: !!rag.retrievalIndex,
+    embeddingKind: rag.embeddingKind,
+    embeddingDim: rag.embeddingDim,
+    embeddingModel: rag.embeddingModel,
+    degraded: rag.chunks.length === 0,
+    lastLoadedAt: rag.loadedAt,
   };
 }
 
@@ -718,17 +744,17 @@ function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: 
   }
 
   if (queryEmbedding !== null) {
-    let chunkEmbedding = chunkEmbeddingCache.get(chunk.id);
+    let chunkEmbedding = rag.chunkEmbeddings.get(chunk.id);
     if (!chunkEmbedding) {
-      chunkEmbedding = persistedEmbeddingCache.get(chunk.id) ?? buildLocalEmbedding(chunk.text);
-      chunkEmbeddingCache.set(chunk.id, chunkEmbedding);
+      chunkEmbedding = rag.persistedEmbeddings.get(chunk.id) ?? buildLocalEmbedding(chunk.text);
+      rag.chunkEmbeddings.set(chunk.id, chunkEmbedding);
     }
     if (chunkEmbedding.length !== queryEmbedding.length) {
       chunkEmbedding = buildLocalEmbedding(chunk.text);
-      chunkEmbeddingCache.set(chunk.id, chunkEmbedding);
+      rag.chunkEmbeddings.set(chunk.id, chunkEmbedding);
     }
     const semantic = cosineSimilarity(chunkEmbedding, queryEmbedding);
-    const semanticWeight = persistedEmbeddingKind === 'nvidia-e5' ? 24 : persistedEmbeddingKind === 'onnx-minilm' ? 20 : 12;
+    const semanticWeight = rag.embeddingKind === 'nvidia-e5' ? 24 : rag.embeddingKind === 'onnx-minilm' ? 20 : 12;
     score += Math.max(0, semantic) * semanticWeight;
   }
 
@@ -768,18 +794,18 @@ function applyMMR(
       const normScore = (remaining[i].score - minScore) / scoreRange;
       let maxSim = 0;
       if (selected.length > 0) {
-        let candEmb = chunkEmbeddingCache.get(remaining[i].chunk.id) ?? persistedEmbeddingCache.get(remaining[i].chunk.id);
+        let candEmb = rag.chunkEmbeddings.get(remaining[i].chunk.id) ?? rag.persistedEmbeddings.get(remaining[i].chunk.id);
         if (!candEmb) {
           candEmb = buildLocalEmbedding(remaining[i].chunk.text);
-          chunkEmbeddingCache.set(remaining[i].chunk.id, candEmb);
+          rag.chunkEmbeddings.set(remaining[i].chunk.id, candEmb);
         }
         for (const sel of selected) {
-          let selEmb = chunkEmbeddingCache.get(sel.chunk.id) ?? persistedEmbeddingCache.get(sel.chunk.id) ?? buildLocalEmbedding(sel.chunk.text);
+          let selEmb = rag.chunkEmbeddings.get(sel.chunk.id) ?? rag.persistedEmbeddings.get(sel.chunk.id) ?? buildLocalEmbedding(sel.chunk.text);
           if (candEmb.length !== selEmb.length) {
             candEmb = buildLocalEmbedding(remaining[i].chunk.text);
             selEmb = buildLocalEmbedding(sel.chunk.text);
-            chunkEmbeddingCache.set(remaining[i].chunk.id, candEmb);
-            chunkEmbeddingCache.set(sel.chunk.id, selEmb);
+            rag.chunkEmbeddings.set(remaining[i].chunk.id, candEmb);
+            rag.chunkEmbeddings.set(sel.chunk.id, selEmb);
           }
           const sim = cosineSimilarity(candEmb, selEmb);
           if (sim > maxSim) maxSim = sim;
@@ -794,30 +820,14 @@ function applyMMR(
   return selected;
 }
 
-function shouldUseNvidiaRerank(query: ContextQuery): boolean {
+function shouldUseNvidiaRerankByConfig(): boolean {
   if (process.env.AI_ENABLE_NVIDIA_RERANK === '0') return false;
-  if (!query.query || !query.query.trim()) return false;
   return isUsableNvidiaApiKey(process.env.NVIDIA_API_KEY);
 }
 
-function isPgvectorEnabled(): boolean {
-  return process.env.AI_ENABLE_PGVECTOR_RAG === '1'
-    && process.env.AI_PGVECTOR_RUNTIME_READY !== '0';
-}
-
-function isPgvectorMissingError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /match_document_embeddings|document_embeddings|42P01|does not exist|PGRST|HTTP 404/i.test(message);
-}
-
-function markPgvectorTemporarilyUnavailable(reason: string): void {
-  pgvectorUnavailableUntilMs = Date.now() + PGVECTOR_UNAVAILABLE_COOLDOWN_MS;
-  if (pgvectorMissingHintLogged) return;
-  pgvectorMissingHintLogged = true;
-  logger.warn(
-    { reason, retryAfterMinutes: Math.round(PGVECTOR_UNAVAILABLE_COOLDOWN_MS / 60000) },
-    '[context-retriever] pgvector unavailable',
-  );
+function shouldUseNvidiaRerank(query: ContextQuery): boolean {
+  if (!query.query || !query.query.trim()) return false;
+  return shouldUseNvidiaRerankByConfig();
 }
 
 function coerceRerankCandidates(value: unknown): RerankIndexCandidate[] {
@@ -864,12 +874,27 @@ function extractRerankOrder(payload: unknown, passageCount: number): number[] {
   return order;
 }
 
+const RERANK_DISABLE_MS = 6 * 60 * 60 * 1000;
+const rerankBreaker = sharedState('rerank-breaker', () => ({ until: 0, reason: '' }));
+
+/** Reranker state for the developer console. */
+export function getRerankStatus(): { enabled: boolean; model: string; pausedUntil: string | null; reason: string | null } {
+  const enabledByConfig = shouldUseNvidiaRerankByConfig();
+  const paused = Date.now() < rerankBreaker.until;
+  return {
+    enabled: enabledByConfig && !paused,
+    model: (process.env.AI_RERANK_MODEL || DEFAULT_NVIDIA_RERANK_MODEL).trim() || DEFAULT_NVIDIA_RERANK_MODEL,
+    pausedUntil: paused ? new Date(rerankBreaker.until).toISOString() : null,
+    reason: paused ? rerankBreaker.reason : null,
+  };
+}
+
 async function rerankContextSnippets(query: ContextQuery, snippets: ContextSnippet[]): Promise<ContextSnippet[]> {
   const apiKey = process.env.NVIDIA_API_KEY;
   const queryText = query.query?.trim() || '';
   if (!queryText || snippets.length < 2) return snippets;
 
-  if (isUsableNvidiaApiKey(apiKey)) {
+  if (isUsableNvidiaApiKey(apiKey) && Date.now() >= rerankBreaker.until) {
     const model = (process.env.AI_RERANK_MODEL || DEFAULT_NVIDIA_RERANK_MODEL).trim() || DEFAULT_NVIDIA_RERANK_MODEL;
     try {
       const payload = await rerankWithNvidia({
@@ -883,7 +908,14 @@ async function rerankContextSnippets(query: ContextQuery, snippets: ContextSnipp
         return applyRerankOrder(snippets, order);
       }
     } catch (error) {
-      logger.warn({ err: error }, '[context-retriever] NVIDIA reranker failed, falling back to keyword-overlap ordering');
+      // A retired/unknown rerank model (404/410) or bad key (401/403) will keep failing;
+      // pause reranking instead of paying for the failed call on every request.
+      const status = Number(String(error).match(/failed: (\d{3})/)?.[1] || 0);
+      if ([401, 403, 404, 410].includes(status)) {
+        rerankBreaker.until = Date.now() + RERANK_DISABLE_MS;
+        rerankBreaker.reason = `${model}: HTTP ${status}`;
+      }
+      logger.warn({ err: String(error).slice(0, 300), status }, '[context-retriever] NVIDIA reranker failed, falling back to keyword-overlap ordering');
     }
   }
 
@@ -939,9 +971,9 @@ function normalizeSnippetSourceType(sourceType?: RetrievalSourceType): 'paper' |
 }
 
 function getRetrievalIndex(): RetrievalIndex {
-  if (cachedRetrievalIndex) return cachedRetrievalIndex;
-  cachedRetrievalIndex = buildRetrievalIndex(cachedChunks, (chapterId) => getChapterById(chapterId));
-  return cachedRetrievalIndex;
+  if (rag.retrievalIndex) return rag.retrievalIndex;
+  rag.retrievalIndex = buildRetrievalIndex(rag.chunks, (chapterId) => getChapterById(chapterId));
+  return rag.retrievalIndex;
 }
 
 function resolveCandidatePoolSize(topK: number, ceiling = 72): number {
@@ -959,7 +991,7 @@ function buildSnippetDedupeKey(snippet: ContextSnippet): string {
 }
 
 function getChunkById(chunkId: string): ContextChunk | undefined {
-  return cachedChunks.find((chunk) => chunk.id === chunkId);
+  return rag.chunks.find((chunk) => chunk.id === chunkId);
 }
 
 function retrievalDocumentToSnippet(doc: RetrievalDocument): ContextSnippet {
@@ -1064,14 +1096,14 @@ function selectFallbackSource(query: ContextQuery): string | null {
     return 1;
   };
 
-  const chapterSources = query.chapterId ? cachedIndex.chapters?.[query.chapterId] ?? [] : [];
+  const chapterSources = query.chapterId ? rag.index.chapters?.[query.chapterId] ?? [] : [];
   const normalizedChapterSources = Array.from(new Set(chapterSources.map((item) => canonicalizeSourcePath(item))))
     .sort((a, b) => sourcePriority(a) - sourcePriority(b));
   if (normalizedChapterSources.length > 0) return normalizedChapterSources[0];
 
   const normalizedSubject = normalizeSubject(query.classLevel, query.subject);
   const key = `${query.classLevel}|${normalizedSubject}`;
-  const subjectSources = cachedIndex.sourcesBySubjectClass?.[key] ?? [];
+  const subjectSources = rag.index.sourcesBySubjectClass?.[key] ?? [];
   const normalizedSubjectSources = Array.from(new Set(subjectSources.map((item) => canonicalizeSourcePath(item))))
     .sort((a, b) => sourcePriority(a) - sourcePriority(b));
   if (normalizedSubjectSources.length > 0) return normalizedSubjectSources[0];
@@ -1091,24 +1123,24 @@ async function appendChunkToCache(chunk: ContextChunk): Promise<void> {
   try {
     await fs.mkdir(CONTEXT_DIR, { recursive: true });
     await fs.appendFile(CHUNK_PATHS[0], line, 'utf-8');
-    cachedChunks.push(normalizedChunk);
+    rag.chunks.push(normalizedChunk);
 
     if (normalizedChunk.chapterId) {
-      const chapters = (cachedIndex.chapters ??= {});
+      const chapters = (rag.index.chapters ??= {});
       const current = chapters[normalizedChunk.chapterId] ?? [];
       if (!current.map((item) => canonicalizeSourcePath(item)).includes(normalizedChunk.sourcePath)) {
         chapters[normalizedChunk.chapterId] = [...current, normalizedChunk.sourcePath].slice(0, 12);
       }
     }
 
-    const sources = (cachedIndex.sourcesBySubjectClass ??= {});
+    const sources = (rag.index.sourcesBySubjectClass ??= {});
     const key = `${normalizedChunk.classLevel}|${normalizeSubject(normalizedChunk.classLevel, normalizedChunk.subject)}`;
     const existing = sources[key] ?? [];
     if (!existing.map((item) => canonicalizeSourcePath(item)).includes(normalizedChunk.sourcePath)) {
       sources[key] = [...existing, normalizedChunk.sourcePath].slice(0, 40);
     }
 
-    await fs.writeFile(INDEX_PATHS[0], JSON.stringify(cachedIndex, null, 2), 'utf-8');
+    await fs.writeFile(INDEX_PATHS[0], JSON.stringify(rag.index, null, 2), 'utf-8');
   } catch (error) {
     logger.error({ err: error }, '[context-retriever] Failed to write-through chunk cache');
   }
@@ -1206,166 +1238,6 @@ async function getOnDemandSnippet(query: ContextQuery): Promise<ContextSnippet |
   };
 }
 
-// ── pgvector retrieval (when document_embeddings table is populated) ──────────
-
-interface PgvectorRow {
-  id: string;
-  text: string;
-  source_path: string;
-  class_level: number;
-  subject: string;
-  source_type: string;
-  chapter_id: string | null;
-  year: number | null;
-  paper_type: string | null;
-  similarity: number;
-}
-
-async function getPgvectorSnippets(query: ContextQuery): Promise<ContextSnippet[] | null> {
-  if (!isPgvectorEnabled()) return null;
-  if (Date.now() < pgvectorUnavailableUntilMs) return null;
-
-  const geminiKey = process.env.GEMINI_API_KEY?.trim();
-
-  try {
-    const [
-      { isSupabaseServiceConfigured, supabaseRpc },
-      { createGeminiRetrievalEmbeddings, isUsableGeminiApiKey },
-    ] = await Promise.all([
-      import('@/lib/supabase-rest'),
-      import('@/lib/ai/gemini-embeddings'),
-    ]);
-    if (!isSupabaseServiceConfigured() || !isUsableGeminiApiKey(geminiKey)) return null;
-
-    const pyqForHyDE = query.chapterId ? getPYQData(query.chapterId) : null;
-    const expandedQuery = expandRetrievalQuery({
-      query: query.query ?? '',
-      subject: query.subject,
-      classLevel: query.classLevel,
-      chapterTitle: query.chapterId ? getChapterById(query.chapterId)?.title : undefined,
-      chapterTopics: query.chapterTopics ?? [],
-      pyqTopics: pyqForHyDE?.importantTopics ?? [],
-    });
-    const queryText = (
-      await buildHyDEQuery(
-        expandedQuery,
-        query.subject,
-        query.classLevel,
-        query.chapterTopics ?? [],
-        pyqForHyDE?.importantTopics ?? [],
-        query.chapterId ? getChapterById(query.chapterId)?.title : undefined
-      )
-    ).slice(0, 2048);
-
-    const [embedding] = await createGeminiRetrievalEmbeddings({
-      apiKey: geminiKey,
-      input: [queryText],
-      taskType: 'RETRIEVAL_QUERY',
-      dimensions: 1024,
-    });
-    if (!embedding || embedding.length !== 1024) return null;
-
-    const topK = Math.max(1, Math.min(14, query.topK ?? 4));
-    const candidatePoolSize = resolveCandidatePoolSize(topK, 64);
-    const rows = await supabaseRpc<PgvectorRow[]>('match_document_embeddings', {
-      query_embedding: `[${embedding.join(',')}]`,
-      match_count: candidatePoolSize,
-      filter_class: query.classLevel,
-      filter_subject: normalizeSubject(query.classLevel, query.subject),
-      filter_chapter: query.chapterId ?? null,
-    });
-
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-
-    const pgSnippets: ContextSnippet[] = [];
-    const seenKeys = new Set<string>();
-    for (const row of rows) {
-      const text = sanitizeChunkText(row.text).slice(0, 1600);
-      if (!isHighQualityChunk(text)) continue;
-      const dedupeKey = `${row.source_path}|${text.slice(0, 260).toLowerCase()}`;
-      if (seenKeys.has(dedupeKey)) continue;
-      seenKeys.add(dedupeKey);
-      pgSnippets.push({
-        id: row.id,
-        text,
-        sourcePath: canonicalizeSourcePath(row.source_path),
-        classLevel: row.class_level,
-        subject: row.subject,
-        sourceType: normalizeSnippetSourceType(row.source_type as RetrievalSourceType),
-        chapterId: row.chapter_id ?? undefined,
-        year: row.year ?? undefined,
-        paperType: row.paper_type as PaperType | undefined,
-        modalityHints: inferModalityHints(text, normalizeSnippetSourceType(row.source_type as RetrievalSourceType)),
-        relevanceScore: Number((row.similarity * 100).toFixed(2)),
-      });
-    }
-    if (pgSnippets.length > 0) {
-      await loadContextArtifacts();
-      const retrievalIndex = getRetrievalIndex();
-      const topicFocus = findTopicFocus(retrievalIndex, {
-        classLevel: query.classLevel,
-        subject: normalizeSubject(query.classLevel, query.subject),
-        chapterId: query.chapterId,
-        queryText,
-        maxTopics: 4,
-      }).map((entry) => entry.topic);
-      const sparseDocs = searchBm25Documents(retrievalIndex, `${queryText} ${topicFocus.join(' ')}`.trim(), {
-        classLevel: query.classLevel,
-        subject: normalizeSubject(query.classLevel, query.subject),
-        chapterId: query.chapterId,
-        includeKinds: ['chunk'],
-        maxResults: candidatePoolSize,
-      });
-      const wantsVisual = needsVisualRetrieval(query.query ?? queryText, query.task, query.chapterTopics ?? []);
-      const visualDocs = wantsVisual
-        ? searchBm25Documents(retrievalIndex, `${queryText} ${topicFocus.join(' ')}`.trim(), {
-            classLevel: query.classLevel,
-            subject: normalizeSubject(query.classLevel, query.subject),
-            chapterId: query.chapterId,
-            includeKinds: ['visual', 'chunk'],
-            maxResults: Math.max(6, topK * 2),
-          }).filter((entry) => entry.doc.kind === 'visual' || entry.doc.modalityHints.includes('diagram'))
-        : [];
-
-      const fused = reciprocalRankFusion<ContextSnippet>([
-        pgSnippets.map((snippet) => ({ item: snippet, score: snippet.relevanceScore })),
-        sparseDocs.map((entry) => ({
-          item: retrievalDocumentToSnippet(entry.doc),
-          score: entry.score * 10,
-        })),
-        visualDocs.map((entry) => ({
-          item: retrievalDocumentToSnippet(entry.doc),
-          score: entry.score * 12,
-        })),
-      ]);
-
-      const fusedSnippets: ContextSnippet[] = [];
-      const fusedSeen = new Set<string>();
-      for (const entry of fused) {
-        const snippet = {
-          ...entry.item,
-          relevanceScore: Number((Math.max(entry.item.relevanceScore || 0, entry.score * 1000)).toFixed(2)),
-        };
-        const dedupeKey = buildSnippetDedupeKey(snippet);
-        if (fusedSeen.has(dedupeKey)) continue;
-        fusedSeen.add(dedupeKey);
-        fusedSnippets.push(snippet);
-        if (fusedSnippets.length >= Math.max(topK * 2, 12)) break;
-      }
-
-      pgvectorUnavailableUntilMs = 0;
-      pgvectorMissingHintLogged = false;
-      return fusedSnippets;
-    }
-    return null;
-  } catch (error) {
-    if (isPgvectorMissingError(error)) {
-      markPgvectorTemporarilyUnavailable('missing table or RPC function');
-    }
-    return null;
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getContextPack(query: ContextQuery): Promise<ContextPack> {
@@ -1457,7 +1329,7 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     correctiveActions: string[] = []
   ): Promise<ContextPack> => {
     const localDenseStrategy = supportsRemoteSemanticEmbeddings() ? 'local-dense-nvidia' : 'local-lexical-hash';
-    const subjectScoped = cachedChunks.filter((chunk) => {
+    const subjectScoped = rag.chunks.filter((chunk) => {
       if (chunk.classLevel !== query.classLevel) return false;
       if (normalizeSubject(chunk.classLevel, chunk.subject) !== normalizedSubject) return false;
       return isHighQualityChunk(chunk.text);
@@ -1604,37 +1476,6 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     localCorrective && (localCorrective.retrievalMeta?.confidence ?? 0) > (localPrimary.retrievalMeta?.confidence ?? 0)
       ? localCorrective
       : localPrimary;
-
-  const pgSnippets = await getPgvectorSnippets({ ...query, topK });
-  if (pgSnippets && pgSnippets.length > 0) {
-    const rerankPool = pgSnippets.slice(0, Math.max(topK * 2, 12));
-    const reranked = shouldUseNvidiaRerank(query)
-      ? await rerankContextSnippets(query, rerankPool).catch(() => rerankPool)
-      : rerankPool;
-    const selected = reranked.slice(0, topK);
-    const compressed = await compressContextSnippets(selected, focusText, query);
-    const pgPack: ContextPack = {
-      snippets: compressed,
-      contextHash: buildContextHash(compressed),
-      usedOnDemandFallback: false,
-      usedPgvector: true,
-      retrievalMeta: buildRetrievalMeta(compressed, query.chapterId, {
-        queryText: focusText,
-        topicFocus,
-        correctiveActions: [],
-        strategies: unique([
-          'pgvector-dense',
-          'contextual-bm25',
-          'rank-fusion',
-          'topic-hierarchy',
-          wantsVisual ? 'visual-retrieval' : '',
-        ]).filter(Boolean),
-      }),
-    };
-    if ((pgPack.retrievalMeta?.confidence ?? 0) >= (bestLocal.retrievalMeta?.confidence ?? 0)) {
-      return pgPack;
-    }
-  }
 
   return bestLocal;
 }

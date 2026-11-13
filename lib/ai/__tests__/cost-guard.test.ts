@@ -1,80 +1,63 @@
 /**
- * Unit tests for lib/ai/cost-guard.ts
+ * Unit tests for lib/ai/cost-guard.ts (public platform: global daily budget, memory fallback).
  */
-import { describe, expect, it, vi } from 'vitest';
-import { checkAiTokenBudget, type TokenBudgetResult } from '@/lib/ai/cost-guard';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/supabase-rest', () => {
-  const counters = new Map<string, { value: string; updated_at: string }>();
+const originalBudget = process.env.AI_DAILY_TOKEN_BUDGET_GLOBAL;
 
-  return {
-    supabaseSelect: vi.fn(async (_table: string, query: { filters?: Array<{ value: string }> }) => {
-      const key = query.filters?.[0]?.value;
-      const row = key ? counters.get(key) : undefined;
-      return row ? [row] : [];
-    }),
-    supabaseInsert: vi.fn(async (_table: string, row: { key: string; value: string; updated_at: string }) => {
-      counters.set(row.key, { value: row.value, updated_at: row.updated_at });
-      return [row];
-    }),
-    supabaseUpdate: vi.fn(
-      async (
-        _table: string,
-        row: { value: string; updated_at: string },
-        filters: Array<{ value: string }>,
-      ) => {
-        const key = filters[0]?.value;
-        if (key) counters.set(key, row);
-        return [row];
-      },
-    ),
-  };
+afterEach(() => {
+  if (originalBudget === undefined) delete process.env.AI_DAILY_TOKEN_BUDGET_GLOBAL;
+  else process.env.AI_DAILY_TOKEN_BUDGET_GLOBAL = originalBudget;
+  vi.resetModules();
 });
+
+async function loadGuard() {
+  // Counters live in process-wide shared state; start every test from a clean slate.
+  delete (globalThis as Record<string, unknown>).__vidyapathRuntimeState__;
+  delete process.env.UPSTASH_REDIS_REST_URL;
+  delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  return import('@/lib/ai/cost-guard');
+}
 
 describe('checkAiTokenBudget', () => {
   it('rejects requests above AI_MAX_TOKENS_PER_REQUEST (default 4000)', async () => {
-    const result = await checkAiTokenBudget({
-      schoolId: null,
-      requestedTokens: 99_999,
-    });
+    const { checkAiTokenBudget } = await loadGuard();
+    const result = await checkAiTokenBudget({ requestedTokens: 99_999 });
     expect(result.allowed).toBe(false);
     expect(result.reason).toBe('per-request-cap');
     expect(result.remaining).toBe(0);
   });
 
-  it('accepts rich route input and computes requested token estimate internally', async () => {
-    const projectedInputText = 'Electrostatics derivation for potential due to dipole.';
+  it('estimates tokens from projected input and output', async () => {
+    const { checkAiTokenBudget } = await loadGuard();
     const result = await checkAiTokenBudget({
-      context: { schoolId: 'sch_test' },
       endpoint: '/api/chapter-pack',
-      projectedInputText,
+      projectedInputText: 'Electrostatics derivation for potential due to dipole.',
       projectedOutputTokens: 1200,
     });
-
-    expect(typeof result.allowed).toBe('boolean');
+    expect(result.allowed).toBe(true);
     expect(result.requested).toBeGreaterThan(1200);
-    expect(result.reason ?? 'ok').not.toBe('per-request-cap');
   });
 
-  it('uses backward-compatible legacy shape', async () => {
-    const result: TokenBudgetResult = await checkAiTokenBudget({
-      requestedTokens: 200,
-    });
-    expect('allowed' in result).toBe(true);
-    expect('remaining' in result).toBe(true);
-    expect('requested' in result).toBe(true);
-    expect('limit' in result).toBe(true);
-    expect(result.requested).toBe(200);
+  it('blocks once the global daily budget is spent', async () => {
+    process.env.AI_DAILY_TOKEN_BUDGET_GLOBAL = '10000';
+    const { checkAiTokenBudget } = await loadGuard();
+    for (let i = 0; i < 3; i += 1) {
+      const ok = await checkAiTokenBudget({ requestedTokens: 3000 });
+      expect(ok.allowed).toBe(true);
+    }
+    const blocked = await checkAiTokenBudget({ requestedTokens: 3000 });
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.reason).toBe('global-daily-budget');
   });
 
   it('handles missing numeric token fields without NaN', async () => {
+    const { checkAiTokenBudget } = await loadGuard();
     const result = await checkAiTokenBudget({
-      context: { schoolId: 'sch_test' },
       endpoint: '/api/test',
       projectedInputText: '',
       projectedOutputTokens: Number.NaN,
     });
-    expect(result).toBeDefined();
     expect(Number.isFinite(result.requested)).toBe(true);
     expect(result.requested).toBeGreaterThanOrEqual(1);
   });

@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
-import { isAuthExperiencePath } from '@/lib/ui/layout-shell';
 import { Timer, X, Play, Pause, RotateCcw, Coffee, BookOpen, Volume2, VolumeX } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -96,11 +95,8 @@ export default function FloatingPomodoro({ chapterTitle, pyqStats }: FloatingPom
     : ((5 * 60 - timeLeft) / (5 * 60)) * 100;
 
   const timeDisplay = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  const isExamRoute = pathname.startsWith('/exam/');
-  const isAuthRoute = isAuthExperiencePath(pathname);
   const isChapterRoute = pathname.startsWith('/chapters/');
 
-  if (isAuthRoute || isExamRoute) return null;
   if (!chapterTitle && isChapterRoute) return null;
 
   return (

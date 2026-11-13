@@ -1,3 +1,4 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
 import { getChapterById } from '@/lib/data';
@@ -7,7 +8,7 @@ import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { isFlashcardArray, normalizeFlashcards, type FlashcardItem } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -94,14 +95,14 @@ function isFlashcardAlignedToChapter(card: FlashcardItem, chapterTitle: string, 
   return cardTokens.some((token) => chapterTokens.has(token));
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:flashcards', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:flashcards', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 15,
       blockSeconds: 120,
@@ -130,7 +131,6 @@ export async function POST(req: Request) {
     const cardCount = Math.min(15, Math.max(3, Number(body.cardCount) || 10));
 
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/generate-flashcards',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 2500,
@@ -255,7 +255,6 @@ Rules:
     }
 
     await logAiUsage({
-      context,
       endpoint: '/api/generate-flashcards',
       provider: result.provider,
       model: result.model,
@@ -293,3 +292,5 @@ Rules:
     });
   }
 }
+
+export const POST = withAiMetrics('/api/generate-flashcards', handlePost);

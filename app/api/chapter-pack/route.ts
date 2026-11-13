@@ -1,3 +1,4 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { getChapterById } from '@/lib/data';
 import { getFrequencyLabel, getPYQData } from '@/lib/pyq';
 import { getGroundedFrequencyLabel, getGroundedPYQData } from '@/lib/pyq-grounded';
@@ -12,7 +13,7 @@ import {
   stripSourceTags,
   type ChapterPackResponse,
 } from '@/lib/ai/validators';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -93,14 +94,14 @@ function filterTopicsForChapter(candidates: string[], chapterTitle: string, chap
   return aligned.slice(0, 8);
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:chapter-pack', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:chapter-pack', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 16,
       blockSeconds: 120,
@@ -136,7 +137,6 @@ export async function POST(req: Request) {
       });
     }
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/chapter-pack',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 1700,
@@ -254,7 +254,6 @@ Return ONLY JSON:
         sourceCitations,
       };
       await logAiUsage({
-        context,
         endpoint: '/api/chapter-pack',
         provider: result.provider,
         model: result.model,
@@ -281,3 +280,5 @@ Return ONLY JSON:
     });
   }
 }
+
+export const POST = withAiMetrics('/api/chapter-pack', handlePost);

@@ -40,12 +40,8 @@ import FloatingPomodoro from '@/components/FloatingPomodoro';
 import ChapterNotes from '@/components/ChapterNotes';
 import InlinePDFViewer from '@/components/InlinePDFViewer';
 import FlashcardDeck from '@/components/FlashcardDeck';
-import TeacherChapterPanel from '@/components/TeacherChapterPanel';
 import AnalyticsTracker from '@/components/AnalyticsTracker';
 import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
-import StudentSubjectGate from '@/components/StudentSubjectGate';
-import TeacherQuestionBankLink from '@/components/TeacherQuestionBankLink';
-import AskTeacherButton from '@/components/AskTeacherButton';
 
 // Generate static params for all chapters
 export function generateStaticParams() {
@@ -154,20 +150,16 @@ const RELEVANCE_DESC: Record<string, string> = {
 
 export default async function ChapterDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ section?: string }>;
 }) {
   const resolvedParams = await params;
-  const resolvedSearchParams = await searchParams;
   const chapter = getChapterById(resolvedParams.id);
   if (!chapter || chapter.classLevel === 11) notFound();
 
   const { prev, next } = getAdjacentChapters(resolvedParams.id);
   const style = SUBJECT_STYLES[chapter.subject] ?? SUBJECT_STYLES.Physics;
   const SubjectIcon = style.icon ?? Atom;
-  const section = typeof resolvedSearchParams?.section === 'string' ? resolvedSearchParams.section.trim() : '';
   const chapterPyq = (await getGroundedPYQData(chapter.id)) ?? getPYQData(chapter.id);
   const groundedFrequency = await getGroundedFrequencyLabel(chapter.id);
   const paperYearUniverse = await getGroundedPaperYearUniverse();
@@ -178,7 +170,7 @@ export default async function ChapterDetailPage({
   const chapterNotesUrl = `/cbse-notes/${chapter.classLevel}/${slugify(chapter.subject)}/${chapterNotesSlug(chapter)}`;
 
   return (
-    <StudentSubjectGate subject={chapter.subject}>
+    <>
       <div className="min-h-screen bg-[#FDFAF6]">
         <ScrollToTopOnMount />
         <AnalyticsTracker eventName="chapter_view" chapterId={chapter.id} />
@@ -244,7 +236,6 @@ export default async function ChapterDetailPage({
             <TextToSpeechButton textToRead={`Chapter ${chapter.chapterNumber}, ${chapter.title}. The key topics are: ${chapter.topics.join('. ')}`} />
             <BookmarkButton chapterId={chapter.id} />
             <StudiedButton chapterId={chapter.id} />
-            <TeacherQuestionBankLink chapterId={chapter.id} />
           </div>
           </div>
         </div>
@@ -518,14 +509,6 @@ export default async function ChapterDetailPage({
               </div>
             </div>
 
-            <TeacherChapterPanel
-              chapterId={chapter.id}
-              classLevel={chapter.classLevel === 10 || chapter.classLevel === 12 ? chapter.classLevel : undefined}
-              subject={chapter.subject}
-              section={section || undefined}
-              defaultQuizUrl={chapter.googleFormUrl}
-            />
-
             {/* Prev / Next Navigation */}
             <div className="grid grid-cols-2 gap-3">
               {prev ? (
@@ -589,7 +572,7 @@ export default async function ChapterDetailPage({
                   AI Study Hub locks all tools to your selected chapter context. Revision planning is available in Revision Hub.
                 </p>
                 <Link
-                  href={`/student/ai-tools?chapter=${encodeURIComponent(chapter.id)}`}
+                  href={`/ai-tools?chapter=${encodeURIComponent(chapter.id)}`}
                   className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700"
                 >
                   Open AI Study Hub
@@ -610,21 +593,12 @@ export default async function ChapterDetailPage({
                 </p>
               </div>
 
-              {(chapter.classLevel === 10 || chapter.classLevel === 12) && (
-                <AskTeacherButton
-                  chapterId={chapter.id}
-                  chapterTitle={chapter.title}
-                  subject={chapter.subject}
-                  classLevel={chapter.classLevel}
-                  topics={chapter.topics}
-                />
-              )}
             </div>
           </div>
         </div>
         </div>
       </div>
-    </StudentSubjectGate>
+    </>
   );
 }
 

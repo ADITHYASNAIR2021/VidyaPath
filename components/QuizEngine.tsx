@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, XCircle, ArrowRight, Award, Trophy, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { useStudyActivityStore } from '@/lib/store';
 
 interface Quiz {
   question: string;
@@ -63,7 +64,6 @@ export default function QuizEngine({
   onRegisterGenerateAction?: (action: () => Promise<void>) => void;
 }) {
   const [quizzes, setQuizzes] = useState<Quiz[]>(initialQuizzes);
-  const [studentAiEnabled, setStudentAiEnabled] = useState<boolean | null>(null);
   const [currentQ, setCurrentQ] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [showAnswer, setShowAnswer] = useState(false);
@@ -82,26 +82,6 @@ export default function QuizEngine({
     const saved = localStorage.getItem(`quiz-score-[${chapterId}]`);
     setBestScore(saved ? parseInt(saved, 10) : null);
   }, [chapterId]);
-
-  useEffect(() => {
-    let active = true;
-    fetch('/api/auth/session', { cache: 'no-store' })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => null);
-        const data =
-          payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
-            ? (payload.data as Record<string, unknown>)
-            : (payload as Record<string, unknown> | null);
-        const role = typeof data?.role === 'string' ? data.role : '';
-        if (active) setStudentAiEnabled(['student', 'teacher', 'admin', 'developer'].includes(role));
-      })
-      .catch(() => {
-        if (active) setStudentAiEnabled(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -241,11 +221,11 @@ export default function QuizEngine({
         <button
           onClick={handleGenerateValues}
           type="button"
-          disabled={isGenerating || studentAiEnabled === false}
+          disabled={isGenerating}
           className="inline-flex items-center gap-2 rounded-xl bg-saffron-500 px-5 py-2.5 font-semibold text-white transition-colors hover:bg-saffron-600 disabled:opacity-50"
         >
           <Award className="w-4 h-4" />
-          {studentAiEnabled === false ? 'Login to Generate Quiz' : isGenerating ? 'Generating...' : 'Generate Quiz via AI'}
+          {isGenerating ? 'Generating...' : 'Generate Quiz via AI'}
         </button>
         {isGenerating && (
           <div className="mt-4 w-full max-w-sm rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 dark:border-indigo-500/40 dark:bg-indigo-500/20">
@@ -294,6 +274,7 @@ export default function QuizEngine({
 
     setFinished(true);
     void submitQuestionFeedback(sessionResults);
+    useStudyActivityStore.getState().recordActivity();
     const newScore = Math.round((score / quizzes.length) * 100);
     if (!bestScore || newScore > bestScore) {
       localStorage.setItem(`quiz-score-[${chapterId}]`, newScore.toString());
@@ -336,10 +317,10 @@ export default function QuizEngine({
           <button
             onClick={handleGenerateValues}
             type="button"
-            disabled={isGenerating || studentAiEnabled === false}
+            disabled={isGenerating}
             className="inline-flex items-center gap-2 rounded-xl border border-saffron-200 bg-saffron-50 px-4 py-2.5 font-semibold text-saffron-700 transition-colors hover:bg-saffron-100 disabled:opacity-50 dark:border-saffron-400/40 dark:bg-saffron-500/20 dark:text-saffron-100 dark:hover:bg-saffron-500/30"
           >
-            {studentAiEnabled === false ? 'Login Needed' : isGenerating ? 'Generating...' : 'Generate New Test'}
+            {isGenerating ? 'Generating...' : 'Generate New Test'}
           </button>
         </div>
       </div>
@@ -377,10 +358,10 @@ export default function QuizEngine({
           <button
             onClick={handleGenerateValues}
             type="button"
-            disabled={isGenerating || studentAiEnabled === false}
+            disabled={isGenerating}
             className="flex items-center gap-2 rounded-lg border border-navy-100 bg-navy-50 px-3 py-1.5 text-xs font-semibold text-navy-600 transition-colors hover:bg-navy-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
           >
-            {studentAiEnabled === false ? 'Login for AI' : isGenerating ? 'AI Thinking...' : 'AI Generate'}
+            {isGenerating ? 'AI Thinking...' : 'AI Generate'}
           </button>
         </div>
         <div className="text-xs font-bold uppercase tracking-widest text-[#8A8AAA] dark:text-slate-400">
@@ -490,11 +471,6 @@ export default function QuizEngine({
             >
               <div className="mb-1 font-bold">{selectedOption === q.correctAnswerIndex ? 'Correct!' : 'Incorrect.'}</div>
               {q.explanation && <div className="opacity-90">{q.explanation}</div>}
-              {selectedOption !== q.correctAnswerIndex && studentAiEnabled === false && (
-                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/20 dark:text-amber-100">
-                  Login to get AI explanations and adaptive hints for wrong answers.
-                </div>
-              )}
             </div>
 
             <div className="mt-4 flex justify-end">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { fsrs, Card, Rating, createEmptyCard } from 'ts-fsrs';
 import { BrainCircuit, RotateCcw, Frown, Meh, Zap, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getChapterDeck, useFlashcardDeckStore, useStudyActivityStore } from '@/lib/store';
 
 interface Flashcard {
   front: string;
@@ -57,6 +58,11 @@ export default function FlashcardDeck({
     },
     [chapterId]
   );
+
+  // Restore AI-generated cards saved on this device for this chapter.
+  useEffect(() => {
+    setFlashcards(getChapterDeck(chapterId, initialFlashcards, useFlashcardDeckStore.getState().decks));
+  }, [chapterId, initialFlashcards]);
 
   useEffect(() => {
     if (flashcards) loadCardsFromStorage(flashcards);
@@ -121,11 +127,8 @@ export default function FlashcardDeck({
           : (data as Record<string, unknown>);
       if (payload.success === true && Array.isArray(payload.data) && payload.data.length > 0) {
         const generated = payload.data as Flashcard[];
-        setFlashcards((prev) => {
-          const combined = [...prev, ...generated];
-          loadCardsFromStorage(combined);
-          return combined;
-        });
+        useFlashcardDeckStore.getState().appendCards(chapterId, generated);
+        setFlashcards(getChapterDeck(chapterId, initialFlashcards, useFlashcardDeckStore.getState().decks));
         setStatusMessage('New flashcards were generated.');
       } else {
         setStatusMessage(String(payload.message || payload.error || 'Failed to generate flashcards.'));
@@ -242,6 +245,7 @@ export default function FlashcardDeck({
     }
 
     localStorage.setItem(`fsrs-[${chapterId}]-${currentIdx}`, JSON.stringify(nextCard));
+    useStudyActivityStore.getState().recordActivity();
 
     setCards((prev) => {
       const copy = [...prev];

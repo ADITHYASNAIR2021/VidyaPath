@@ -1,4 +1,5 @@
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
@@ -23,14 +24,14 @@ function cleanBase64(value: string): string {
   return value.replace(/^data:[^;]+;base64,/, '').trim();
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:image-solve', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:image-solve', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 8,
       blockSeconds: 120,
@@ -75,7 +76,6 @@ export async function POST(req: Request) {
       });
     }
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/image-solve',
       projectedInputText: JSON.stringify({
         prompt,
@@ -120,42 +120,63 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join('\n');
 
-    const model = 'gemini-1.5-flash';
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: instruction },
+    // Vision-capable Gemini models, tried in order (quota/retirement on one falls through to the next).
+    const visionModels = (process.env.AI_IMAGE_SOLVE_MODELS || 'gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-2.5-flash')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    let model = visionModels[0];
+    let response: Response | null = null;
+    const failures: string[] = [];
+    for (const candidate of visionModels) {
+      model = candidate;
+      try {
+        const attempt = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(candidate)}:generateContent`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
+            signal: AbortSignal.timeout(Number(process.env.AI_REQUEST_TIMEOUT_MS) || 45_000),
+            body: JSON.stringify({
+              contents: [
                 {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: imageBase64,
-                  },
+                  role: 'user',
+                  parts: [
+                    { text: instruction },
+                    {
+                      inline_data: {
+                        mime_type: mimeType,
+                        data: imageBase64,
+                      },
+                    },
+                  ],
                 },
               ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.25,
-            maxOutputTokens: 1800,
-            topP: 0.9,
-          },
-        }),
+              generationConfig: {
+                temperature: 0.25,
+                maxOutputTokens: 1800,
+                topP: 0.9,
+              },
+            }),
+          }
+        );
+        if (attempt.ok) {
+          response = attempt;
+          break;
+        }
+        const err = await attempt.text().catch(() => '');
+        failures.push(`${candidate}: ${attempt.status} ${err.replace(/\s+/g, ' ').slice(0, 160)}`);
+      } catch (error) {
+        failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    );
+    }
 
-    if (!response.ok) {
-      const err = await response.text().catch(() => '');
+    if (!response) {
+      logger.warn({ requestId, failures }, '[image-solve] all vision models failed');
       return errorJson({
         requestId,
         errorCode: 'image-solve-upstream-failed',
-        message: `Gemini image solve failed: ${response.status} ${err.slice(0, 150)}`,
+        message: 'The image solver is busy right now. Please try again in a minute.',
         status: 502,
       });
     }
@@ -202,7 +223,6 @@ export async function POST(req: Request) {
       followUp: String(parsed.followUp ?? 'Practice one similar question to lock this concept.').trim(),
     };
     await logAiUsage({
-      context,
       endpoint: '/api/image-solve',
       provider: 'gemini',
       model,
@@ -223,3 +243,5 @@ export async function POST(req: Request) {
     });
   }
 }
+
+export const POST = withAiMetrics('/api/image-solve', handlePost);

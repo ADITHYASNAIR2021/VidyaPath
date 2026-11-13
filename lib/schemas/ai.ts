@@ -233,30 +233,3 @@ export const paperEvaluateRequestSchema = z.object({
   subject: optionalTrimmed,
 });
 export type PaperEvaluateRequest = z.infer<typeof paperEvaluateRequestSchema>;
-
-// ---------------------------------------------------------------------------
-// /api/teacher/ai (classroom AI assistant)
-// ---------------------------------------------------------------------------
-// Kept permissive — shape is dynamic based on tool type.
-export const teacherAiRequestSchema = z
-  .object({
-    type: z.enum([
-      'worksheet',
-      'lesson-plan',
-      'question-paper',
-      'weak-students',
-      'remedial-set',
-      'next-day-recap',
-      'revision-sheet',
-    ]),
-    chapterId: optionalTrimmed,
-    chapterTitle: optionalTrimmed,
-    subject: optionalTrimmed,
-    classLevel: z.coerce.number().optional(),
-    topics: z.array(z.string()).optional(),
-    questionCount: z.coerce.number().int().min(1).max(50).optional(),
-    difficulty: optionalTrimmed,
-    customContext: optionalPromptContext,
-  })
-  .passthrough();
-export type TeacherAiRequest = z.infer<typeof teacherAiRequestSchema>;

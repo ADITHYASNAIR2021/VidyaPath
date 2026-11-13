@@ -9,19 +9,11 @@ on:
 
 jobs:
   quality:
-    name: Typecheck, Lint, Tests, Guards
+    name: Typecheck, Lint, Tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       NODE_ENV: test
-      SESSION_SIGNING_SECRET: ci-session-signing-secret-32chars-minimum-0001
-      ADMIN_PORTAL_KEY: ci-admin-key
-      TEACHER_PORTAL_KEY: ci-teacher-key
-      DEVELOPER_USERNAME: ci-developer
-      DEVELOPER_PASSWORD: ci-developer-password
-      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
-      SUPABASE_SERVICE_ROLE_KEY: ci-service-key
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,22 +27,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --include=dev
 
-      - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v2
-        with:
-          version: 2.84.2
-          github-token: ${{ github.token }}
-
-      - name: Start migrated database
-        shell: bash
-        run: |
-          set -o pipefail
-          if ! supabase start --debug 2>&1 | tee supabase-start.log; then
-            detail=$(tail -n 25 supabase-start.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
-            echo "::error file=supabase/config.toml,line=1,title=Supabase local startup failed::$detail"
-            exit 1
-          fi
-
       - name: Type check
         run: npm run typecheck
 
@@ -60,18 +36,8 @@ jobs:
       - name: Unit tests
         run: npm run test
 
-      - name: Security guards
-        run: npm run test:security-guards
-
       - name: Route and URL integrity
         run: npm run check:route-links
-
-      - name: Supabase migration lint
-        run: npm run db:lint
-
-      - name: Stop local database
-        if: always()
-        run: supabase stop --no-backup
 
   audit:
     name: Dependency Audit (prod)
@@ -105,16 +71,7 @@ jobs:
     timeout-minutes: 20
     env:
       NODE_ENV: production
-      SESSION_SIGNING_SECRET: ci-build-session-signing-secret-32chars-min
-      ADMIN_PORTAL_KEY: ci-admin-key
-      TEACHER_PORTAL_KEY: ci-teacher-key
-      DEVELOPER_USERNAME: ci-developer
-      DEVELOPER_PASSWORD: ci-developer-password
-      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
-      SUPABASE_SERVICE_ROLE_KEY: ci-service-key
       NEXT_PUBLIC_APP_URL: https://example.com
-      STRICT_ENV_VALIDATION: '0'
     steps:
       - name: Checkout
         uses: actions/checkout@v4

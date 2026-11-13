@@ -1,25 +1,9 @@
-'use client';
-
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { GraduationCap } from 'lucide-react';
-import { isAuthExperiencePath, isPortalPath, isStudentShellPath } from '@/lib/ui/layout-shell';
 
 export default function SiteFooter() {
-  const pathname = usePathname();
-  const sharedShellPath =
-    pathname.startsWith('/chapters') ||
-    pathname.startsWith('/formulas') ||
-    pathname.startsWith('/equations') ||
-    pathname.startsWith('/papers') ||
-    pathname.startsWith('/career') ||
-    pathname.startsWith('/cbse-notes') ||
-    pathname.startsWith('/concept-web') ||
-    pathname.startsWith('/helper');
-  if (isAuthExperiencePath(pathname) || pathname.startsWith('/exam/assignment/') || isPortalPath(pathname) || isStudentShellPath(pathname) || sharedShellPath) return null;
-
   return (
-    <footer className="border-t border-[#E8E4DC] bg-white px-4 py-7 mt-8">
+    <footer className="border-t border-[#E8E4DC] bg-[var(--color-surface)] px-4 py-7 mt-8">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-saffron-500 text-white flex items-center justify-center">
@@ -31,7 +15,7 @@ export default function SiteFooter() {
         </div>
 
         <div className="text-xs text-[#8A8AAA] text-center">
-          Made with love by Adithya S Nair.
+          Free for every student. No login — your progress stays on your device.
         </div>
 
         <div className="flex items-center gap-3 text-xs">
@@ -40,9 +24,6 @@ export default function SiteFooter() {
           </Link>
           <Link href="/terms" className="text-[#8A8AAA] hover:text-navy-700 transition-colors">
             Terms
-          </Link>
-          <Link href="/login" className="text-indigo-700 hover:text-indigo-800 font-semibold">
-            Login
           </Link>
         </div>
       </div>

@@ -1,0 +1,32 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vidyapath-prod",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "cross-env",
+        "DEVELOPER_DASHBOARD_KEY=wVgFxYLufbpx9vqMvAW3B4ffbVKzFyww",
+        "next",
+        "start",
+        "-p",
+        "3123"
+      ],
+      "port": 3123
+    },
+    {
+      "name": "vidyapath-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "cross-env",
+        "DEVELOPER_DASHBOARD_KEY=wVgFxYLufbpx9vqMvAW3B4ffbVKzFyww",
+        "next",
+        "dev",
+        "--webpack",
+        "-p",
+        "3124"
+      ],
+      "port": 3124
+    }
+  ]
+}

@@ -10,12 +10,12 @@ export default function TermsPage() {
     <main className="min-h-screen bg-[#FDFAF6] px-4 py-16">
       <article className="mx-auto max-w-3xl space-y-5 text-sm leading-7 text-gray-700 [&_a]:font-medium [&_h2]:pt-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-navy-700 [&_li]:pl-1 [&_strong]:text-navy-700 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-6">
         <h1 className="font-fraunces text-3xl font-bold text-navy-700">Terms of Service</h1>
-        <p className="text-sm text-gray-500">Last updated: July 24, 2026</p>
+        <p className="text-sm text-gray-500">Last updated: November 13, 2026</p>
 
         <h2>1. Acceptance of Terms</h2>
         <p>
-          By accessing VidyaPath, you agree to these terms. If you are a student, your school
-          has accepted these terms on your behalf as part of their educational services.
+          By using VidyaPath, you agree to these terms. If you are under 18, please read them with a
+          parent or guardian.
         </p>
 
         <h2>2. Service Description</h2>
@@ -25,19 +25,18 @@ export default function TermsPage() {
           The platform is provided &quot;as is&quot; for educational purposes.
         </p>
 
-        <h2>3. User Accounts</h2>
+        <h2>3. No Accounts</h2>
         <ul>
-          <li>Student accounts are provisioned by your school with unique roll codes.</li>
-          <li>You are responsible for maintaining the confidentiality of your password.</li>
-          <li>Sharing accounts or accessing another user&apos;s data is prohibited.</li>
-          <li>Schools may deactivate accounts at their discretion.</li>
+          <li>VidyaPath does not require an account or login.</li>
+          <li>Your progress, notes and flashcards are stored only in your browser; you are responsible for keeping a copy if you need one.</li>
+          <li>AI features have fair-use limits (per minute and per day) so the service stays free for everyone.</li>
         </ul>
 
         <h2>4. Acceptable Use</h2>
         <p>You agree NOT to:</p>
         <ul>
           <li>Use automated scripts, bots, or scraping tools on the platform.</li>
-          <li>Attempt to bypass authentication, rate limits, or security controls.</li>
+          <li>Attempt to bypass rate limits, usage limits, or security controls.</li>
           <li>Upload malicious content or abuse the AI tutoring system.</li>
           <li>Use the platform for commercial purposes without authorization.</li>
           <li>Share copyrighted NCERT/CBSE content outside the platform in violation of fair use.</li>
@@ -47,7 +46,7 @@ export default function TermsPage() {
         <p>
           Our AI tutor generates study explanations, flashcards, and practice questions. While we
           strive for accuracy, AI-generated content may contain errors. Always verify with your
-          textbooks and teachers. VidyaPath is not responsible for academic decisions made
+          NCERT textbooks and teachers. VidyaPath is not responsible for academic decisions made
           based on AI-generated content.
         </p>
 
@@ -56,7 +55,7 @@ export default function TermsPage() {
           Rights in CBSE, NCERT, and third-party material remain with their respective owners and the
           material may be used only as permitted by applicable terms and law. The VidyaPath platform,
           its design, and original software are owned by their respective contributors or licensors.
-          User-generated content (teacher notes, quiz questions) remains the property of the creator.
+          Notes you write remain yours and stay on your device.
         </p>
 
         <h2>7. Limitation of Liability</h2>
@@ -72,15 +71,14 @@ export default function TermsPage() {
 
         <h2>8. Termination</h2>
         <p>
-          We reserve the right to suspend accounts that violate these terms. Schools may request
-          bulk account termination. Related records are handled under the current privacy policy,
-          school requirements, backup cycles, and applicable obligations.
+          We may block access from networks or clients that abuse the service or violate these terms,
+          for example by automated scraping or by deliberately exhausting AI usage limits.
         </p>
 
         <h2>9. Changes to Terms</h2>
         <p>
-          We will notify active users of material changes via the platform. Continued use after
-          changes constitutes acceptance. The current version is always available at this page.
+          Continued use after changes constitutes acceptance. The current version and date are
+          always available on this page.
         </p>
 
         <h2>10. Governing Law</h2>

@@ -3,6 +3,8 @@ import type { ContextSnippet, ContextTask } from '@/lib/ai/context-retriever';
 import { getTaskChatModelCandidates, type LlmProvider, type LlmModelConfig } from '@/lib/ai/model-routing';
 import { callNvidiaChatCompletion, isUsableNvidiaApiKey, type LlmUsageCounts } from '@/lib/ai/nvidia-client';
 import { rankModelCandidatesForTask, recordAiQualityRecord } from '@/lib/ai/quality-store';
+import { logger } from '@/lib/logger';
+import { sharedState } from '@/lib/runtime/shared-state';
 
 export type { LlmUsageCounts };
 
@@ -60,6 +62,8 @@ interface BaseGenerateOptions {
 
 interface GenerateTextOptions extends BaseGenerateOptions {
   messages?: ChatMessage[];
+  /** Ask providers for native JSON output (set automatically by generateTaskJson). */
+  jsonMode?: boolean;
 }
 
 interface GenerateJsonOptions<T> extends GenerateTextOptions {
@@ -198,11 +202,17 @@ function buildQualityRecordBase(options: GenerateTextOptions) {
   };
 }
 
+/**
+ * The timeout covers the whole exchange (headers and body). The body is buffered inside
+ * the deadline so a provider that stalls mid-stream cannot hang a student's request.
+ */
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const body = await response.arrayBuffer();
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -216,7 +226,8 @@ async function callGemini(
   messages: ChatMessage[] | undefined,
   temperature: number,
   maxOutputTokens: number,
-  topP: number
+  topP: number,
+  jsonMode = false
 ): Promise<{ text: string; usage: LlmUsageCounts | null }> {
   const contents =
     messages && messages.length > 0
@@ -227,10 +238,10 @@ async function callGemini(
       : [{ role: 'user', parts: [{ text: userPrompt }] }];
 
   const response = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: fullSystemPrompt }] },
         contents,
@@ -238,6 +249,7 @@ async function callGemini(
           temperature,
           maxOutputTokens,
           topP,
+          ...(jsonMode ? { responseMimeType: 'application/json' } : {}),
         },
       }),
     }
@@ -287,15 +299,17 @@ async function callOpenAICompatibleEndpoint(
   messages: ChatMessage[] | undefined,
   temperature: number,
   maxOutputTokens: number,
-  topP: number
+  topP: number,
+  jsonMode = false
 ): Promise<{ text: string; usage: LlmUsageCounts | null }> {
-  const response = await fetchWithTimeout(apiUrl, {
+  const send = (withJsonFormat: boolean) => fetchWithTimeout(apiUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
+      ...(withJsonFormat ? { response_format: { type: 'json_object' } } : {}),
       model,
       messages:
         messages && messages.length > 0
@@ -310,6 +324,13 @@ async function callOpenAICompatibleEndpoint(
       stream: false,
     }),
   });
+
+  let response = await send(jsonMode);
+  if (!response.ok && jsonMode && response.status === 400) {
+    // Some models reject response_format; retry once as plain text (the JSON parser repairs output).
+    const firstError = await response.clone().text().catch(() => '');
+    if (/response_format|json/i.test(firstError)) response = await send(false);
+  }
 
   if (!response.ok) {
     const err = await response.text().catch(() => '');
@@ -346,31 +367,34 @@ async function callOpenAICompatibleEndpoint(
 
 async function callGroq(
   apiKey: string, model: string, fullSystemPrompt: string, userPrompt: string,
-  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number
+  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number,
+  jsonMode = false
 ): Promise<{ text: string; usage: LlmUsageCounts | null }> {
   return callOpenAICompatibleEndpoint(
     'https://api.groq.com/openai/v1/chat/completions', 'Groq',
-    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP
+    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP, jsonMode
   );
 }
 
 async function callCerebras(
   apiKey: string, model: string, fullSystemPrompt: string, userPrompt: string,
-  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number
+  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number,
+  jsonMode = false
 ): Promise<{ text: string; usage: LlmUsageCounts | null }> {
   return callOpenAICompatibleEndpoint(
     'https://api.cerebras.ai/v1/chat/completions', 'Cerebras',
-    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP
+    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP, jsonMode
   );
 }
 
 async function callMistral(
   apiKey: string, model: string, fullSystemPrompt: string, userPrompt: string,
-  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number
+  messages: ChatMessage[] | undefined, temperature: number, maxOutputTokens: number, topP: number,
+  jsonMode = false
 ): Promise<{ text: string; usage: LlmUsageCounts | null }> {
   return callOpenAICompatibleEndpoint(
     'https://api.mistral.ai/v1/chat/completions', 'Mistral',
-    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP
+    apiKey, model, fullSystemPrompt, userPrompt, messages, temperature, maxOutputTokens, topP, jsonMode
   );
 }
 
@@ -459,12 +483,55 @@ function extractBalancedJsonBlock(text: string): string | null {
   return null;
 }
 
+/**
+ * LLMs often put literal newlines/tabs inside JSON string values, which JSON.parse rejects
+ * ("Bad control character in string literal"). Escape control characters that appear
+ * inside strings while leaving structural whitespace alone.
+ */
+export function escapeControlCharsInJsonStrings(text: string): string {
+  let output = '';
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        output += char;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        output += char;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+        output += char;
+        continue;
+      }
+      if (char === '\n') output += '\\n';
+      else if (char === '\r') output += '\\r';
+      else if (char === '\t') output += '\\t';
+      else if (char.charCodeAt(0) < 0x20) output += ' ';
+      else output += char;
+      continue;
+    }
+    if (char === '"') inString = true;
+    output += char;
+  }
+  return output;
+}
+
 function tryParseJsonCandidates(rawText: string): { parsed: unknown | null; error?: string } {
   const normalized = normalizeJsonText(stripCodeFence(rawText));
   const candidates = [normalized];
   const balanced = extractBalancedJsonBlock(normalized);
   if (balanced && balanced !== normalized) {
     candidates.push(balanced);
+  }
+  for (const candidate of [...candidates]) {
+    const repaired = escapeControlCharsInJsonStrings(candidate);
+    if (repaired !== candidate) candidates.push(repaired);
   }
 
   let lastError = 'Unknown JSON parse error';
@@ -562,6 +629,77 @@ function evaluateJsonGrounding(
   };
 }
 
+// ── Model circuit breaker ────────────────────────────────────────────────────
+// Providers retire models (HTTP 404/410) and keys can be revoked (401/403).
+// Skip such candidates for a while instead of paying their latency on every request.
+const MODEL_GONE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+const AUTH_FAILURE_COOLDOWN_MS = 15 * 60 * 1000;
+const QUOTA_COOLDOWN_MS = 60 * 1000;
+const OVERLOAD_COOLDOWN_MS = 45 * 1000;
+const unavailableModels = sharedState(
+  'model-circuit-breaker',
+  () => new Map<string, { until: number; status: number; reason: string }>()
+);
+
+function candidateKey(candidate: LlmModelConfig): string {
+  return `${candidate.provider}::${candidate.model}`;
+}
+
+function extractHttpStatus(error: unknown): number {
+  const match = String(error).match(/failed: (\d{3})/);
+  return match ? Number(match[1]) : 0;
+}
+
+function noteCandidateFailure(candidate: LlmModelConfig, error: unknown): void {
+  const status = extractHttpStatus(error);
+  const cooldown = status === 404 || status === 410
+    ? MODEL_GONE_COOLDOWN_MS
+    : status === 401 || status === 402 || status === 403
+      ? AUTH_FAILURE_COOLDOWN_MS
+      : status === 429
+        ? QUOTA_COOLDOWN_MS
+        : status === 503 || status === 504 || /aborted|timeout|timed out/i.test(String(error))
+          ? OVERLOAD_COOLDOWN_MS
+          : 0;
+  if (cooldown > 0) {
+    unavailableModels.set(candidateKey(candidate), {
+      until: now() + cooldown,
+      status,
+      reason: String(error).slice(0, 240),
+    });
+  }
+  logger.warn(
+    { provider: candidate.provider, model: candidate.model, status, err: String(error).slice(0, 300) },
+    '[generator] model candidate failed'
+  );
+}
+
+function isCandidateTemporarilyUnavailable(candidate: LlmModelConfig): boolean {
+  const entry = unavailableModels.get(candidateKey(candidate));
+  if (!entry) return false;
+  if (entry.until <= now()) {
+    unavailableModels.delete(candidateKey(candidate));
+    return false;
+  }
+  return true;
+}
+
+/** Models currently skipped by the circuit breaker (for the developer console). */
+export function getUnavailableModels(): Array<{ provider: string; model: string; status: number; reason: string; until: string }> {
+  const current = now();
+  return [...unavailableModels.entries()]
+    .filter(([, entry]) => entry.until > current)
+    .map(([key, entry]) => {
+      const [provider, model] = key.split('::');
+      return { provider, model, status: entry.status, reason: entry.reason, until: new Date(entry.until).toISOString() };
+    });
+}
+
+/** Clear the circuit breaker (developer console "retry all models"). */
+export function resetUnavailableModels(): void {
+  unavailableModels.clear();
+}
+
 async function runGeneration(options: GenerateTextOptions): Promise<GenerationResult> {
   const cacheKey = buildCacheKey(options);
   const cacheEnabled = isResponseCacheEnabled();
@@ -613,6 +751,7 @@ ${options.userPrompt}`;
   }
 
   for (const candidate of candidates) {
+    if (isCandidateTemporarilyUnavailable(candidate)) continue;
     const candidateStart = now();
     const temperature = resolveTemperature(candidate, options.temperature);
     const maxOutputTokens = resolveMaxTokens(candidate, options.maxOutputTokens);
@@ -689,7 +828,8 @@ ${options.userPrompt}`;
           modelMessages,
           temperature,
           maxOutputTokens,
-          topP
+          topP,
+          options.jsonMode === true
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, {
@@ -732,7 +872,7 @@ ${options.userPrompt}`;
         }
         const groqResult = await callGroq(
           groqKey, candidate.model, fullSystemPrompt,
-          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP
+          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP, options.jsonMode === true
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, { text: groqResult.text, provider: 'groq', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
@@ -763,7 +903,7 @@ ${options.userPrompt}`;
         }
         const result = await callCerebras(
           cerebrasKey, candidate.model, fullSystemPrompt,
-          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP
+          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP, options.jsonMode === true
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, { text: result.text, provider: 'cerebras', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
@@ -794,7 +934,7 @@ ${options.userPrompt}`;
         }
         const result = await callMistral(
           mistralKey, candidate.model, fullSystemPrompt,
-          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP
+          contextAwareUserPrompt, modelMessages, temperature, maxOutputTokens, topP, options.jsonMode === true
         );
         if (cacheEnabled) {
           RESPONSE_CACHE.set(cacheKey, { text: result.text, provider: 'mistral', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
@@ -815,7 +955,8 @@ ${options.userPrompt}`;
         return { text: result.text, provider: 'mistral', model: candidate.model, cacheHit: false, usage: result.usage, latencyMs };
       }
     } catch (error) {
-      errors.push(String(error));
+      errors.push(String(error).slice(0, 220));
+      noteCandidateFailure(candidate, error);
       void recordAiQualityRecord({
         task: options.task,
         provider: candidate.provider,
@@ -831,7 +972,7 @@ ${options.userPrompt}`;
   }
 
   throw new Error(
-    `No model could generate a response. Configure at least one of: NVIDIA_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY. Details: ${errors.slice(0, 6).join(' | ')}`
+    `No model could generate a response. Configure at least one of: NVIDIA_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY. Details: ${errors.slice(0, 16).join(' | ') || 'all candidate models are temporarily unavailable'}`
   );
 }
 
@@ -849,13 +990,21 @@ export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Prom
     repaired: boolean;
   };
 }> {
-  const evaluateAndAccept = (value: unknown) => {
+  const evaluateAndAccept = (raw: unknown) => {
+    // JSON mode on OpenAI-compatible APIs always returns an object, so array tasks may come
+    // back wrapped as {"flashcards": [...]} — accept the single array inside.
+    let value = raw;
+    if (!options.validate(value) && value && typeof value === 'object' && !Array.isArray(value)) {
+      const arrays = Object.values(value as Record<string, unknown>).filter(Array.isArray);
+      if (arrays.length === 1 && options.validate(arrays[0])) value = arrays[0];
+    }
     if (!options.validate(value)) return null;
     const quality = evaluateJsonGrounding(value, options.contextSnippets, options.includeCitations);
     return { data: value as T, quality };
   };
 
-  const firstResult = await runGeneration(options);
+  const jsonOptions: GenerateTextOptions = { ...options, jsonMode: true };
+  const firstResult = await runGeneration(jsonOptions);
   const firstParsed = tryParseJsonCandidates(firstResult.text);
   const acceptedFirst = firstParsed.parsed ? evaluateAndAccept(firstParsed.parsed) : null;
   if (acceptedFirst && (acceptedFirst.quality.retrievalMiss || acceptedFirst.quality.groundednessScore >= 30)) {
@@ -882,6 +1031,7 @@ export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Prom
   }
 
   const retryOptions: GenerateTextOptions = {
+    jsonMode: true,
     ...options,
     diversityKey: `${options.diversityKey ?? 'default'}:json-retry`,
     temperature: Math.min(options.temperature ?? 0.2, 0.1),
@@ -946,6 +1096,14 @@ CRITICAL:
     errorMessage: `first=${firstParsed.error ?? 'schema-or-grounding'}; retry=${retryParsed.error ?? 'schema-or-grounding'}`,
   });
 
+  logger.warn(
+    {
+      task: options.task,
+      first: { provider: firstResult.provider, model: firstResult.model, parseError: firstParsed.error, preview: firstResult.text.slice(0, 600) },
+      retry: { provider: retryResult.provider, model: retryResult.model, parseError: retryParsed.error, preview: retryResult.text.slice(0, 600) },
+    },
+    '[generator] JSON output rejected after retry'
+  );
   if (firstParsed.parsed && !options.validate(firstParsed.parsed)) {
     throw new Error(`Model returned schema-invalid JSON for task ${options.task}.`);
   }

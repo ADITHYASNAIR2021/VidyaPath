@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import Link from 'next/link';
 import { Send, Loader2, Zap, RefreshCw, MessageCircle, ShieldAlert } from 'lucide-react';
 import clsx from 'clsx';
 import 'katex/dist/katex.min.css';
@@ -270,7 +269,6 @@ export default function AIChatBox({
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
   const [feedbackSent, setFeedbackSent] = useState<Record<string, boolean>>({});
   const [feedbackPending, setFeedbackPending] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -281,26 +279,6 @@ export default function AIChatBox({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
-
-  useEffect(() => {
-    let active = true;
-    fetch('/api/auth/session', { cache: 'no-store' })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => null);
-        const data =
-          payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
-            ? (payload.data as Record<string, unknown>)
-            : (payload as Record<string, unknown> | null);
-        const role = typeof data?.role === 'string' ? data.role : '';
-        if (active) setAiEnabled(['student', 'teacher', 'admin', 'developer'].includes(role));
-      })
-      .catch(() => {
-        if (active) setAiEnabled(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   async function sendMessage(messageText: string) {
     if (!messageText.trim() || loading) return;
@@ -393,28 +371,6 @@ export default function AIChatBox({
     } finally {
       setFeedbackPending('');
     }
-  }
-
-  if (aiEnabled === false) {
-    return (
-      <div className="flex flex-col overflow-hidden rounded-2xl border border-[#E8E4DC] bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <div className="bg-gradient-to-r from-saffron-500 to-saffron-600 px-4 py-3.5">
-          <div className="text-sm font-semibold text-white">VidyaAI Tutor</div>
-          <div className="text-xs text-white/80">Login required</div>
-        </div>
-        <div className="p-4">
-          <p className="text-sm text-[#4A4A6A] dark:text-slate-300">Login with any account to unlock chapter AI tools.</p>
-          <div className="mt-3">
-            <Link
-              href={`/login?next=${encodeURIComponent(`/chapters/${chapterId}`)}`}
-              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
-            >
-              Login
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   return (

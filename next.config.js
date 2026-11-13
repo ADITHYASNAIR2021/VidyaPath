@@ -1,30 +1,4 @@
 /** @type {import('next').NextConfig} */
-function validateBuildEnv() {
-  const strictValidation = process.env.STRICT_ENV_VALIDATION === '1';
-  if (!strictValidation) return;
-  const hasValue = (name) => !!(process.env[name] || '').trim();
-  const missing = [];
-  if (!hasValue('NEXT_PUBLIC_SUPABASE_URL')) missing.push('NEXT_PUBLIC_SUPABASE_URL');
-  if (!(hasValue('NEXT_PUBLIC_SUPABASE_ANON_KEY') || hasValue('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'))) {
-    missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY|NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY');
-  }
-  if (!hasValue('SUPABASE_SERVICE_ROLE_KEY')) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-  if (!hasValue('SESSION_SIGNING_SECRET')) {
-    missing.push('SESSION_SIGNING_SECRET');
-  } else if (process.env.SESSION_SIGNING_SECRET.trim().length < 32) {
-    missing.push('SESSION_SIGNING_SECRET (minimum 32 characters)');
-  }
-  if (!hasValue('TEACHER_PORTAL_KEY')) missing.push('TEACHER_PORTAL_KEY');
-  if (!hasValue('NEXT_PUBLIC_APP_URL')) missing.push('NEXT_PUBLIC_APP_URL');
-  if (!hasValue('DEVELOPER_USERNAME')) missing.push('DEVELOPER_USERNAME');
-  if (!hasValue('DEVELOPER_PASSWORD')) missing.push('DEVELOPER_PASSWORD');
-  if (missing.length > 0) {
-    throw new Error(`Missing required production env vars: ${missing.join(', ')}`);
-  }
-}
-
-validateBuildEnv();
-
 const nextConfig = {
   // Sentry source maps for production error tracking
   productionBrowserSourceMaps: process.env.SENTRY_DSN ? true : false,
@@ -96,9 +70,8 @@ const nextConfig = {
 const withSerwist = require('@serwist/next').default({
   swSrc: 'app/sw.ts',
   swDest: 'public/sw.js',
-  // Disable the PWA service worker in development. A stale SW intercepts
-  // navigations and can break auth (logged-in pages bounce back to /login).
-  // PWA stays fully enabled in production builds.
+  // Disable the PWA service worker in development so stale caches never mask
+  // local edits. PWA stays fully enabled in production builds.
   disable: process.env.NODE_ENV === 'development',
 });
 

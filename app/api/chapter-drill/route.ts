@@ -1,3 +1,4 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { getChapterById } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
@@ -22,7 +23,7 @@ import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
 import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
 import { getContentSafetyBlock } from '@/lib/ai/content-safety';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -351,14 +352,14 @@ function getDrillTemperature(questionType: 'mcq' | 'short' | 'long' | 'mixed'): 
   return computeWeightedTemperature({ recall: 25, application: 35, analysis: 20, caseBased: 10, derivation: 10 });
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:chapter-drill', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:chapter-drill', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 15,
       blockSeconds: 120,
@@ -395,7 +396,6 @@ export async function POST(req: Request) {
     }
     const projectedOutputTokens = Math.min(3600, 900 + parsed.questionCount * 170);
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/chapter-drill',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens,
@@ -422,7 +422,6 @@ export async function POST(req: Request) {
 
     const pyq = (await getGroundedPYQData(parsed.chapterId)) ?? getPYQData(parsed.chapterId);
     const recentHistory = await getRecentQuestionHistory({
-      authUserId: context?.authUserId,
       chapterId: chapter.id,
       limit: 10,
     });
@@ -642,14 +641,12 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
         },
       };
       await recordGeneratedQuestions({
-        authUserId: context?.authUserId,
         chapterId: chapter.id,
         subject: chapter.subject,
         questions: finalAnnotatedQuestions,
       });
 
       await logAiUsage({
-        context,
         endpoint: '/api/chapter-drill',
         provider: result.provider,
         model: result.model,
@@ -675,3 +672,5 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
     });
   }
 }
+
+export const POST = withAiMetrics('/api/chapter-drill', handlePost);

@@ -3,11 +3,13 @@ import {
   ArrowRight,
   BookOpen,
   Calculator,
+  ClipboardCheck,
   Compass,
   FileText,
   MessageCircle,
   Network,
   Sparkles,
+  Target,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { getChapterStats, PAPERS } from '@/lib/data';
@@ -57,10 +59,11 @@ export default function HomePage() {
                 <FileText className="w-4 h-4" />
               </Link>
               <Link
-                href="/affiliate-your-school"
+                href="/ai-tools"
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-6 py-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
               >
-                Affiliate your school
+                Try the AI Study Hub
+                <Sparkles className="w-4 h-4" />
               </Link>
             </div>
 
@@ -109,10 +112,22 @@ export default function HomePage() {
               description="Browse paper links and practice exam-style questions by class and subject."
             />
             <FeatureCard
-              href="/dashboard"
+              href="/ai-tools"
               icon={<MessageCircle className="w-5 h-5 text-saffron-600" />}
-              title="Adaptive revision"
-              description="Get chapter diagnosis, 7-day remediation, and progress-oriented next steps."
+              title="AI Study Hub"
+              description="Generate quizzes and flashcards for any chapter, diagnose weak spots, and solve questions from a photo."
+            />
+            <FeatureCard
+              href="/mock-exam"
+              icon={<ClipboardCheck className="w-5 h-5 text-rose-600" />}
+              title="Timed mock exams"
+              description="Board-style MCQ papers built from NCERT and PYQs, graded instantly with explanations."
+            />
+            <FeatureCard
+              href="/revision"
+              icon={<Target className="w-5 h-5 text-amber-600" />}
+              title="Revision planner"
+              description="A week-by-week plan from your weak chapters, plus spaced-repetition flashcard review."
             />
             <FeatureCard
               href="/formulas"

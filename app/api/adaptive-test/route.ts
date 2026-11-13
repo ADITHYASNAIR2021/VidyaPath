@@ -1,3 +1,4 @@
+import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
@@ -27,7 +28,7 @@ import { buildSubjectSystemPromptAddendum } from '@/lib/ai/subject-prompts';
 import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
 import { getContentSafetyBlock } from '@/lib/ai/content-safety';
-import { requireInteractiveAuth } from '@/lib/auth/interactive';
+import { requirePublicAiAccess } from '@/lib/ai/public-access';
 import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
@@ -159,14 +160,14 @@ function isAlignedToChapter(question: string, allowText: string): boolean {
   return qTokens.some((token) => allow.has(token));
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const requestId = getRequestId(req);
   try {
-    const { context, response: authResponse } = await requireInteractiveAuth(req);
+    const { response: authResponse } = await requirePublicAiAccess(req);
     if (authResponse) return authResponse;
 
     const limit = await checkRateLimit({
-      key: buildRateLimitKey('ai:adaptive-test', [context?.authUserId || getClientIp(req), context?.schoolId]),
+      key: buildRateLimitKey('ai:adaptive-test', [getClientIp(req)]),
       windowSeconds: 60,
       maxRequests: 10,
       blockSeconds: 120,
@@ -193,7 +194,6 @@ export async function POST(req: Request) {
     }
     const parsed = bodyResult.value;
     const tokenBudget = await checkAiTokenBudget({
-      context,
       endpoint: '/api/adaptive-test',
       projectedInputText: JSON.stringify(parsed),
       projectedOutputTokens: 2000,
@@ -216,7 +216,6 @@ export async function POST(req: Request) {
       .filter((item): item is NonNullable<ReturnType<typeof getPYQData>> => !!item)
       .slice(0, 6);
     const adaptiveHistory = await getAdaptiveHistoryProfile({
-      authUserId: context?.authUserId,
       chapterIds: parsed.chapterIds,
       recentLimit: 8,
     });
@@ -360,7 +359,6 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
         contextSnippets: contextPack.snippets,
       });
       await recordGeneratedQuestions({
-        authUserId: context?.authUserId,
         chapterId: chapter?.id,
         subject: parsed.subject,
         questions: annotatedQuestions,
@@ -393,7 +391,6 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
         },
       };
       await logAiUsage({
-        context,
         endpoint: '/api/adaptive-test',
         provider: result.provider,
         model: result.model,
@@ -433,3 +430,5 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
     });
   }
 }
+
+export const POST = withAiMetrics('/api/adaptive-test', handlePost);
