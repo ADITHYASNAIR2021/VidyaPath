@@ -1,4 +1,4 @@
-# Raw corpus bytes must match the pinned gzip payloads on Windows and Linux.
+# Keep editable corpus files in LF; deployed gzip bytes remain hash-pinned.
 lib/context/*.json text eol=lf
 lib/context/*.jsonl text eol=lf
 lib/context/*.gz -text
