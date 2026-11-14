@@ -239,7 +239,7 @@ export default function DeveloperDashboard({ onLogout }: { onLogout: () => void 
         <p className="mb-4 rounded-xl bg-[var(--color-surface-soft)] p-3 text-sm text-[var(--color-text-secondary)]">
           BM25 search works without API keys. Semantic search needs matching document and query embeddings; a vector file alone does not enable it.
         </p>
-        <p className="mb-4 text-xs text-[var(--color-text-secondary)]">Vector database: {rag.vectorStore.configured ? `Supabase · corpus ${rag.vectorStore.corpusId ?? 'not selected'} · ${rag.vectorStore.reason}` : 'Not enabled; bundled BM25 is active'}. {rag.vectorStore.model ? `Encoder: ${rag.vectorStore.model}.` : ''}</p>
+        <p className="mb-4 text-xs text-[var(--color-text-secondary)]">Bundled BM25 and the optional private E5 service serve retrieval without an external database.</p>
         {rag.remoteService.configured && <p className="mb-4 text-xs text-[var(--color-text-secondary)]">Remote E5 index: {rag.remoteService.reason}{rag.remoteService.latencyMs !== null ? ` · ${rag.remoteService.latencyMs} ms` : ''}. The service returns IDs only; source text is resolved from the pinned local corpus. Local-only diagnostics bypass the service.</p>}
         <Table head={['File', 'Role', 'Source', 'Local', '.gz']}>
           {rag.files.map((file) => (

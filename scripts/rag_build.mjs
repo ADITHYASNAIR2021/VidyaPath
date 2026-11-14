@@ -261,24 +261,6 @@ async function pingOpenAICompat(url, key, name) {
   }
 }
 
-async function pingSupabase(url, anonKey) {
-  const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), AC_TIMEOUT);
-  try {
-    const r = await fetch(`${url}/rest/v1/`, {
-      signal: ctrl.signal,
-      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
-    });
-    return r.status < 500
-      ? { ok: true,  note: `HTTP ${r.status}` }
-      : { ok: false, note: `HTTP ${r.status}` };
-  } catch (e) {
-    return { ok: false, note: e.name === 'AbortError' ? 'timeout' : String(e.message || e) };
-  } finally {
-    clearTimeout(tid);
-  }
-}
-
 async function runApiHealthCheck() {
   const env = process.env;
 
@@ -323,14 +305,6 @@ async function runApiHealthCheck() {
       prefix:    null,
       minLen:    16,
       ping:      async (k) => pingOpenAICompat('https://api.mistral.ai/v1/models', k, 'Mistral'),
-    },
-    {
-      name:      'Supabase',
-      role:      'state persistence',
-      tier:      'db',
-      key:       env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      url:       env.NEXT_PUBLIC_SUPABASE_URL,
-      ping:      async (k) => pingSupabase(env.NEXT_PUBLIC_SUPABASE_URL, k),
     },
     {
       name:      '@huggingface/transformers',

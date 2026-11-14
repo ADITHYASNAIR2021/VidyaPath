@@ -328,7 +328,7 @@ async function handlePost(req: NextRequest) {
           snippets: [],
           contextHash: 'no-context',
           usedOnDemandFallback: false,
-          usedPgvector: false,
+          usedRemoteIndex: false,
         };
     if (contextPack.snippets.length === 0) {
       return errorJson({ requestId, errorCode: 'chapter-evidence-unavailable', message: 'No safe chapter evidence is available. Please try again after the chapter index is updated.', status: 503 });

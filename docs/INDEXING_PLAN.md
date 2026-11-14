@@ -1,6 +1,6 @@
 # Generated chapter indexing plan
 
-Generated 2026-11-14T17:58:39.585Z. Corpus fingerprint: `c6414950c6c41e4f56c8afa1b82552e2fb9f554fd6b796cdbf09dd91743592ab`.
+Generated 2026-11-14T19:46:57.665Z. Corpus fingerprint: `c6414950c6c41e4f56c8afa1b82552e2fb9f554fd6b796cdbf09dd91743592ab`.
 
 115 chapters; 43 need coverage review. Counts and lexical coverage are diagnostics, not evidence of factual correctness. Zero OCR chunks are available.
 

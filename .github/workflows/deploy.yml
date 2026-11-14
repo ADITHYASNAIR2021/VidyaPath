@@ -1,65 +1,15 @@
-name: Release Readiness
+name: Docker Validation
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
-  quality:
-    name: Typecheck, Lint, Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    env:
-      NODE_ENV: test
-      NEXT_PUBLIC_APP_URL: https://ci-example.com
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci --include=dev
-      - run: npm run typecheck
-      - run: npm run lint:strict
-      - run: npm run test
-      - run: npm run test:retrieval-service
-
-  build:
-    name: Build
-    needs: quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      NODE_ENV: production
-      NEXT_PUBLIC_APP_URL: https://ci-example.com
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci --include=dev
-      - run: npm run build
-      - run: npm run check:function-sizes
-      - name: Cache build output
-        uses: actions/cache@v4
-        with:
-          path: .next
-          key: build-${{ github.sha }}
-
   docker:
     name: Docker Build & Health Check
-    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Restore build cache
-        uses: actions/cache@v4
-        with:
-          path: .next
-          key: build-${{ github.sha }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build Docker image

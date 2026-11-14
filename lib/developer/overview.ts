@@ -15,7 +15,6 @@ import { getSiteUrl } from '@/lib/site-url';
 import { readRetrievalReport } from '@/lib/ai/retrieval-report';
 import { getBoundaryStats } from '@/lib/ai/boundary-policy';
 import { AI_TOOL_POLICIES } from '@/lib/ai/tool-registry';
-import { getVectorStoreStatus } from '@/lib/ai/vector-store';
 import { getSemanticGuardStatus } from '@/lib/ai/semantic-guard';
 import { getRemoteRetrievalStatus } from '@/lib/ai/remote-retrieval';
 
@@ -74,7 +73,7 @@ async function getRagStatus() {
   }
   return {
     cdnConfigured, chunkCount, files, rerank: getRerankStatus(), runtime: getRetrievalStats(), report,
-    helpersEnabled: process.env.AI_ENABLE_RETRIEVAL_LLM === '1', vectorStore: getVectorStoreStatus(), remoteService: getRemoteRetrievalStatus(),
+    helpersEnabled: process.env.AI_ENABLE_RETRIEVAL_LLM === '1', remoteService: getRemoteRetrievalStatus(),
     localEmbeddingsEnabled: process.env.AI_ENABLE_LOCAL_EMBEDDINGS === '1' && !process.env.VERCEL,
   };
 }

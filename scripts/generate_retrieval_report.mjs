@@ -121,7 +121,7 @@ const report = {
   chapters: chapterReports, benchmark,
   needsWork: chapterReports.filter((chapter) => chapter.reindexNeeded).length,
   methodology: 'Coverage counts and lexical topic proxies, not factual correctness. Diagram tags are not OCR verification. Benchmarks use fixed curated questions; no user prompts are stored.',
-  serving: { default: 'Bundled gzip corpus + in-process BM25; optional private E5 service or hosted reranker', cdn: 'Optional immutable versioned artifact release with SHA-256 manifest', vectorDatabase: 'Not required: compact private E5 index supplied; optional server-only pgvector backend', localVectors: 'Export existing E5 vectors into a compact VM release; raw vectors and ONNX weights are excluded from serverless functions' },
+  serving: { default: 'Bundled gzip corpus + in-process BM25; optional private E5 service or hosted reranker', cdn: 'Optional immutable versioned artifact release with SHA-256 manifest', vectorDatabase: 'No external database: compact private E5 index supplied', localVectors: 'Export existing E5 vectors into a compact VM release; raw vectors and ONNX weights are excluded from serverless functions' },
 };
 writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
 const cell = (value) => String(value).replace(/\|/g, '\\|').replace(/\n/g, ' ');

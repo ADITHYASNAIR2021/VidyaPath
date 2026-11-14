@@ -301,7 +301,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
         total: annotated.length,
         requested: questionCount,
         grounding: {
-          usedPgvector: contextPack.usedPgvector,
+          usedRemoteIndex: contextPack.usedRemoteIndex,
           usedOnDemandFallback: contextPack.usedOnDemandFallback,
           retrieval: contextPack.retrievalMeta,
           strongGroundedCount: annotated.filter(isQuestionStronglyGrounded).length,

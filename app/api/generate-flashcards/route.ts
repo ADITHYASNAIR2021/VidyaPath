@@ -231,7 +231,7 @@ Rules:
         total: hardenedCards.length,
         requested: cardCount,
         grounding: {
-          usedPgvector: contextPack.usedPgvector,
+          usedRemoteIndex: contextPack.usedRemoteIndex,
           usedOnDemandFallback: contextPack.usedOnDemandFallback,
           retrieval: contextPack.retrievalMeta,
           alignedCount: hardenedCards.filter((card) =>

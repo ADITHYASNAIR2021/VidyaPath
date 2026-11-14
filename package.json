@@ -35,7 +35,6 @@
     "sync:rag-metadata": "node scripts/sync_context_metadata.mjs",
     "write:rag-count": "node scripts/write_rag_count.mjs",
     "compress:context": "node scripts/compress_context.mjs",
-    "upload:context": "node scripts/upload_context_to_storage.mjs",
     "verify:context": "node scripts/verify_context_index.mjs",
     "eval:rag": "vitest run lib/ai/__tests__/rag-benchmark.test.ts",
     "check:route-links": "node scripts/route_link_integrity.mjs",

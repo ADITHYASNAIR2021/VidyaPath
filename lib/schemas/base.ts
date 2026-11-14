@@ -1,7 +1,7 @@
 /**
  * Shared zod primitives. Used by route-level schemas in `lib/schemas/**`
- * and directly by ad-hoc validators. Keep synchronized with DB constraints
- * in `supabase/migrations/`.
+ * and directly by ad-hoc validators. Public tools validate canonical data
+ * on the server and do not require a database.
  */
 import { z } from 'zod';
 
