@@ -56,30 +56,40 @@
     "rag:build:tb-only": "node scripts/rag_build.mjs --skip-qp --skip-benchmark",
     "rag:build:class10": "node scripts/rag_build.mjs --class 10",
     "rag:build:class12": "node scripts/rag_build.mjs --class 12",
-    "rag:build:no-bench": "node scripts/rag_build.mjs --skip-benchmark"
+    "rag:build:no-bench": "node scripts/rag_build.mjs --skip-benchmark",
+    "check:context-deploy": "node scripts/check_context_deploy.mjs",
+    "prebuild": "npm run check:context-deploy",
+    "postbuild": "node scripts/prune_function_traces.mjs && npm run check:function-sizes",
+    "report:retrieval": "node scripts/generate_retrieval_report.mjs",
+    "eval:rag:report": "node scripts/eval_rag_report.mjs",
+    "rag:repair": "node scripts/reindex.mjs",
+    "rag:repair:apply": "node scripts/reindex.mjs --apply",
+    "export:semantic": "node scripts/export_semantic_release.mjs",
+    "test:retrieval-service": "node --test services/retrieval/server.test.mjs"
   },
   "dependencies": {
-    "@sentry/nextjs": "^10.57.0",
-    "@serwist/next": "^9.5.7",
+    "@sentry/nextjs": "^10.78.0",
+    "@serwist/next": "^9.5.13",
     "@upstash/redis": "^1.37.0",
     "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
     "fuse.js": "^7.3.0",
-    "katex": "^0.16.45",
+    "katex": "^0.19.1",
     "lucide-react": "^0.400.0",
-    "mermaid": "^11.17.2",
-    "next": "16.3.3",
+    "mermaid": "^12.3.0",
+    "next": "16.4.6",
     "pino": "^10.3.1",
     "postcss": "8.5.26",
     "react": "^18",
     "react-dom": "^18",
     "react-katex": "^3.1.0",
-    "serwist": "^9.5.7",
+    "serwist": "^9.5.13",
     "swr": "^2.4.1",
     "ts-fsrs": "^5.3.2",
     "use-debounce": "^10.1.1",
-    "zod": "^4.3.6",
-    "zustand": "^5.0.12"
+    "zod": "^4.6.7",
+    "zustand": "^5.0.12",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@types/katex": "^0.16.8",
@@ -90,21 +100,28 @@
     "autoprefixer": "^10.0.1",
     "cross-env": "^10.1.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "16.4.6",
     "null-loader": "^4.0.1",
     "tailwindcss": "^3.4.1",
     "typescript": "^5",
     "vitest": "^4.1.4"
   },
   "overrides": {
-    "dompurify": "^3.4.14",
+    "dompurify": "^3.4.17",
     "uuid": "^14.0.0",
     "next": {
-      ".": "16.3.3",
+      ".": "16.4.6",
       "postcss": "8.5.26"
-    }
+    },
+    "zod": "^4.6.7",
+    "sharp": "^0.35.5",
+    "fast-uri": "^3.1.9",
+    "source-map-js": "^1.2.2",
+    "glob": "^14.0.6",
+    "minimatch": "^11.0.8",
+    "katex": "$katex"
   },
   "optionalDependencies": {
-    "@huggingface/transformers": "^4.2.0"
+    "@huggingface/transformers": "^4.3.2"
   }
 }

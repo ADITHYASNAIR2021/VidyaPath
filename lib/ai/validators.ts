@@ -39,7 +39,8 @@ export interface RevisionPlanResponse {
 }
 
 export interface PaperEvaluateResponse {
-  scoreEstimate: number;
+  scoreEstimate: number | null;
+  assessmentStatus?: 'ungraded-no-marking-scheme';
   sectionBreakdown: Array<{ section: string; score: number; maxScore: number }>;
   mistakes: string[];
   improvementTasks: string[];
@@ -153,18 +154,20 @@ export function cleanTextList(items: string[], maxItems = 10): string[] {
 }
 
 export function isFlashcardArray(value: unknown): value is FlashcardItem[] {
-  if (!Array.isArray(value)) return false;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 15) return false;
   return value.every(
     (item) =>
       !!item &&
       typeof item === 'object' &&
       typeof (item as Record<string, unknown>).front === 'string' &&
-      typeof (item as Record<string, unknown>).back === 'string'
+      typeof (item as Record<string, unknown>).back === 'string' &&
+      String((item as Record<string, unknown>).front).trim().length > 0 &&
+      String((item as Record<string, unknown>).back).trim().length > 0
   );
 }
 
 export function isMCQArray(value: unknown): value is MCQItem[] {
-  if (!Array.isArray(value)) return false;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 50) return false;
   return value.every((item) => {
     if (!item || typeof item !== 'object') return false;
     const record = item as Record<string, unknown>;
@@ -176,14 +179,15 @@ export function isMCQArray(value: unknown): value is MCQItem[] {
     const answers = Array.isArray(record.answers)
       ? record.answers.filter((entry): entry is number => Number.isFinite(Number(entry))).map((entry) => Number(entry))
       : [];
-    const validSingle = Number.isFinite(answer) && answer >= 0 && answer < options.length;
+    const validSingle = typeof record.answer === 'number' && Number.isInteger(answer) && answer >= 0 && answer < options.length;
     const validMultiple = answerMode === 'multiple'
       ? answers.length >= 2 && answers.every((entry) => Number.isInteger(entry) && entry >= 0 && entry < options.length)
       : true;
     return (
       typeof record.question === 'string' &&
-      options.length >= 4 &&
-      options.length <= 5 &&
+      options.length === 4 && Array.isArray(record.options) && record.options.length === options.length && options.every((option) => option.trim().length > 0) &&
+      new Set(options.map((option) => option.trim().toLowerCase())).size === 4 &&
+      typeof record.explanation === 'string' && record.explanation.trim().length > 0 &&
       validSingle &&
       validMultiple
     );
@@ -210,7 +214,7 @@ export function isPaperEvaluateResponse(value: unknown): value is PaperEvaluateR
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
   return (
-    Number.isFinite(Number(record.scoreEstimate)) &&
+    (record.scoreEstimate === null || (typeof record.scoreEstimate === 'number' && Number.isFinite(record.scoreEstimate) && record.scoreEstimate >= 0 && record.scoreEstimate <= 100)) &&
     Array.isArray(record.sectionBreakdown) &&
     Array.isArray(record.mistakes) &&
     Array.isArray(record.improvementTasks)
@@ -277,7 +281,7 @@ export function isChapterDrillResponse(value: unknown): value is ChapterDrillRes
     typeof record.chapterId === 'string' &&
     typeof record.difficulty === 'string' &&
     questionTypeValid &&
-    isMCQArray(record.questions) &&
+    (isMCQArray(record.questions) || (Array.isArray(record.questions) && record.questions.length === 0 && ((Array.isArray(record.shortQuestions) && record.shortQuestions.length > 0) || (Array.isArray(record.longQuestions) && record.longQuestions.length > 0)))) &&
     shortQuestionsValid &&
     longQuestionsValid &&
     Array.isArray(record.answerKey) &&

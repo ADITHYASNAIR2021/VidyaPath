@@ -149,7 +149,9 @@ export async function proxy(request: NextRequest) {
         nonce
       );
     }
-    return nextWithSecurityHeaders(request, nonce);
+    const response = nextWithSecurityHeaders(request, nonce);
+    if (pathname.startsWith('/api/developer/')) response.headers.set('Cache-Control', 'private, no-store');
+    return response;
   }
 
   const redirectUrl = resolveRetiredRedirect(request);

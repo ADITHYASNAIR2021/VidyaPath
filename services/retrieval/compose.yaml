@@ -1,0 +1,22 @@
+services:
+  retrieval:
+    image: vidyapath-retrieval:local
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - ./release:/data:ro
+      - ./model-cache:/models:ro
+    mem_limit: 3g
+    cpus: 2
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+  prepare:
+    image: vidyapath-retrieval:local
+    profiles: ["setup"]
+    command: ["node", "encoder.mjs", "--download"]
+    volumes:
+      - ./model-cache:/models
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]

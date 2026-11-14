@@ -1,9 +1,10 @@
 import type { MCQItem } from '@/lib/ai/validators';
 import type { ContextSnippet } from '@/lib/ai/context-retriever';
 import { logger } from '@/lib/logger';
+import { UNTRUSTED_DATA_RULES } from '@/lib/ai/boundary-policy';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 
 const VERIFY_TIMEOUT_MS = 12_000;
-const MIN_KEEP_RATIO = 0.6;
 
 function buildVerifyPrompt(questions: MCQItem[], snippets: ContextSnippet[]): string {
   const contextText = snippets
@@ -38,7 +39,8 @@ function parseVerifyResponse(text: string, expectedCount: number): boolean[] | n
     .split(',')
     .map((s) => s.trim().toLowerCase());
   if (parts.length !== expectedCount) return null;
-  const results = parts.map((s) => s !== 'false' && s !== '0');
+  if (parts.some((part) => part !== 'true' && part !== 'false')) return null;
+  const results = parts.map((s) => s === 'true');
   return results;
 }
 
@@ -53,6 +55,8 @@ export async function verifySelfCheck(
   if (!groqKey || groqKey.length < 20) return questions;
 
   const batch = questions.slice(0, 15);
+  const budget = await checkAiTokenBudget({ endpoint: 'question-verifier', projectedInputText: `${UNTRUSTED_DATA_RULES}\n${buildVerifyPrompt(batch, snippets)}`, projectedOutputTokens: 120 });
+  if (!budget.allowed) return questions;
 
   try {
     const controller = new AbortController();
@@ -65,8 +69,8 @@ export async function verifySelfCheck(
         Authorization: `Bearer ${groqKey}`,
       },
       body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        messages: [{ role: 'user', content: buildVerifyPrompt(batch, snippets) }],
+        model: 'openai/gpt-oss-20b',
+        messages: [{ role: 'system', content: UNTRUSTED_DATA_RULES }, { role: 'user', content: buildVerifyPrompt(batch, snippets) }],
         temperature: 0,
         max_tokens: 120,
       }),
@@ -85,13 +89,7 @@ export async function verifySelfCheck(
     const remainder = questions.slice(15);
     const filtered = [...batchFiltered, ...remainder];
 
-    if (filtered.length < Math.ceil(questions.length * MIN_KEEP_RATIO)) {
-      logger.warn(
-        { kept: filtered.length, total: questions.length },
-        '[question-verifier] too many rejections — skipping filter'
-      );
-      return questions;
-    }
+    // Never restore answers explicitly rejected by the verifier.
 
     const removed = questions.length - filtered.length;
     if (removed > 0) {

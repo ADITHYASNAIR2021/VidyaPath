@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   BookOpenCheck,
   BrainCircuit,
@@ -349,6 +349,7 @@ function SummaryRenderer({ text }: { text: string }) {
 }
 
 export default function StudentAIToolsPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedChapterId = (searchParams.get('chapter') ?? '').trim();
   const { studiedChapterIds } = useProgressStore();
@@ -704,7 +705,7 @@ export default function StudentAIToolsPage() {
         await chapterFlowActionsRef.current.runDiagnosis();
         return;
       }
-      window.location.href = `/revision?chapter=${encodeURIComponent(selectedChapter.id)}`;
+      router.push(`/revision?chapter=${encodeURIComponent(selectedChapter.id)}`);
     } finally {
       setFlowBusy(false);
     }
@@ -1104,6 +1105,7 @@ export default function StudentAIToolsPage() {
           </div>
 
           <ImageQuestionSolver
+            chapterId={selectedChapter.id}
             key={`image-solver-${selectedChapter.id}`}
             chapterTitle={selectedChapter.title}
             classLevel={selectedChapter.classLevel}

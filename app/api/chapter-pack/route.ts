@@ -14,7 +14,6 @@ import {
   type ChapterPackResponse,
 } from '@/lib/ai/validators';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { chapterPackRequestSchema } from '@/lib/schemas/ai';
@@ -137,6 +136,7 @@ async function handlePost(req: Request) {
       });
     }
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/chapter-pack',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 1700,
@@ -253,21 +253,11 @@ Return ONLY JSON:
         examStrategy: cleanTextList(data.examStrategy, 6).length > 0 ? cleanTextList(data.examStrategy, 6) : fallback.examStrategy,
         sourceCitations,
       };
-      await logAiUsage({
-        endpoint: '/api/chapter-pack',
-        provider: result.provider,
-        model: result.model,
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
-        totalTokens: result.usage?.totalTokens,
-        requestId,
-        estimated: !result.usage,
-      });
 
       return dataJson({ requestId, data: payload });
     } catch (aiError) {
       logger.warn({ err: aiError }, '[chapter-pack] AI fallback triggered');
-      return dataJson({ requestId, data: fallback });
+      return errorJson({ requestId, errorCode: 'grounded-generation-unavailable', message: 'A safe, grounded result is not available. Review the chapter material and try again.', status: 503 });
     }
   } catch (error) {
     logger.error({ err: error }, '[chapter-pack] error');

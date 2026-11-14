@@ -42,6 +42,7 @@ import InlinePDFViewer from '@/components/InlinePDFViewer';
 import FlashcardDeck from '@/components/FlashcardDeck';
 import AnalyticsTracker from '@/components/AnalyticsTracker';
 import ScrollToTopOnMount from '@/components/ScrollToTopOnMount';
+import { readRetrievalReport } from '@/lib/ai/retrieval-report';
 
 // Generate static params for all chapters
 export function generateStaticParams() {
@@ -164,6 +165,7 @@ export default async function ChapterDetailPage({
   const groundedFrequency = await getGroundedFrequencyLabel(chapter.id);
   const paperYearUniverse = await getGroundedPaperYearUniverse();
   const careerMap = getChapterCareerMap(chapter.id);
+  const coverage = (await readRetrievalReport())?.chapters.find((row) => row.id === chapter.id);
 
   const youtubeUrl = `https://www.youtube.com/results?search_query=CBSE+Class+${chapter.classLevel}+${chapter.subject}+${encodeURIComponent(chapter.title)}+NCERT`;
   const ncertExemplarUrl = chapter.ncertExemplarUrl || `https://ncert.nic.in/exemplar-problems.php`;
@@ -321,8 +323,8 @@ export default async function ChapterDetailPage({
             {/* ── PYQ Analysis ──────────────────────────────────── */}
             {(() => {
               const pyq = chapterPyq;
-              const freq = groundedFrequency ?? getFrequencyLabel(chapter.id);
               if (!pyq) return null;
+              const freq = pyq.yearsAsked.length ? groundedFrequency ?? getFrequencyLabel(chapter.id) : null;
               const recentYears = pyq.yearsAsked.filter(y => y >= 2019).sort((a,b) => b-a);
               const olderYears = pyq.yearsAsked.filter(y => y < 2019).sort((a,b) => b-a);
               const allYears = [...pyq.yearsAsked].sort((a, b) => b - a);
@@ -347,6 +349,9 @@ export default async function ChapterDetailPage({
                   </div>
 
                   {/* Stats row */}
+                  <p className="mb-3 text-xs text-[#4A4A6A]">
+                    Marks and focus topics are heuristic study guidance, not a marking scheme or exam prediction. Years come from indexed chapter-paper tags; a tag does not verify an individual exam question.
+                  </p>
                   <div className="grid grid-cols-3 gap-3 mb-4">
                     <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-center">
                       <div className="text-2xl font-bold text-indigo-700">{pyq.yearsAsked.length}</div>
@@ -354,11 +359,11 @@ export default async function ChapterDetailPage({
                     </div>
                     <div className="bg-saffron-50 border border-saffron-100 rounded-xl p-3 text-center">
                       <div className="text-2xl font-bold text-saffron-600">~{pyq.avgMarks}</div>
-                      <div className="text-xs text-saffron-500 mt-0.5">Avg marks</div>
+                      <div className="text-xs text-saffron-500 mt-0.5">Estimated marks</div>
                     </div>
                     <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-center">
                       <div className="text-2xl font-bold text-emerald-700">
-                        {oldestKnownYear}-{latestKnownYear}
+                        {allYears.length ? `${oldestKnownYear}-${latestKnownYear}` : 'No verified years'}
                       </div>
                       <div className="text-xs text-emerald-500 mt-0.5">Known range</div>
                     </div>
@@ -407,7 +412,7 @@ export default async function ChapterDetailPage({
                   {/* Important PYQ topics */}
                   {pyq.importantTopics.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold text-[#4A4A6A] mb-2">Most frequently asked topics</div>
+                      <div className="text-xs font-semibold text-[#4A4A6A] mb-2">Suggested focus topics</div>
                       <div className="space-y-1">
                         {pyq.importantTopics.slice(0, 4).map((topic, i) => (
                           <div key={topic} className="flex items-center gap-2 text-sm text-[#4A4A6A]">
@@ -581,15 +586,15 @@ export default async function ChapterDetailPage({
               </div>
 
               <div>
-                <AIChatBox
+                {coverage?.chunks === 0 ? <div role="status" className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100">AI source material for this chapter is not available yet. You can read the study material here; grounded AI answers will become available when chapter sources are added.</div> : <AIChatBox
                   chapterId={chapter.id}
                   chapterTitle={chapter.title}
                   chapterTopics={chapter.topics}
                   classLevel={chapter.classLevel}
                   subject={chapter.subject}
-                />
+                />}
                 <p className="text-xs text-[#8A8AAA] text-center mt-2">
-                  VidyaAI is trained on NCERT curriculum only
+                  Uses retrieved NCERT and board-paper excerpts. Verify answers with your textbook or teacher.
                 </p>
               </div>
 

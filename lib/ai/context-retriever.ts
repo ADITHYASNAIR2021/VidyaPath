@@ -23,6 +23,10 @@ import {
 } from '@/lib/ai/retrieval-index';
 import { logger } from '@/lib/logger';
 import { sharedState } from '@/lib/runtime/shared-state';
+import { inspectAiText, recordBoundaryBlock } from '@/lib/ai/boundary-policy';
+import { readRetrievalReport } from '@/lib/ai/retrieval-report';
+import { searchVectorStore } from '@/lib/ai/vector-store';
+import { searchRemoteIndex, resolveRemoteHits } from '@/lib/ai/remote-retrieval';
 
 export type ContextTask =
   | 'chat'
@@ -92,6 +96,8 @@ export interface ContextSnippet {
 }
 
 export interface ContextQuery {
+  /** Deterministic diagnostics: never call providers or run PDF extraction. */
+  localOnly?: boolean;
   task: ContextTask;
   classLevel: number;
   subject: string;
@@ -102,6 +108,7 @@ export interface ContextQuery {
 }
 
 export interface ContextPack {
+  chapterCoverage?: { requested: string[]; retrieved: string[]; missing: string[] };
   snippets: ContextSnippet[];
   contextHash: string;
   usedOnDemandFallback: boolean;
@@ -251,7 +258,7 @@ async function compressContextSnippets(
   return Promise.all(
     snippets.map(async (snippet, index) => {
       const compressed =
-        index < 4
+        !query.localOnly && index < 4
           ? await compressRetrievedSnippet({
               query: focusText,
               subject: query.subject,
@@ -325,6 +332,8 @@ function supportsRemoteSemanticEmbeddings(): boolean {
   return rag.embeddingKind === 'nvidia-e5' && rag.embeddingDim > 0;
 }
 
+let localEmbeddingPipeline: Promise<unknown> | null = null;
+
 async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
   if (supportsRemoteSemanticEmbeddings()) {
     const nvidiaKey = process.env.NVIDIA_API_KEY?.trim();
@@ -350,7 +359,21 @@ async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
     }
   }
   if (rag.embeddingKind === 'onnx-minilm') {
-    // ONNX model execution is intentionally build-time only. Shipping the
+    if (process.env.AI_ENABLE_LOCAL_EMBEDDINGS === '1' && !process.env.VERCEL) {
+      try {
+        localEmbeddingPipeline ??= import('@huggingface/transformers').then(({ pipeline, env }) => {
+          env.cacheDir = path.join(process.cwd(), '.cache', 'embeddings');
+          return pipeline('feature-extraction', rag.embeddingModel, { dtype: /e5/i.test(rag.embeddingModel) ? 'q8' : 'fp32' });
+        });
+        const pipe = await localEmbeddingPipeline as (text: string, options: Record<string, unknown>) => Promise<{ data: Float32Array }>;
+        const input = /e5/i.test(rag.embeddingModel) ? `query: ${text}` : text;
+        const output = await pipe(input, { pooling: 'mean', normalize: true });
+        if (output.data.length === rag.embeddingDim) return Float32Array.from(output.data);
+      } catch (error) {
+        logger.warn({ err: error }, '[context-retriever] Local semantic query failed; using BM25');
+      }
+    }
+    // Local ONNX execution is opt-in on long-running servers. Shipping the
     // transformer runtime in every serverless route adds hundreds of MB and
     // exceeds Vercel's function limit. Production semantic retrieval uses
     // pgvector/remote embeddings; BM25 remains the deterministic local fallback.
@@ -537,13 +560,21 @@ async function loadContextArtifactsNow(now: number): Promise<void> {
   rag.loadedAt = now;
 
   const cdnBaseUrl = (process.env.CONTEXT_CDN_URL || '').trim().replace(/\/+$/, '');
+  const manifest = await readRetrievalReport();
+  const expectedHashes = new Map((manifest?.artifacts ?? []).map((file) => [file.file.replace(/\.gz$/, ''), file.uncompressedSha256]));
+  if (manifest?.optionalVectorArtifact) expectedHashes.set('chunk_vectors.jsonl', manifest.optionalVectorArtifact.uncompressedSha256);
+  const validateArtifact = (fileName: string, text: string): string => {
+    const expected = expectedHashes.get(fileName);
+    if (expected && createHash('sha256').update(text).digest('hex') !== expected) throw new Error(`RAG artifact integrity mismatch: ${fileName}`);
+    return text;
+  };
 
   try {
     // ── Fetch context files from local disk or CDN ──
     const fetchFile = async (localPath: string, fileName: string): Promise<string> => {
       // Try local disk first
       try {
-        return await fs.readFile(localPath, 'utf-8');
+        return validateArtifact(fileName, await fs.readFile(localPath, 'utf-8'));
       } catch {
         // CI and production commits keep large context artifacts compressed.
         // Load the adjacent .gz file before considering a remote CDN fallback.
@@ -552,24 +583,26 @@ async function loadContextArtifactsNow(now: number): Promise<void> {
             import('node:zlib'),
             fs.readFile(`${localPath}.gz`),
           ]);
-          return gunzipSync(compressed).toString('utf-8');
+          return validateArtifact(fileName, gunzipSync(compressed, { maxOutputLength: 256 * 1024 * 1024 }).toString('utf-8'));
         } catch {
           // Local compressed artifact is unavailable — try the configured CDN.
         }
 
         // Fallback: fetch from CDN if configured (prefer .gz for smaller transfer)
         if (cdnBaseUrl) {
+          // Remote content must match the manifest pinned by this deployment.
+          if (!expectedHashes.get(fileName)) return '';
           try {
-            const gzRes = await fetch(`${cdnBaseUrl}/${fileName}.gz`);
+            const gzRes = await fetch(`${cdnBaseUrl}/${fileName}.gz`, { signal: AbortSignal.timeout(8000) });
             if (gzRes.ok) {
               const { gunzipSync } = await import('node:zlib');
               const compressed = Buffer.from(await gzRes.arrayBuffer());
-              return gunzipSync(compressed).toString('utf-8');
+              return validateArtifact(fileName, gunzipSync(compressed, { maxOutputLength: 256 * 1024 * 1024 }).toString('utf-8'));
             }
           } catch { /* .gz not available — try raw */ }
           try {
-            const res = await fetch(`${cdnBaseUrl}/${fileName}`);
-            if (res.ok) return await res.text();
+            const res = await fetch(`${cdnBaseUrl}/${fileName}`, { signal: AbortSignal.timeout(8000) });
+            if (res.ok) return validateArtifact(fileName, await res.text());
           } catch { /* CDN fetch failed — return empty */ }
         }
         return '';
@@ -579,7 +612,10 @@ async function loadContextArtifactsNow(now: number): Promise<void> {
     const [chunkPayloads, indexPayloads, vectorPayload, retrievalIndexPayload] = await Promise.all([
       Promise.all(CHUNK_PATHS.map((p) => fetchFile(p, path.basename(p)))),
       Promise.all(INDEX_PATHS.map((p) => fetchFile(p, path.basename(p)))),
-      fetchFile(VECTOR_INDEX_PATH, path.basename(VECTOR_INDEX_PATH)),
+      // Local vectors are unnecessary for BM25/remote diagnostics. Avoid reading
+      // hundreds of MB unless a matching local/hosted query encoder is enabled.
+      !process.env.VERCEL && (process.env.AI_ENABLE_LOCAL_EMBEDDINGS === '1' || (Object.keys(manifest?.totals.vectorModels ?? {}).some((key) => key.startsWith('nvidia-e5|')) && isUsableNvidiaApiKey(process.env.NVIDIA_API_KEY)))
+        ? fetchFile(VECTOR_INDEX_PATH, path.basename(VECTOR_INDEX_PATH)) : Promise.resolve(''),
       fetchFile(RETRIEVAL_INDEX_PATH, path.basename(RETRIEVAL_INDEX_PATH)),
     ]);
 
@@ -621,6 +657,11 @@ async function loadContextArtifactsNow(now: number): Promise<void> {
       })
       .filter((entry) => isHighQualityChunk(entry.text))
       .filter((entry) => {
+        const issue = inspectAiText(`${entry.sourcePath}\n${entry.text}`, 'retrieval');
+        if (issue) recordBoundaryBlock('retrieval', issue);
+        return !issue;
+      })
+      .filter((entry) => {
         const dedupeKey = `${entry.chapterId ?? 'none'}|${entry.sourcePath}|${entry.text.slice(0, 260).toLowerCase()}`;
         if (seen.has(dedupeKey)) return false;
         seen.add(dedupeKey);
@@ -643,7 +684,12 @@ async function loadContextArtifactsNow(now: number): Promise<void> {
             embeddingModel?: string;
           };
           if (!parsed.id || !Array.isArray(parsed.embedding)) continue;
-          if (parsed.embedding.length === 0) continue;
+          if (parsed.embedding.length === 0 || !parsed.embedding.every((value) => typeof value === 'number' && Number.isFinite(value))) continue;
+          const kind = parsed.embeddingKind ?? 'hashed-bow';
+          if (rag.persistedEmbeddings.size > 0 && (
+            parsed.embedding.length !== rag.embeddingDim || kind !== rag.embeddingKind ||
+            (parsed.embeddingModel && parsed.embeddingModel !== rag.embeddingModel)
+          )) continue;
           const vec = new Float32Array(parsed.embedding);
           rag.persistedEmbeddings.set(parsed.id, vec);
           if (rag.persistedEmbeddings.size === 1) {
@@ -702,12 +748,16 @@ async function loadContextArtifactsNow(now: number): Promise<void> {
 export function getRetrievalStats() {
   return {
     chunkCount: rag.chunks.length,
-    chapterCount: Object.keys(rag.index).length,
+    chapterCount: Object.keys(rag.index.chapters ?? {}).length,
     hasVectors: rag.persistedEmbeddings.size > 0,
     hasRetrievalIndex: !!rag.retrievalIndex,
     embeddingKind: rag.embeddingKind,
     embeddingDim: rag.embeddingDim,
     embeddingModel: rag.embeddingModel,
+    semanticEnabled: rag.persistedEmbeddings.size > 0 && (
+      (rag.embeddingKind === 'nvidia-e5' && isUsableNvidiaApiKey(process.env.NVIDIA_API_KEY)) ||
+      (rag.embeddingKind === 'onnx-minilm' && process.env.AI_ENABLE_LOCAL_EMBEDDINGS === '1' && !process.env.VERCEL)
+    ),
     degraded: rag.chunks.length === 0,
     lastLoadedAt: rag.loadedAt,
   };
@@ -746,16 +796,16 @@ function computeScore(chunk: ContextChunk, query: ContextQuery, queryEmbedding: 
   if (queryEmbedding !== null) {
     let chunkEmbedding = rag.chunkEmbeddings.get(chunk.id);
     if (!chunkEmbedding) {
-      chunkEmbedding = rag.persistedEmbeddings.get(chunk.id) ?? buildLocalEmbedding(chunk.text);
-      rag.chunkEmbeddings.set(chunk.id, chunkEmbedding);
+      chunkEmbedding = rag.persistedEmbeddings.get(chunk.id);
+      if (!chunkEmbedding && rag.embeddingKind === 'hashed-bow') chunkEmbedding = buildLocalEmbedding(chunk.text);
+      if (chunkEmbedding) rag.chunkEmbeddings.set(chunk.id, chunkEmbedding);
     }
-    if (chunkEmbedding.length !== queryEmbedding.length) {
-      chunkEmbedding = buildLocalEmbedding(chunk.text);
-      rag.chunkEmbeddings.set(chunk.id, chunkEmbedding);
+    // Missing/stale vectors must not be compared to a different model space.
+    if (chunkEmbedding?.length === queryEmbedding.length) {
+      const semantic = cosineSimilarity(chunkEmbedding, queryEmbedding);
+      const semanticWeight = rag.embeddingKind === 'nvidia-e5' ? 24 : rag.embeddingKind === 'onnx-minilm' ? 20 : 12;
+      score += Math.max(0, semantic) * semanticWeight;
     }
-    const semantic = cosineSimilarity(chunkEmbedding, queryEmbedding);
-    const semanticWeight = rag.embeddingKind === 'nvidia-e5' ? 24 : rag.embeddingKind === 'onnx-minilm' ? 20 : 12;
-    score += Math.max(0, semantic) * semanticWeight;
   }
 
   if (chunk.sourceType === 'textbook') {
@@ -826,6 +876,7 @@ function shouldUseNvidiaRerankByConfig(): boolean {
 }
 
 function shouldUseNvidiaRerank(query: ContextQuery): boolean {
+  if (query.localOnly) return false;
   if (!query.query || !query.query.trim()) return false;
   return shouldUseNvidiaRerankByConfig();
 }
@@ -1202,10 +1253,13 @@ async function runOnDemandExtraction(relativePath: string): Promise<string> {
 }
 
 async function getOnDemandSnippet(query: ContextQuery): Promise<ContextSnippet | null> {
+  if (query.localOnly) return null;
   const sourcePath = selectFallbackSource(query);
   if (!sourcePath) return null;
 
   const extracted = await runOnDemandExtraction(sourcePath);
+  // A file path and topic list are metadata, not grounded source material.
+  if (!extracted || !isHighQualityChunk(extracted)) return null;
   const chapter = query.chapterId ? getChapterById(query.chapterId) : undefined;
   const fallbackText =
     extracted ||
@@ -1270,7 +1324,7 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     chapterTopics,
     pyqTopics: localPyq?.importantTopics ?? [],
   });
-  const hydeQuery = await buildHyDEQuery(
+  const hydeQuery = query.localOnly ? expandedQuery : await buildHyDEQuery(
     expandedQuery,
     query.subject,
     query.classLevel,
@@ -1289,11 +1343,32 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
   const topicChunkIds = new Set(topicFocusResults.flatMap((entry) => entry.chunkIds));
   const wantsVisual = needsVisualRetrieval(query.query ?? expandedQuery, query.task, chapterTopics);
   const focusText = unique([expandedQuery, hydeQuery, ...topicFocus]).join(' ').trim();
+  const normalizeTerm = (term: string) => term.length > 4 && term.endsWith('s') && !term.endsWith('ss') ? term.slice(0, -1) : term;
+  const questionTerms = unique(tokenizeRetrievalText(query.query || '').filter((term) => !['explain', 'describe', 'please', 'give', 'create', 'generate', 'how', 'why', 'does'].includes(term)).map(normalizeTerm));
+  const contentMatch = (snippet: ContextSnippet): number => {
+    if (!questionTerms.length) return 0;
+    const contentTerms = new Set(tokenizeRetrievalText(snippet.text).map(normalizeTerm));
+    let matched = 0, total = 0;
+    for (const term of questionTerms) {
+      const weight = Math.max(1, Math.min(8, retrievalIndex.idf[term] || 1));
+      total += weight;
+      if (contentTerms.has(term)) matched += weight;
+    }
+    return total ? matched / total : 0;
+  };
+  const semanticQuery = { ...query, subject: normalizedSubject, query: query.query?.trim() || expandedQuery };
+  const vectorCandidates = process.env.AI_VECTOR_BACKEND === 'remote'
+    ? resolveRemoteHits(await searchRemoteIndex(semanticQuery), semanticQuery, rag.chunks)
+    : await searchVectorStore(semanticQuery);
 
   const selectDiversifiedSnippets = (rankedCandidates: Array<{ snippet: ContextSnippet; score: number }>): ContextSnippet[] => {
     const uniqueCandidates: Array<{ snippet: ContextSnippet; score: number }> = [];
     const seen = new Set<string>();
     for (const entry of rankedCandidates.sort((a, b) => b.score - a.score)) {
+      if (!isHighQualityChunk(entry.snippet.text)) continue;
+      if (query.chapterId && entry.snippet.chapterId && entry.snippet.chapterId !== query.chapterId) continue;
+      const issue = inspectAiText(`${entry.snippet.sourcePath}\n${entry.snippet.text}`, 'retrieval');
+      if (issue) { recordBoundaryBlock('retrieval', issue); continue; }
       const key = buildSnippetDedupeKey(entry.snippet);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1338,9 +1413,10 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     const densePool = !broadenSubjectScope && chapterScoped.length >= Math.min(topK, 2) ? chapterScoped : subjectScoped;
     const candidatePoolSize = resolveCandidatePoolSize(topK, broadenSubjectScope ? 96 : 72);
 
-    const denseLists: Array<Array<{ item: ContextSnippet; score: number }>> = [];
+    const denseLists: Array<Array<{ item: ContextSnippet; score: number }>> = vectorCandidates.length
+      ? [vectorCandidates.map((item) => ({ item, score: item.relevanceScore }))] : [];
     for (const variant of unique(queryVariants).slice(0, 4)) {
-      const queryEmbedding = await buildQueryEmbedding(variant);
+      const queryEmbedding = query.localOnly ? null : await buildQueryEmbedding(variant);
       const denseRanked = densePool
         .map((chunk) => ({ chunk, score: computeScore(chunk, query, queryEmbedding) }))
         .filter((entry) => entry.score > 0)
@@ -1366,7 +1442,7 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     }
 
     const sparseLists = unique(queryVariants).slice(0, 4).map((variant) =>
-      searchBm25Documents(retrievalIndex, `${variant} ${topicFocus.join(' ')}`.trim(), {
+      searchBm25Documents(retrievalIndex, variant, {
         classLevel: query.classLevel,
         subject: normalizedSubject,
         chapterId: broadenSubjectScope ? undefined : query.chapterId,
@@ -1402,7 +1478,10 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
         modalityHints: entry.item.modalityHints ?? inferModalityHints(entry.item.text, normalizeSnippetSourceType(entry.item.sourceType)),
         topicHints: entry.item.topicHints ?? [],
       };
-      let score = Math.max(entry.item.relevanceScore || 0, entry.score * 1000);
+      // Metadata/topic labels aid recall but must not substitute for words in
+      // the actual passage. Keep scale-independent fusion bounded beside the
+      // student's specific question, evaluated against excerpt text only.
+      let score = Math.min(35, entry.score * 500) + contentMatch(snippet) * 65;
       if (topicChunkIds.has(snippet.id)) score += 8;
       if (wantsVisual && (snippet.sourceType === 'image-ocr' || (snippet.modalityHints ?? []).includes('diagram'))) score += 6;
       rankedCandidates.push({
@@ -1422,6 +1501,7 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
         correctiveActions,
         strategies: unique([
           localDenseStrategy,
+          vectorCandidates.length ? (process.env.AI_VECTOR_BACKEND === 'remote' ? 'remote-e5-index' : 'pgvector-dense') : '',
           'contextual-bm25',
           'rank-fusion',
         'topic-hierarchy',
@@ -1444,17 +1524,29 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
       }
     }
 
-    const rerankPool = selected.slice(0, Math.max(topK * 2, topK));
+    // Rerank the candidate pool before truncating to the requested result count.
+    const rerankPool: ContextSnippet[] = [];
+    const rerankKeys = new Set<string>();
+    for (const snippet of [...selected, ...rankedCandidates.map((entry) => entry.snippet)]) {
+      if (!isHighQualityChunk(snippet.text)) continue;
+      if (query.chapterId && snippet.chapterId && snippet.chapterId !== query.chapterId) continue;
+      if (inspectAiText(`${snippet.sourcePath}\n${snippet.text}`, 'retrieval')) continue;
+      const key = buildSnippetDedupeKey(snippet);
+      if (rerankKeys.has(key)) continue;
+      rerankKeys.add(key);
+      rerankPool.push(snippet);
+      if (rerankPool.length >= topK * 3) break;
+    }
     const reranked = shouldUseNvidiaRerank(query)
       ? await rerankContextSnippets(query, rerankPool).catch(() => rerankPool)
       : rerankPool;
     const finalSnippets = reranked.slice(0, topK);
-    const compressed = await compressContextSnippets(finalSnippets, focusText, query);
+    const compressed = await compressContextSnippets(finalSnippets, query.query?.trim() || focusText, query);
     return {
       snippets: compressed,
       contextHash: buildContextHash(compressed),
       usedOnDemandFallback,
-      usedPgvector: false,
+      usedPgvector: process.env.AI_VECTOR_BACKEND === 'supabase' && vectorCandidates.length > 0,
       retrievalMeta: buildRetrievalMeta(compressed, query.chapterId, {
         queryText: focusText,
         topicFocus,
@@ -1464,7 +1556,9 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
     };
   };
 
-  const localPrimary = await buildLocalHybridPack([focusText], false);
+  // Preserve the student's specific question as an independent search. Mixing
+  // every chapter topic into it can bury the relevant subsection in broad hits.
+  const localPrimary = await buildLocalHybridPack([query.query?.trim() || expandedQuery, focusText], false);
   const localCorrective =
     localPrimary.retrievalMeta?.confidenceLevel === 'low'
       ? await buildLocalHybridPack(buildCorrectiveQueries(query, expandedQuery, topicFocus), true, [
@@ -1477,5 +1571,40 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
       ? localCorrective
       : localPrimary;
 
+  // Broad subject chunks supplement a verified chapter; they cannot establish
+  // that an otherwise missing chapter (for example an absent story) is covered.
+  if (chapter && query.chapterId && !bestLocal.snippets.some((snippet) => snippet.chapterId === query.chapterId)) {
+    return { ...bestLocal, snippets: [], contextHash: buildContextHash([]), retrievalMeta: buildRetrievalMeta([], query.chapterId, { queryText: query.query || '', correctiveActions: ['missing-direct-chapter-evidence'], strategies: ['chapter-coverage-required'] }) };
+  }
   return bestLocal;
+}
+
+/** Interleave evidence so a multi-chapter request cannot silently use only its first chapter. */
+export async function getMultiChapterContextPack(input: { task: ContextTask; chapterIds: string[]; query: string; topK?: number; localOnly?: boolean }): Promise<ContextPack> {
+  const ids = unique(input.chapterIds).slice(0, 16);
+  const packs: Array<{ chapterId: string; pack: ContextPack }> = [];
+  for (let start = 0; start < ids.length; start += 4) {
+    const batch = await Promise.all(ids.slice(start, start + 4).map(async (id) => {
+      const chapter = getChapterById(id);
+      if (!chapter) throw new Error('Unknown chapter in multi-chapter retrieval');
+      const pack = await getContextPack({ task: input.task, classLevel: chapter.classLevel, subject: chapter.subject, chapterId: id, chapterTopics: chapter.topics, query: `${input.query} ${chapter.title}`, topK: 2, localOnly: input.localOnly });
+      return { chapterId: id, pack };
+    }));
+    packs.push(...batch);
+  }
+  const snippets: ContextSnippet[] = [];
+  const seen = new Set<string>();
+  for (let rank = 0; rank < 4; rank++) {
+    for (const { pack } of packs) {
+      const snippet = pack.snippets[rank];
+      if (snippet && !seen.has(snippet.id)) { seen.add(snippet.id); snippets.push(snippet); }
+    }
+  }
+  const selected = snippets.slice(0, Math.max(ids.length, Math.min(32, input.topK ?? 16)));
+  const retrieved = packs.filter(({ pack }) => pack.snippets.length > 0).map(({ chapterId }) => chapterId);
+  return {
+    snippets: selected, contextHash: buildContextHash(selected), usedOnDemandFallback: packs.some(({ pack }) => pack.usedOnDemandFallback), usedPgvector: packs.some(({ pack }) => pack.usedPgvector),
+    retrievalMeta: buildRetrievalMeta(selected, undefined, { queryText: input.query, strategies: ['multi-chapter-interleaved'] }),
+    chapterCoverage: { requested: ids, retrieved, missing: ids.filter((id) => !retrieved.includes(id)) },
+  };
 }

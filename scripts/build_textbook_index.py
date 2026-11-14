@@ -24,6 +24,7 @@ Why semantic chunking:
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import logging
@@ -31,6 +32,8 @@ import os
 import re
 import sys
 import warnings
+from textbook_identity import match_textbook_chapter, textbook_heading_text
+from pdf_text_fallback import extract_page_text
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,7 +91,7 @@ CHAPTER_META_RE = re.compile(
     r"classLevel:\s*(?P<class>\d+).*?"
     r"subject:\s*'(?P<subject>[^']+)'.*?"
     r"chapterNumber:\s*(?P<number>\d+).*?"
-    r"title:\s*'(?P<title>[^']+)'",
+    r"title:\s*'(?P<title>(?:\\'|[^'])+)'.*?topics:\s*\[(?P<topics>.*?)\]",
     re.DOTALL,
 )
 
@@ -100,6 +103,7 @@ class ChapterMeta:
     subject: str
     chapter_number: int
     title: str
+    topics: List[str]
 
 
 @dataclass
@@ -202,6 +206,7 @@ def load_chapter_meta(data_ts_path: Path) -> Tuple[Dict[str, ChapterMeta], Dict[
             subject=match.group("subject").strip(),
             chapter_number=int(match.group("number")),
             title=match.group("title").replace("\\'", "'").strip(),
+            topics=parse_topic_literals(match.group("topics")),
         )
         by_id[chapter.chapter_id] = chapter
         by_key[(chapter.class_level, chapter.subject, chapter.chapter_number)] = chapter
@@ -217,7 +222,7 @@ def extract_pdf_text(pdf_path: Path) -> str:
     lines: List[str] = []
     for page_num, page in enumerate(reader.pages):
         try:
-            page_text = page.extract_text() or ""
+            page_text = extract_page_text(page, pdf_path, page_num)
         except Exception as page_exc:
             print(f"[WARN] {pdf_path.name} page {page_num}: {page_exc}", file=sys.stderr)
             page_text = ""
@@ -453,24 +458,26 @@ def iter_pdfs(
         yield pdf, class_level, medium, subject_raw, subject_normalized
 
 
+def parse_topic_literals(value: str) -> List[str]:
+    try:
+        result = ast.literal_eval("[" + value + "]")
+        return [item for item in result if isinstance(item, str)]
+    except (ValueError, SyntaxError):
+        return []
+
+
 def resolve_chapter_identity(
     class_level: int,
     subject_normalized: str,
     chapter_number: int,
     chapter_code: str,
     chapter_meta_by_key: Dict[Tuple[int, str, int], ChapterMeta],
+    raw_text: str = "",
 ) -> Tuple[str, int, str]:
-    if chapter_number > 0:
-        key = (class_level, subject_normalized, chapter_number)
-        chapter = chapter_meta_by_key.get(key)
-        if chapter:
-            return chapter.chapter_id, chapter.chapter_number, chapter.title
-
-        if class_level == 10 and subject_normalized == "Science":
-            for science_subject in ("Chemistry", "Biology", "Physics"):
-                chapter = chapter_meta_by_key.get((10, science_subject, chapter_number))
-                if chapter:
-                    return chapter.chapter_id, chapter.chapter_number, chapter.title
+    metadata = [{"id": chapter.chapter_id, "classLevel": chapter.class_level, "subject": chapter.subject, "title": chapter.title, "chapterNumber": chapter.chapter_number, "topics": chapter.topics} for chapter in chapter_meta_by_key.values()]
+    matched, _, _ = match_textbook_chapter(raw_text, class_level, subject_normalized, metadata)
+    if matched:
+        return matched["id"], matched["chapterNumber"], matched["title"]
 
     chapter_num = chapter_number if chapter_number > 0 else 0
     suffix = f"{chapter_code}-{chapter_num:02d}" if chapter_num > 0 else chapter_code
@@ -655,6 +662,7 @@ def build_semantic_index(
             chapter_number=chapter_number,
             chapter_code=chapter_code,
             chapter_meta_by_key=chapter_meta_by_key,
+            raw_text=textbook_heading_text(pdf_path, raw_text),
         )
 
         visual_candidates = []

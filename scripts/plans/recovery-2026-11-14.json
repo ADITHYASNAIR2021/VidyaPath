@@ -1,0 +1,6 @@
+[
+  {"sourcePath":"dataset/ncert_textbooks/Class_10/English_Medium/Science/jesc108.pdf","page":3,"reason":"pypdf-decompression-limit; original log uses zero-based page 2"},
+  {"sourcePath":"dataset/ncert_textbooks/Class_12/English_Medium/Biology/lebo101.pdf","page":14,"reason":"pypdf-decompression-limit; original log uses zero-based page 13"},
+  {"sourcePath":"dataset/ncert_textbooks/Class_12/English_Medium/Biology/lebo102.pdf","page":9,"reason":"pypdf-decompression-limit; original log uses zero-based page 8"},
+  {"sourcePath":"dataset/ncert_textbooks/Class_12/English_Medium/Biology/lebo102.pdf","page":11,"reason":"pypdf-decompression-limit; original log uses zero-based page 10"}
+]

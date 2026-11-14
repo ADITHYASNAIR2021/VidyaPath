@@ -1,35 +1,43 @@
-# Vercel Environment Setup
+# Deployment environment — 14 November 2026
 
-VidyaPath is a public, no-login site with no database. Nothing below blocks the build;
-missing values only log warnings at startup.
+Static chapters/papers require no database. Production AI requires shared rate limits and at least one usable model key. Missing Redis protection pauses AI; it does not pause static study material.
 
-## AI (at least one key for AI features)
-- `GROQ_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`
+## Required for production AI
 
-## Recommended
-- `NEXT_PUBLIC_APP_URL` — canonical URL (sitemap, robots, metadata, CSRF origin pinning)
-- `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` — shared rate limits, daily AI budget and developer-console usage metrics across instances
-- `DEVELOPER_DASHBOARD_KEY` — 24+ random characters; enables the operator console at `/developer`
-  (`node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`)
-- `CONTEXT_CDN_URL` — **required in production for full PYQ grounding.** `lib/context/chunks.jsonl(.gz)` (board-paper
-  chunks) is gitignored, so Vercel builds don't contain it. Upload `chunks.jsonl.gz` (and optionally `chunk_vectors.jsonl.gz`)
-  to any public static host and set this to that folder URL. Check /developer → RAG index: every file except
-  `chunk_vectors.jsonl` should show `local`, `local-gz` or `cdn`.
+- At least one of `GEMINI_API_KEY`, `GROQ_API_KEY`, `NVIDIA_API_KEY`, `MISTRAL_API_KEY`. The image solver specifically needs Gemini. Cerebras is explicit opt-in because the registered model requires billing.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. Shared limiter/budget outages block calls rather than resetting limits or failing open.
+- `NEXT_PUBLIC_APP_URL`, set to the canonical site origin.
+- For operator access: a random `DEVELOPER_DASHBOARD_KEY` of at least 24 characters. Never use a `NEXT_PUBLIC_` name for any secret.
 
-## Cost controls for public AI
-- `AI_PUBLIC_DAILY_REQUESTS_PER_IP` (default 120)
-- `AI_DAILY_TOKEN_BUDGET_GLOBAL` (default 1,000,000 tokens/day; AI pauses until 00:00 UTC once spent)
-- `AI_MAX_TOKENS_PER_REQUEST` (default 4000)
+## Corpus serving
 
-## Optional
-- `AI_IMAGE_SOLVE_MODELS` — comma-separated Gemini vision models for the image solver (default: gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-2.5-flash)
-- `AI_ENABLE_NVIDIA_RERANK=0` — skip the NVIDIA reranker (its default model was retired 2026-08-25; the app pauses it automatically after a 410)
-- `AI_TASK_MODEL_MAP` / `AI_TASK_MODEL_<TASK>` — override model fallback chains without a code change
-- `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` or `NEXT_PUBLIC_UMAMI_WEBSITE_ID` + `NEXT_PUBLIC_UMAMI_SCRIPT_URL` — cookieless analytics
-- `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` — error tracking
+The build includes paper chunks as `chunks.jsonl.gz`, `textbook_chunks.jsonl.gz`, compressed chapter maps, compressed BM25 index and `retrieval_manifest.json`. `npm run build` verifies hashes, removes offline/private trace references and checks every page/API trace. See [the deployment runbook](../DEPLOYMENT_RUNBOOK.md) for the optional private E5 service, exact upload destinations and rollback.
 
-## No longer used (safe to delete from the Vercel project)
-`SESSION_SIGNING_SECRET`, `TEACHER_PORTAL_KEY`, `ADMIN_PORTAL_KEY`, `DEVELOPER_USERNAME`, `DEVELOPER_PASSWORD`,
-`AUTH_ENABLE_LEGACY_SESSIONS`, `SINGLE_ENV_MODE`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `AI_ENABLE_PGVECTOR_RAG`, `CRON_SECRET`, VAPID keys,
-`OBSERVABILITY_ALERT_WEBHOOK_URL`, `ADMIN_BOOTSTRAP_ENABLED`, `STRICT_ENV_VALIDATION`.
+`CONTEXT_CDN_URL` is optional. It must point to the immutable release uploaded by `scripts/upload_context_to_storage.mjs --apply`; the release must match the manifest committed with the deployment. Raw/vector files are not silently downloaded from an unpinned arbitrary corpus.
+
+## Quotas
+
+- `AI_PUBLIC_DAILY_REQUESTS_PER_IP`: default 120.
+- `AI_DAILY_TOKEN_BUDGET_GLOBAL`: default 1,000,000 reserved tokens/day, reset at 00:00 UTC.
+- `AI_MAX_TOKENS_PER_REQUEST`: default 16,000 including system instructions, source evidence, history and maximum output. Provider attempts and JSON repairs reserve separately; reservation is conservative and differs from actual billed usage.
+- Provider quotas and billing remain provider-side controls. A model with a free tier can charge on a paid account.
+
+Vercel's platform-controlled forwarding header is used for IP limits. On another host, restrict direct origin access, have the reverse proxy overwrite a single client-IP header, and set `TRUSTED_PROXY_HEADER` (plus `TRUSTED_PROXY_HOPS` if needed). Unconfigured production origins use one shared unknown-IP bucket rather than trusting spoofed headers.
+
+## Optional retrieval and safety
+
+- `AI_ENABLE_NVIDIA_RERANK=0` disables the optional hosted reranker; local BM25 continues to work.
+- `AI_ENABLE_RETRIEVAL_LLM=1` opts into budgeted query expansion. Source compression always preserves original sentences.
+- `AI_ENABLE_LOCAL_EMBEDDINGS=1` enables the exact local model named by vector metadata on a long-running Node/Docker host. It is disabled on Vercel.
+- `AI_INJECTION_GUARD_URL` enables a separately hosted/local text-injection classifier. Configured outages fail closed. See the full guide for setup and limits.
+- `AI_VECTOR_BACKEND=supabase`, `RAG_VECTOR_CORPUS_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` enable the optional private pgvector backend. These variables are now used only for this explicit backend/upload workflow. The old `AI_ENABLE_PGVECTOR_RAG` flag has no effect.
+
+## Deployment verification
+
+1. `npm ci`, `npm run check:ci`, `npm run eval:rag:report`, `npm run build`, `npm run check:function-sizes`.
+2. Commit the new corpus gzip, manifest and updated source metadata with the code.
+3. Deploy, then check `/developer`: provider catalogs, every chapter's coverage, stale benchmark status, actual loaded chunk count, vector encoder/corpus, safety counters and a real question using the retrieval test.
+4. Confirm unauthenticated developer APIs return 401 and cross-site mutations return 403.
+5. Test representative benign prompts and image questions using the target deployment/account. Automated safety checks and lexical grounding do not certify every model answer.
+
+Full procedures and optional database setup: [AI security and retrieval](../AI_SECURITY_AND_RETRIEVAL.md).

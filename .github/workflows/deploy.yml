@@ -23,6 +23,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint:strict
       - run: npm run test
+      - run: npm run test:retrieval-service
 
   build:
     name: Build

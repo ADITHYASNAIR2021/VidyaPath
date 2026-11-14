@@ -14,7 +14,6 @@ import {
   type RevisionWeek,
 } from '@/lib/ai/validators';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { revisionPlanRequestSchema } from '@/lib/schemas/ai';
@@ -148,6 +147,7 @@ async function handlePost(req: Request) {
     }
     const body = bodyResult.value as Record<string, unknown>;
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/revision-plan',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 1900,
@@ -260,15 +260,6 @@ Return ONLY JSON in this shape:
           miniTests: (week.miniTests ?? []).map((test) => stripSourceTags(test)),
         })),
       };
-      await logAiUsage({
-        endpoint: '/api/revision-plan',
-        provider: result.provider,
-        model: result.model,
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
-        totalTokens: result.usage?.totalTokens,
-        estimated: !result.usage,
-      });
       return dataJson({ requestId, data: payload });
     } catch (aiError) {
       logger.warn({ err: aiError }, '[revision-plan] AI fallback triggered');

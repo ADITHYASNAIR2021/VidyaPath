@@ -1,107 +1,42 @@
-#!/usr/bin/env node
-/**
- * Upload RAG context files to Supabase Storage.
- *
- * Prerequisites:
- *   1. Create a bucket in Supabase Dashboard → Storage → New Bucket
- *      Name: "context" (public bucket)
- *   2. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local
- *
- * Usage:
- *   node scripts/upload_context_to_storage.mjs
- *   node scripts/upload_context_to_storage.mjs --bucket my-bucket
- *
- * After upload, set CONTEXT_CDN_URL in your deployment:
- *   CONTEXT_CDN_URL=https://YOUR_PROJECT.supabase.co/storage/v1/object/public/context
- */
-import { readFileSync, existsSync } from 'node:fs';
-import { join, basename } from 'node:path';
-import { parseArgs } from 'node:util';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
-const ROOT = join(import.meta.dirname, '..');
-const CONTEXT_DIR = join(ROOT, 'lib', 'context');
-
-const { values: flags } = parseArgs({
-  args: process.argv.slice(2),
-  options: {
-    bucket: { type: 'string', default: 'context' },
-    help: { type: 'boolean', short: 'h', default: false },
-  },
-  strict: false,
+const args = process.argv.slice(2);
+const apply = args.includes('--apply');
+const bucketIndex = args.indexOf('--bucket');
+const bucket = bucketIndex >= 0 ? args[bucketIndex + 1] : 'context';
+if (!/^[a-z0-9_-]{1,63}$/.test(bucket)) throw new Error('Invalid bucket name');
+const directory = path.resolve('lib/context');
+const manifest = JSON.parse(readFileSync(path.join(directory, 'retrieval_manifest.json'), 'utf8'));
+const allowed = new Set(['chunks.jsonl.gz', 'textbook_chunks.jsonl.gz', 'retrieval_index.json.gz', 'chapter_index.json.gz', 'textbook_chapter_index.json.gz']);
+if (!/^[a-f0-9]{64}$/.test(manifest.artifactFingerprint)) throw new Error('Invalid corpus fingerprint');
+const release = `releases/${manifest.artifactFingerprint}`;
+const hash = (value) => createHash('sha256').update(value).digest('hex');
+const files = manifest.artifacts.map((artifact) => {
+  if (!allowed.has(artifact.file)) throw new Error('Unexpected artifact in release manifest');
+  const bytes = readFileSync(path.join(directory, artifact.file));
+  if (hash(bytes) !== artifact.sha256) throw new Error(`Stale release manifest: ${artifact.file}`);
+  return { file: artifact.file, bytes };
 });
-
-if (flags.help) {
-  console.log(`
-Usage: node scripts/upload_context_to_storage.mjs [--bucket <name>]
-
-Uploads RAG context files to Supabase Storage for CDN distribution.
-Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local.
-  `);
-  process.exit(0);
-}
-
-const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
-const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-
-if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error('ERROR: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env.local');
-  process.exit(1);
-}
-
-const FILES = [
-  'chunks.jsonl',
-  'textbook_chunks.jsonl',
-  'chunk_vectors.jsonl',
-  'retrieval_index.json',
-  'chapter_index.json',
-  'textbook_chapter_index.json',
-  '.rag_count.json',
-];
-
-async function uploadFile(filePath, fileName) {
-  const content = readFileSync(filePath);
-  const url = `${SUPABASE_URL}/storage/v1/object/${flags.bucket}/${fileName}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${SERVICE_KEY}`,
-      'Content-Type': 'application/octet-stream',
-      'x-upsert': 'true',
-    },
-    body: content,
-  });
-
-  if (!res.ok) {
-    const err = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+// Manifest is the commit marker and is always uploaded last.
+files.push({ file: 'retrieval_manifest.json', bytes: readFileSync(path.join(directory, 'retrieval_manifest.json')) });
+console.log(`Release ${release}: ${files.length} files, ${(files.reduce((sum, file) => sum + file.bytes.length, 0) / 1048576).toFixed(1)} MB`);
+if (!apply) { console.log('Dry run: no upload or external write. Use node --env-file=.env.local scripts/upload_context_to_storage.mjs --apply after creating a public academic-corpus bucket. Never upload student answers/images.'); process.exit(0); }
+const base = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!base || new URL(base).protocol !== 'https:' || !key) throw new Error('Server-only SUPABASE_URL (HTTPS) and SUPABASE_SERVICE_ROLE_KEY are required');
+for (const { file, bytes } of files) {
+  const object = `${bucket}/${release}/${file}`;
+  const response = await fetch(`${base}/storage/v1/object/${object}`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': file.endsWith('.gz') ? 'application/gzip' : 'application/json', 'cache-control': '31536000', 'x-upsert': 'false' }, body: bytes, signal: AbortSignal.timeout(60000) });
+  if (!response.ok) {
+    // Existing immutable releases may be retried only when bytes are identical.
+    if ([400, 409].includes(response.status)) {
+      const existing = await fetch(`${base}/storage/v1/object/public/${object}`, { signal: AbortSignal.timeout(30000) });
+      if (existing.ok && hash(Buffer.from(await existing.arrayBuffer())) === hash(bytes)) { console.log(`Already verified: ${file}`); continue; }
+    }
+    throw new Error(`Upload failed for ${file}: HTTP ${response.status}. Release not activated; no objects overwritten.`);
   }
-
-  return { url, size: content.length };
+  console.log(`Uploaded: ${file}`);
 }
-
-console.log(`Uploading to Supabase Storage bucket: ${flags.bucket}`);
-console.log(`Endpoint: ${SUPABASE_URL}\n`);
-
-let totalSize = 0;
-for (const fileName of FILES) {
-  const filePath = join(CONTEXT_DIR, fileName);
-  if (!existsSync(filePath)) {
-    console.log(`  SKIP  ${fileName} (not found)`);
-    continue;
-  }
-
-  try {
-    const result = await uploadFile(filePath, fileName);
-    const sizeMB = (result.size / (1024 * 1024)).toFixed(1);
-    console.log(`  OK    ${fileName} (${sizeMB} MB)`);
-    totalSize += result.size;
-  } catch (err) {
-    console.error(`  FAIL  ${fileName}: ${err.message}`);
-  }
-}
-
-const totalMB = (totalSize / (1024 * 1024)).toFixed(1);
-console.log(`\nDone. Total: ${totalMB} MB uploaded.`);
-console.log(`\nSet in your deployment environment:`);
-console.log(`  CONTEXT_CDN_URL=${SUPABASE_URL}/storage/v1/object/public/${flags.bucket}`);
+console.log(`Release uploaded. Pin this URL in the deployment together with the same manifest: CONTEXT_CDN_URL=${base}/storage/v1/object/public/${bucket}/${release}`);

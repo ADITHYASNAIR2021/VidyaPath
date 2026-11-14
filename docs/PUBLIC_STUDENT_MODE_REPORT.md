@@ -1,3 +1,5 @@
+> Historical report. Current AI safeguards, optional vector backend and corpus serving are documented in [AI security and retrieval](AI_SECURITY_AND_RETRIEVAL.md).
+
 # VidyaPath → Public, No-Login Student Platform
 
 **Date:** 2026-11-13 · **Scope:** whole repo (app/, components/, lib/, proxy.ts, supabase/, scripts/)

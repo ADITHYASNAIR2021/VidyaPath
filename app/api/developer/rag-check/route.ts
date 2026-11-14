@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireDeveloper } from '@/lib/developer/guard';
-import { getContextPack } from '@/lib/ai/context-retriever';
+import { getContextPack, getRetrievalStats } from '@/lib/ai/context-retriever';
 import { getChapterById } from '@/lib/data';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 
@@ -27,6 +27,7 @@ export async function POST(req: Request) {
   try {
     const pack = await getContextPack({
       task: 'chat',
+      localOnly: true,
       classLevel: chapter.classLevel,
       subject: chapter.subject,
       chapterId: chapter.id,
@@ -40,13 +41,20 @@ export async function POST(req: Request) {
         chapterId: chapter.id,
         chapterTitle: chapter.title,
         latencyMs: Date.now() - started,
+        mode: 'local-only; no provider calls',
+        scope: { classLevel: chapter.classLevel, subject: chapter.subject, topics: chapter.topics },
+        runtime: getRetrievalStats(),
         snippetCount: pack.snippets.length,
         retrieval: pack.retrievalMeta ?? null,
         snippets: pack.snippets.slice(0, 6).map((snippet) => ({
+          id: snippet.id,
+          chapterId: snippet.chapterId,
+          page: snippet.page,
           sourcePath: snippet.sourcePath,
           sourceType: snippet.sourceType,
           relevanceScore: snippet.relevanceScore,
           preview: snippet.text.slice(0, 220),
+          text: snippet.text,
         })),
       },
     });

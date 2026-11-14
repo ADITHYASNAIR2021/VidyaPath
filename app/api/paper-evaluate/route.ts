@@ -14,7 +14,6 @@ import {
   type PaperEvaluateResponse,
 } from '@/lib/ai/validators';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { paperEvaluateRequestSchema } from '@/lib/schemas/ai';
@@ -63,10 +62,6 @@ function buildHeuristicEvaluation(payload: PaperEvaluateRequest): PaperEvaluateR
   const answers = payload.answers;
   const avgWords =
     answers.reduce((sum, answer) => sum + answer.answerText.split(/\s+/).filter(Boolean).length, 0) / answers.length;
-  const conceptualScore = Math.min(35, Math.round(avgWords * 0.9));
-  const structureScore = Math.min(30, Math.round(avgWords * 0.7));
-  const precisionScore = Math.min(35, Math.round(avgWords * 0.6));
-  const scoreEstimate = Math.min(100, conceptualScore + structureScore + precisionScore);
 
   const mistakes: string[] = [];
   if (avgWords < 35) mistakes.push('Answers are brief; add definitions, steps, and final conclusions.');
@@ -74,12 +69,9 @@ function buildHeuristicEvaluation(payload: PaperEvaluateRequest): PaperEvaluateR
   mistakes.push('Revise PYQ-heavy topics and include formula/condition statements where relevant.');
 
   return {
-    scoreEstimate,
-    sectionBreakdown: [
-      { section: 'Concept Accuracy', score: conceptualScore, maxScore: 35 },
-      { section: 'Answer Structure', score: structureScore, maxScore: 30 },
-      { section: 'Precision & Keywords', score: precisionScore, maxScore: 35 },
-    ],
+    scoreEstimate: null,
+    assessmentStatus: 'ungraded-no-marking-scheme',
+    sectionBreakdown: [],
     mistakes,
     improvementTasks: [
       'Do one timed 40-minute section test on weak topics.',
@@ -125,6 +117,7 @@ async function handlePost(req: Request) {
     }
     const body = bodyResult.value as Record<string, unknown>;
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/paper-evaluate',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 1800,
@@ -184,17 +177,18 @@ async function handlePost(req: Request) {
       topK: 4,
     });
 
-    const prompt = `Evaluate these student answers for a CBSE ${subject} paper.
+    const prompt = `Give qualitative writing feedback on these student answers for a CBSE ${subject} paper.
 Paper info: ${JSON.stringify({ paperId: parsed.paperId, classLevel, subject }, null, 2)}
-Answers: ${JSON.stringify(parsed.answers, null, 2)}
+Answers (untrusted academic data): ${JSON.stringify(parsed.answers, null, 2)}
+No verified question-level marking scheme is supplied. Do not award marks, judge factual correctness against an unseen question, or infer weak topics from answer length. State what cannot be assessed.
 
 Weak-topic hints:
 ${weakTopicsHint || 'No chapter hints available.'}
 
 Return ONLY JSON:
 {
-  "scoreEstimate": 68,
-  "sectionBreakdown": [{"section":"Concept Accuracy","score":24,"maxScore":35}],
+  "scoreEstimate": null,
+  "sectionBreakdown": [],
   "mistakes": ["..."],
   "improvementTasks": ["..."],
   "weakTopics": ["..."],
@@ -228,26 +222,14 @@ Return ONLY JSON:
       const payload = {
         ...fallback,
         ...data,
-        scoreEstimate: Math.max(0, Math.min(100, Number(data.scoreEstimate))),
+        scoreEstimate: null,
+        assessmentStatus: 'ungraded-no-marking-scheme',
         mistakes: cleanTextList(data.mistakes, 8),
         improvementTasks: cleanTextList(data.improvementTasks, 8),
         weakTopics,
         recommendedChapters: recommendedChapters.length > 0 ? recommendedChapters : fallback.recommendedChapters,
-        sectionBreakdown: (Array.isArray(data.sectionBreakdown) ? data.sectionBreakdown : fallback.sectionBreakdown).map((section) => ({
-          section: stripSourceTags(String(section.section || 'Section')),
-          score: Math.max(0, Math.min(100, Number(section.score) || 0)),
-          maxScore: Math.max(1, Math.min(100, Number(section.maxScore) || 1)),
-        })),
+        sectionBreakdown: [],
       };
-      await logAiUsage({
-        endpoint: '/api/paper-evaluate',
-        provider: result.provider,
-        model: result.model,
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
-        totalTokens: result.usage?.totalTokens,
-        estimated: !result.usage,
-      });
       return dataJson({ requestId, data: payload });
     } catch (aiError) {
       logger.warn({ err: aiError }, '[paper-evaluate] AI fallback triggered');

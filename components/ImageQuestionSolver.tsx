@@ -7,6 +7,7 @@ import { BlockMath, InlineMath } from 'react-katex';
 import 'katex/dist/katex.min.css';
 
 interface ImageQuestionSolverProps {
+  chapterId: string;
   chapterTitle: string;
   classLevel: number;
   subject: string;
@@ -46,7 +47,7 @@ function renderMathAwareText(text: string) {
   });
 }
 
-export default function ImageQuestionSolver({ chapterTitle, classLevel, subject }: ImageQuestionSolverProps) {
+export default function ImageQuestionSolver({ chapterId, chapterTitle, classLevel, subject }: ImageQuestionSolverProps) {
   const [imageBase64, setImageBase64] = useState('');
   const [mimeType, setMimeType] = useState('image/jpeg');
   const [previewUrl, setPreviewUrl] = useState('');
@@ -65,6 +66,7 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setError('Choose a JPEG, PNG or WebP question image.'); return; }
     if (file.size > 1_800_000) {
       setError('Please upload an image below 1.8 MB for fast solving.');
       return;
@@ -93,6 +95,7 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageBase64,
+          chapterId,
           mimeType,
           prompt,
           classLevel,
@@ -124,12 +127,13 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
       <p className="mt-1 text-xs text-[#6A6A84] dark:text-slate-300">
         Upload an NCERT/board question photo for {subject} Class {classLevel} - {chapterTitle}.
       </p>
+      <p className="mt-2 text-xs text-[var(--color-text-secondary)]">Crop to the question. Your image is sent to the AI provider for this request; leave out names, faces and personal details.</p>
 
       <div className="mt-4 space-y-3">
         <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-[#D9D3C7] bg-[#FDFAF6] px-4 py-4 text-sm text-[#5A5570] transition-colors hover:border-saffron-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
           <UploadCloud className="w-4 h-4 text-saffron-500" />
           Upload question image
-          <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} aria-label="Upload question image" />
+          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileChange} aria-label="Upload question image" />
         </label>
 
         {previewUrl && (
@@ -176,6 +180,7 @@ export default function ImageQuestionSolver({ chapterTitle, classLevel, subject 
               Confidence: {result.confidence}
             </span>
           </div>
+          <p className="text-xs text-[var(--color-text-secondary)]">Confidence is the model&apos;s estimate, not a correctness check. Verify calculations and facts against your textbook or teacher.</p>
           <div className="space-y-2">{renderMathAwareText(result.solution)}</div>
           <p className="border-t border-[#E8E4DC] pt-2 text-xs text-[#6A6A84] dark:border-slate-700 dark:text-slate-300">
             Next step: {result.followUp}

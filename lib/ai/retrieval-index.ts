@@ -492,9 +492,8 @@ export function reciprocalRankFusion<T extends { id: string }>(
       const entry = ranked[index];
       const current = scoreMap.get(entry.item.id) ?? { item: entry.item, score: 0 };
       current.score += 1 / (k + index + 1);
-      if (typeof entry.score === 'number' && Number.isFinite(entry.score)) {
-        current.score += Math.max(0, entry.score) / 1000;
-      }
+      // RRF combines ordinal ranks. Raw BM25, cosine and heuristic values have
+      // incompatible scales; adding them makes the largest-scale retriever win.
       scoreMap.set(entry.item.id, current);
     }
   }

@@ -1,7 +1,7 @@
 /**
  * Zod schemas for AI route boundaries (`/api/ai-tutor`, `/api/generate-quiz`, ...).
  *
- * These are permissive by design — they accept what current routes accept, but
+ * These enforce bounded data at the HTTP boundary and are followed by canonical chapter checks. They — they accept what current routes accept, but
  * reject obviously malformed bodies (missing required fields, wrong types) so
  * we surface a clean 422 with issue details instead of falling through to
  * downstream normalization.
@@ -13,8 +13,8 @@ import { classLevel, nonEmpty } from './base';
 // Shared
 // ---------------------------------------------------------------------------
 
-const trimmedString = z.string().trim();
-const optionalTrimmed = trimmedString.optional();
+const trimmedString = z.string().trim().max(4000);
+const optionalTrimmed = trimmedString.max(200).optional();
 const optionalNonEmpty = trimmedString.min(1).optional();
 const optionalPromptContext = trimmedString.max(2000).optional();
 
@@ -31,7 +31,7 @@ export const quizRequestSchema = z.object({
   subject: optionalTrimmed,
   chapterId: optionalTrimmed,
   chapterTitle: optionalTrimmed,
-  classLevel: z.union([classLevel, z.coerce.number()]).optional(),
+  classLevel: classLevelCoerce.optional(),
   questionCount: z.coerce.number().int().min(1).max(50).optional(),
   difficulty: optionalTrimmed,
   nccontext: optionalPromptContext,
@@ -46,7 +46,7 @@ export const flashcardsRequestSchema = z.object({
   subject: optionalTrimmed,
   chapterId: optionalTrimmed,
   chapterTitle: optionalTrimmed,
-  classLevel: z.union([classLevel, z.coerce.number()]).optional(),
+  classLevel: classLevelCoerce.optional(),
   cardCount: z.coerce.number().int().min(3).max(15).optional(),
   nccontext: optionalPromptContext,
 });
@@ -64,15 +64,15 @@ const chatMessageSchema = z.object({
 const chapterContextSchema = z
   .object({
     chapterId: optionalTrimmed,
-    title: trimmedString,
-    subject: trimmedString,
-    classLevel: z.union([z.number(), z.string()]).transform((value) => Number(value)),
-    topics: z.array(trimmedString).default([]),
+    title: trimmedString.max(200).optional(),
+    subject: trimmedString.max(80).optional(),
+    classLevel: classLevelCoerce.optional(),
+    topics: z.array(trimmedString.max(200)).max(32).default([]),
   })
   .optional();
 
 export const aiTutorRequestSchema = z.object({
-  messages: z.array(chatMessageSchema).min(1),
+  messages: z.array(chatMessageSchema).min(1).max(20).refine((messages) => messages.at(-1)?.role === 'user', { message: 'The final message must be a student question.' }),
   chapterContext: chapterContextSchema,
   responseMode: z.enum(['answer-only', 'teaching']).optional(),
 });
@@ -83,12 +83,12 @@ export type AiTutorRequest = z.infer<typeof aiTutorRequestSchema>;
 // ---------------------------------------------------------------------------
 
 export const contextPackRequestSchema = z.object({
-  classLevel: z.coerce.number(),
+  classLevel: classLevelCoerce,
   subject: nonEmpty,
   chapterId: optionalTrimmed,
   query: optionalTrimmed,
   task: optionalTrimmed,
-  chapterTopics: z.array(trimmedString).optional(),
+  chapterTopics: z.array(trimmedString.max(200)).max(32).optional(),
 });
 export type ContextPackRequest = z.infer<typeof contextPackRequestSchema>;
 
@@ -134,8 +134,8 @@ export type ChapterDiagnoseRequest = z.infer<typeof chapterDiagnoseRequestSchema
 export const chapterRemediateRequestSchema = z.object({
   chapterId: nonEmpty,
   weakTags: z.array(trimmedString.max(160)).max(12).optional(),
-  availableDays: z.coerce.number().int().optional(),
-  dailyMinutes: z.coerce.number().int().optional(),
+  availableDays: z.coerce.number().int().min(1).max(365).optional(),
+  dailyMinutes: z.coerce.number().int().min(5).max(480).optional(),
 });
 export type ChapterRemediateRequest = z.infer<typeof chapterRemediateRequestSchema>;
 
@@ -146,7 +146,7 @@ export type ChapterRemediateRequest = z.infer<typeof chapterRemediateRequestSche
 export const adaptiveTestRequestSchema = z.object({
   classLevel: classLevelCoerce,
   subject: nonEmpty,
-  chapterIds: z.array(nonEmpty).min(1),
+  chapterIds: z.array(nonEmpty.max(80)).min(1).max(16),
   difficultyMix: optionalTrimmed,
   questionCount: z.coerce.number().int().min(3).max(30).optional(),
   mode: optionalTrimmed,
@@ -198,8 +198,8 @@ export const revisionPlanRequestSchema = z.object({
   classLevel: classLevelCoerce,
   subject: optionalTrimmed,
   examDate: optionalTrimmed,
-  weeklyHours: z.coerce.number().positive(),
-  weakChapterIds: z.array(trimmedString).optional(),
+  weeklyHours: z.coerce.number().positive().max(112),
+  weakChapterIds: z.array(trimmedString.max(80)).max(32).optional(),
   targetScore: z.coerce.number().optional(),
 });
 export type RevisionPlanRequest = z.infer<typeof revisionPlanRequestSchema>;
@@ -209,10 +209,11 @@ export type RevisionPlanRequest = z.infer<typeof revisionPlanRequestSchema>;
 // ---------------------------------------------------------------------------
 
 export const imageSolveRequestSchema = z.object({
-  imageBase64: nonEmpty,
-  mimeType: optionalTrimmed,
+  imageBase64: z.string().min(16).max(7 * 1024 * 1024),
+  chapterId: optionalTrimmed,
+  mimeType: z.enum(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']).optional(),
   prompt: optionalTrimmed,
-  classLevel: z.coerce.number().optional(),
+  classLevel: classLevelCoerce.optional(),
   subject: optionalTrimmed,
 });
 export type ImageSolveRequest = z.infer<typeof imageSolveRequestSchema>;
@@ -222,13 +223,13 @@ export type ImageSolveRequest = z.infer<typeof imageSolveRequestSchema>;
 // ---------------------------------------------------------------------------
 
 const paperAnswerSchema = z.object({
-  questionNo: nonEmpty,
-  answerText: nonEmpty,
+  questionNo: nonEmpty.max(40),
+  answerText: nonEmpty.max(4000),
 });
 
 export const paperEvaluateRequestSchema = z.object({
   paperId: nonEmpty,
-  answers: z.array(paperAnswerSchema).min(1),
+  answers: z.array(paperAnswerSchema).min(1).max(80),
   classLevel: classLevelCoerce.optional(),
   subject: optionalTrimmed,
 });

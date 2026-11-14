@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import { NextResponse } from 'next/server';
 
 export interface ApiErrorBody {
@@ -107,6 +108,18 @@ function parseForwardedHeader(value: string | null | undefined): string | null {
 }
 
 export function getClientIp(req: Request): string {
+  if (process.env.NODE_ENV === 'production') {
+    if (process.env.VERCEL) {
+      const value = parseForwardedForHeader(req.headers.get('x-vercel-forwarded-for') || req.headers.get('x-forwarded-for'));
+      return value && isIP(value) ? value : 'unknown';
+    }
+    const header = process.env.TRUSTED_PROXY_HEADER;
+    if (!header || !['x-forwarded-for', 'x-real-ip', 'cf-connecting-ip', 'fly-client-ip'].includes(header)) return 'unknown';
+    const entries = (req.headers.get(header) || '').split(',').map((part) => normalizeIpCandidate(part)).filter((value): value is string => !!value);
+    const hops = header === 'x-forwarded-for' ? Math.max(1, Math.min(5, Number(process.env.TRUSTED_PROXY_HOPS) || 1)) : 1;
+    const value = entries[entries.length - hops];
+    return value && isIP(value) ? value : 'unknown';
+  }
   for (const headerName of CLIENT_IP_HEADER_NAMES) {
     const raw = req.headers.get(headerName);
     const parsed =
@@ -146,7 +159,7 @@ export function errorJson(input: {
     message: safeMessage,
     error: safeMessage,
     requestId: input.requestId,
-    hint: input.hint,
+    hint: status >= 500 ? undefined : input.hint ? sanitizePublicErrorMessage(input.hint, status) : undefined,
     issues: input.issues,
   };
   const response = withRequestIdHeader(NextResponse.json(body, { status }), input.requestId);

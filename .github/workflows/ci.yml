@@ -36,6 +36,9 @@ jobs:
       - name: Unit tests
         run: npm run test
 
+      - name: Retrieval service security contracts
+        run: npm run test:retrieval-service
+
       - name: Route and URL integrity
         run: npm run check:route-links
 
@@ -64,6 +67,9 @@ jobs:
 
       - name: Enforce audit policy
         run: npm run audit:policy
+
+      - name: Retrieval service dependency audit
+        run: npm audit --prefix services/retrieval --omit=dev --audit-level=high
 
   build-check:
     name: Build Check

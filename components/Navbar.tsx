@@ -38,6 +38,7 @@ function NavLink({ item, pathname, onClick }: { item: NavItem; pathname: string;
   return (
     <Link
       href={item.href}
+      aria-current={isActive ? 'page' : undefined}
       onClick={onClick}
       className={clsx(
         'flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-all duration-200 whitespace-nowrap',
@@ -59,7 +60,7 @@ export default function Navbar() {
   return (
     <nav className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-surface)]/82 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="h-16 flex items-center justify-between gap-4">
+        <div className="min-h-16 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
           <Link href="/" className="flex items-center gap-2 group shrink-0" onClick={() => setMobileOpen(false)}>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-saffron-500 via-amber-500 to-blue-600 text-white shadow-[0_8px_20px_rgba(232,81,26,0.32)]">
               <GraduationCap className="w-5 h-5" />
@@ -72,7 +73,7 @@ export default function Navbar() {
             </div>
           </Link>
 
-          <div className="glass-nav no-scrollbar hidden max-w-[62vw] items-center gap-1 overflow-x-auto rounded-2xl p-1 lg:flex">
+          <div className="glass-nav order-3 hidden w-full items-center justify-center gap-1 rounded-2xl p-1 lg:flex 2xl:order-none 2xl:w-auto">
             {PRIMARY_NAV.map((item) => (
               <NavLink key={item.href} item={item} pathname={pathname} />
             ))}
@@ -92,6 +93,7 @@ export default function Navbar() {
               className="rounded-xl p-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-soft)]"
               aria-label="Toggle navigation menu"
               aria-expanded={mobileOpen}
+              aria-controls="mobile-navigation"
             >
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -100,7 +102,7 @@ export default function Navbar() {
       </div>
 
       {mobileOpen && (
-        <div className="glass-nav lg:hidden border-t border-[var(--color-border)]">
+        <div id="mobile-navigation" className="glass-nav max-h-[calc(100dvh-5rem)] overflow-y-auto lg:hidden border-t border-[var(--color-border)]">
           <div className="px-4 py-3 space-y-1">
             <ClassPicker variant="full" className="mb-3" />
             {PRIMARY_NAV.map((item) => (

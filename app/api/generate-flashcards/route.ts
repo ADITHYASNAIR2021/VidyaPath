@@ -9,7 +9,6 @@ import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { isFlashcardArray, normalizeFlashcards, type FlashcardItem } from '@/lib/ai/validators';
 import { buildVariationInstruction, buildVariationProfile } from '@/lib/ai/variation';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { flashcardsRequestSchema } from '@/lib/schemas/ai';
@@ -24,19 +23,6 @@ function sanitizeUntrustedPromptContext(value: string): string {
     .slice(0, 1600);
 }
 
-function buildGenericFlashcard(subject: string, chapterTitle: string, topic: string, variant: number): FlashcardItem {
-  const fronts = [
-    `State the key idea of ${topic} from ${chapterTitle}.`,
-    `What is the board-important point for ${topic} in ${chapterTitle}?`,
-    `Give a concise revision note for ${topic} (${subject}).`,
-  ];
-  const front = fronts[variant % fronts.length];
-  return {
-    front: `Revision check ${variant + 1}: ${front}`,
-    back: `${topic} should be revised from NCERT definitions, core relations, and standard chapter examples for board answers.`,
-  };
-}
-
 function isGroundedFlashcard(card: FlashcardItem): boolean {
   const text = `${card.front} ${card.back}`.toLowerCase();
   return !/(exam strategy|time management|score more|answering technique|attempt order)/.test(text);
@@ -45,10 +31,7 @@ function isGroundedFlashcard(card: FlashcardItem): boolean {
 function ensureExactCardCount(
   items: FlashcardItem[],
   chapterCards: FlashcardItem[],
-  cardCount: number,
-  subject: string,
-  chapterTitle: string,
-  chapterTopics: string[]
+  cardCount: number
 ): FlashcardItem[] {
   const output: FlashcardItem[] = [];
   const used = new Set<string>();
@@ -70,15 +53,7 @@ function ensureExactCardCount(
     pushIfUnique(card);
   }
 
-  let cursor = 0;
-  const topics = chapterTopics.length > 0 ? chapterTopics : [chapterTitle || subject];
-  while (output.length < cardCount) {
-    const topic = topics[cursor % topics.length] ?? chapterTitle;
-    pushIfUnique(buildGenericFlashcard(subject, chapterTitle, topic, cursor));
-    cursor += 1;
-    if (cursor > cardCount * 6) break;
-  }
-
+  // Return fewer valid items rather than invent filler to meet a count.
   return normalizeFlashcards(output).slice(0, cardCount);
 }
 
@@ -131,6 +106,7 @@ async function handlePost(req: Request) {
     const cardCount = Math.min(15, Math.max(3, Number(body.cardCount) || 10));
 
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/generate-flashcards',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 2500,
@@ -228,10 +204,7 @@ Rules:
     const exactCards = ensureExactCardCount(
       data,
       chapterFallbackCards,
-      cardCount,
-      subject,
-      chapterTitle,
-      chapter?.topics ?? []
+      cardCount
     );
     const groundedCards = exactCards.filter((card) =>
       isFlashcardAlignedToChapter(card, chapterTitle, chapter?.topics ?? [])
@@ -239,10 +212,7 @@ Rules:
     const hardenedCards = ensureExactCardCount(
       groundedCards.length > 0 ? groundedCards : exactCards,
       chapterFallbackCards,
-      cardCount,
-      subject,
-      chapterTitle,
-      chapter?.topics ?? []
+      cardCount
     );
 
     if (hardenedCards.length === 0) {
@@ -253,16 +223,6 @@ Rules:
         status: 500,
       });
     }
-
-    await logAiUsage({
-      endpoint: '/api/generate-flashcards',
-      provider: result.provider,
-      model: result.model,
-      promptTokens: result.usage?.promptTokens,
-      completionTokens: result.usage?.completionTokens,
-      totalTokens: result.usage?.totalTokens,
-      estimated: !result.usage,
-    });
     return dataJson({
       requestId,
       data: {
