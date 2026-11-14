@@ -223,13 +223,13 @@ export const RAG_BENCHMARK_SEED: RagBenchmarkCase[] = [
     expectedTerms: ['marketing', 'mix', 'consumer', 'protection'],
   },
   {
-    id: 'c12-eco-1-demand',
+    id: 'c12-eco-1-national-income',
     task: 'chat',
     classLevel: 12,
     subject: 'Economics',
     chapterId: 'c12-eco-1',
-    query: 'Explain movement along the demand curve and shift of the demand curve with examples.',
-    expectedTerms: ['demand', 'curve', 'shift', 'movement'],
+    query: 'Explain GDP, GNP and national income using the value added method.',
+    expectedTerms: ['gdp', 'gnp', 'income', 'value added'],
   },
   {
     id: 'c12-eco-3-multiplier',

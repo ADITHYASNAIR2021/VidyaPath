@@ -12,7 +12,8 @@ import {
   Target,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { getChapterStats, PAPERS } from '@/lib/data';
+import { getChapterStats } from '@/lib/data';
+import { ALL_PAPERS } from '@/lib/papers';
 
 const BOARD_PATTERN = [
   { section: 'Section A', type: 'MCQ + Assertion (1 mark)', marks: '20 marks' },
@@ -29,7 +30,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#FDFAF6]">
       <section className="px-4 pt-14 pb-16">
         <div className="max-w-6xl mx-auto">
-          <div className="rounded-3xl border border-[#E8E4DC] bg-gradient-to-br from-white via-[#FFF8ED] to-[#F3F8FF] p-8 sm:p-10 shadow-sm">
+          <div className="rounded-3xl border border-[var(--color-border)] bg-gradient-to-br from-[var(--color-surface)] to-[var(--color-surface-soft)] p-8 sm:p-10 shadow-sm">
             <div className="inline-flex items-center gap-2 rounded-full border border-saffron-200 bg-white px-3 py-1.5 text-xs font-semibold text-saffron-600">
               <Sparkles className="w-3.5 h-3.5" />
               Free for all students - no login required
@@ -60,7 +61,7 @@ export default function HomePage() {
               </Link>
               <Link
                 href="/ai-tools"
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-6 py-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-6 py-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors dark:border-indigo-400/40 dark:text-indigo-200 dark:hover:bg-indigo-900/40"
               >
                 Try the AI Study Hub
                 <Sparkles className="w-4 h-4" />
@@ -70,8 +71,8 @@ export default function HomePage() {
             <div className="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Metric value={`${stats.total}+`} label="Chapters" />
               <Metric value={`${Object.keys(stats.byClass).length}`} label="Classes covered" />
-              <Metric value={`${PAPERS.length}+`} label="Papers listed" />
-              <Metric value="INR 0" label="Cost forever" />
+              <Metric value={`${ALL_PAPERS.length}`} label="Papers listed" />
+              <Metric value="INR 0" label="Student access" />
             </div>
           </div>
         </div>

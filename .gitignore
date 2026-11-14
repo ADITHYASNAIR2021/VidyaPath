@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+.cache/
+services/retrieval/release/
+services/retrieval/model-cache/
+.audit-all-report.json
 /.pnp
 .pnp.js
 
@@ -47,6 +51,8 @@ supabase/.env
 # AI context bundle — fetched at runtime from CONTEXT_BUNDLE_URL
 lib/context/*.jsonl
 lib/context/*.jsonl.gz
+!lib/context/chunks.jsonl.gz
+!lib/context/textbook_chunks.jsonl.gz
 lib/context/*_index.json
 lib/context/rag_build_report.json
 lib/context/.rag_count.json

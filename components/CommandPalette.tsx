@@ -123,17 +123,17 @@ export default function CommandPalette() {
         onClick={() => setOpen(true)}
         type="button"
         aria-label="Open command palette"
-        className="hidden md:flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 text-[#8A8AAA] rounded-xl border border-[#E8E4DC] transition-colors w-64"
+        className="hidden lg:flex items-center gap-2 px-3 py-2 bg-[var(--color-surface-soft)] hover:bg-[var(--color-surface)] text-[var(--color-text-secondary)] rounded-xl border border-[var(--color-border)] transition-colors w-52"
       >
         <Search className="w-4 h-4" />
-        <span className="text-sm font-medium flex-1 text-left">Search everything...</span>
+        <span className="text-sm font-medium flex-1 text-left whitespace-nowrap">Search...</span>
         <kbd className="hidden md:flex items-center gap-1 font-sans text-[10px] font-bold px-1.5 py-0.5 bg-white border border-[#E8E4DC] rounded shadow-sm text-[#8A8AAA]">
           <Command className="w-3 h-3" /> K
         </kbd>
       </button>
 
       <button
-        className="md:hidden p-2 text-[#4A4A6A] hover:bg-gray-50 rounded-xl transition-colors"
+        className="lg:hidden p-2 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-soft)] rounded-xl transition-colors"
         onClick={() => setOpen(true)}
         title="Search chapters"
         type="button"

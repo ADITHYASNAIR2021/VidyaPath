@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getClientIp } from '@/lib/http/api-response';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
+import { isRedisRateLimitConfigured } from '@/lib/security/redis-rate-limit';
 
 /**
  * VidyaPath is open to every student with no login. AI endpoints are protected by:
@@ -21,6 +22,9 @@ export async function requirePublicAiAccess(
   req: Request
 ): Promise<{ context: PublicAiContext; response: null } | { context: null; response: NextResponse }> {
   const clientIp = getClientIp(req);
+  if (process.env.NODE_ENV === 'production' && !isRedisRateLimitConfigured()) {
+    return { context: null, response: NextResponse.json({ ok: false, errorCode: 'ai-protection-unavailable', message: 'AI tools are temporarily unavailable. Study chapters and papers remain available.' }, { status: 503, headers: { 'Retry-After': '60', 'Cache-Control': 'no-store' } }) };
+  }
   const daily = await checkRateLimit({
     key: buildRateLimitKey('ai:daily', [clientIp]),
     windowSeconds: 24 * 60 * 60,

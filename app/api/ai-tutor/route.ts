@@ -9,7 +9,6 @@ import { buildEvidenceBundle, buildStudentPracticeSignal } from '@/lib/ai/eviden
 import { generateTaskJson, type ChatMessage } from '@/lib/ai/generator';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { aiTutorRequestSchema } from '@/lib/schemas/ai';
@@ -261,6 +260,7 @@ async function handlePost(req: NextRequest) {
 
     const payload = bodyResult.value as Record<string, unknown>;
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/ai-tutor',
       projectedInputText: JSON.stringify(payload),
       projectedOutputTokens: 2600,
@@ -301,15 +301,15 @@ async function handlePost(req: NextRequest) {
             provider: 'local-guardrail',
             model: 'deterministic-student-safety-v1',
             latencyMs: 0,
-            groundednessScore: 100,
-            citationCoverageScore: 100,
+            assessmentStatus: 'safety-intervention-not-an-academic-answer',
             retrievalMiss: false,
             repaired: false,
-            retrievalConfidence: 100,
-            retrievalConfidenceLevel: 'high',
           },
         },
       });
+    }
+    if (!chapterContext?.chapterId) {
+      return errorJson({ requestId, errorCode: 'chapter-required', message: 'Choose a chapter so the tutor can use verified curriculum sources.', status: 422 });
     }
     const pyq = chapterContext?.chapterId
       ? (await getGroundedPYQData(chapterContext.chapterId)) ?? getPYQData(chapterContext.chapterId)
@@ -330,6 +330,9 @@ async function handlePost(req: NextRequest) {
           usedOnDemandFallback: false,
           usedPgvector: false,
         };
+    if (contextPack.snippets.length === 0) {
+      return errorJson({ requestId, errorCode: 'chapter-evidence-unavailable', message: 'No safe chapter evidence is available. Please try again after the chapter index is updated.', status: 503 });
+    }
 
     // No accounts: practice history lives on the student's device, so the tutor
     // starts every conversation without server-side history.
@@ -384,17 +387,6 @@ Recent asked questions: ${recentHistory.recentQuestions.slice(0, 3).join(' | ') 
     const tutor = coerceTutorResponse(generated.data) ?? generated.data;
     const isOffTopic = tutor.offTopic === true;
     const message = isOffTopic ? tutor.offTopicMessage || tutor.answer : tutor.answer;
-
-    await logAiUsage({
-      endpoint: '/api/ai-tutor',
-      provider: generated.result.provider,
-      model: generated.result.model,
-      promptTokens: generated.result.usage?.promptTokens,
-      completionTokens: generated.result.usage?.completionTokens,
-      totalTokens: generated.result.usage?.totalTokens,
-      requestId,
-      estimated: !generated.result.usage,
-    });
 
     logServerEvent({
       event: 'ai-tutor-response',

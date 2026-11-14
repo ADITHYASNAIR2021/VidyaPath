@@ -145,6 +145,7 @@ export async function runRagBenchmark(cases: RagBenchmarkCase[] = RAG_BENCHMARK_
     }
 
     const contextPack = await getContextPack({
+      localOnly: true,
       task: testCase.task,
       classLevel: chapter?.classLevel ?? testCase.classLevel,
       subject: chapter?.subject ?? testCase.subject,

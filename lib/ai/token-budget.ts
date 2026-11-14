@@ -2,7 +2,7 @@ import { checkAiTokenBudget as reserveGlobalBudget } from '@/lib/ai/cost-guard';
 
 export interface TokenBudgetDecision {
   allowed: boolean;
-  reason?: 'per-request-cap' | 'global-daily-budget';
+  reason?: 'per-request-cap' | 'global-daily-budget' | 'budget-unavailable';
   retryAfterSeconds?: number;
 }
 
@@ -21,12 +21,19 @@ export async function checkAiTokenBudget(input: {
   endpoint: string;
   projectedInputText?: string;
   projectedOutputTokens?: number;
+  /** HTTP preflight does not reserve; the generation boundary reserves actual provider payloads. */
+  reserve?: boolean;
 }): Promise<TokenBudgetDecision> {
+  if (input.reserve === false) {
+    const cap = Math.max(256, Math.min(32768, Number(process.env.AI_MAX_TOKENS_PER_REQUEST) || 16000));
+    const size = Math.ceil((input.projectedInputText?.length || 0) / 4) + (input.projectedOutputTokens || 0);
+    return size <= cap ? { allowed: true } : { allowed: false, reason: 'per-request-cap', retryAfterSeconds: 5 };
+  }
   const result = await reserveGlobalBudget(input);
   if (result.allowed) return { allowed: true };
   return {
     allowed: false,
     reason: result.reason,
-    retryAfterSeconds: result.reason === 'global-daily-budget' ? secondsUntilUtcMidnight() : 5,
+    retryAfterSeconds: result.reason === 'global-daily-budget' ? secondsUntilUtcMidnight() : result.reason === 'budget-unavailable' ? 60 : 5,
   };
 }

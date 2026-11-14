@@ -46,7 +46,7 @@ export function validateEnv(mode: 'strict' | 'report' = 'report'): EnvValidation
 
   if (!hasValue('UPSTASH_REDIS_REST_URL') || !hasValue('UPSTASH_REDIS_REST_TOKEN')) {
     warnings.push(
-      'UPSTASH_REDIS_REST_URL/TOKEN not set — AI rate limits and the daily AI budget are per server instance only.'
+      'UPSTASH_REDIS_REST_URL/TOKEN not set — production AI tools are paused; development uses per-instance limits.'
     );
   }
 

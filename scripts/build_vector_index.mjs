@@ -9,11 +9,10 @@
  * Output:
  *   - lib/context/chunk_vectors.jsonl
  *
- * Embedding priority:
- *   1. @huggingface/transformers all-MiniLM-L6-v2 (384 dim) — free local ONNX
- *   2. NVIDIA nemotron-3-embed-1b (2048 dim) — optional API fallback
- *      Install: npm install @huggingface/transformers
- *   3. Hashed bag-of-words (192 dim) — always available, NOT semantic
+ * VECTOR_PROVIDER=local (default): multilingual-e5-small, free local inference.
+ * VECTOR_PROVIDER=nvidia: hosted Nemotron, subject to trial terms and quota.
+ * VECTOR_PROVIDER=lexical: explicit non-semantic baseline.
+ * Never mix model spaces or replace a valid index after a partial build failure.
  */
 
 import fs from 'node:fs';
@@ -21,8 +20,10 @@ import path from 'node:path';
 
 const EMBEDDING_DIM = 192;
 const ONNX_EMBEDDING_DIM = 384;
-const ONNX_MODEL = 'Xenova/all-MiniLM-L6-v2';
-const NVIDIA_EMBED_MODEL = 'nvidia/nemotron-3-embed-1b';
+const ONNX_MODEL = process.env.LOCAL_EMBED_MODEL || 'Xenova/multilingual-e5-small';
+const NVIDIA_EMBED_MODEL = process.env.AI_EMBED_MODEL || 'nvidia/nemotron-3-embed-1b';
+const provider = process.env.VECTOR_PROVIDER || 'local';
+if (!['local', 'nvidia', 'lexical'].includes(provider)) throw new Error('VECTOR_PROVIDER must be local, nvidia or lexical');
 const root = process.cwd();
 const contextDir = path.join(root, 'lib', 'context');
 const chunkPaths = [
@@ -37,7 +38,8 @@ async function initOnnxPipeline() {
   try {
     const { pipeline, env } = await import('@huggingface/transformers');
     env.allowLocalModels = false;
-    onnxPipeline = await pipeline('feature-extraction', ONNX_MODEL);
+    env.cacheDir = path.join(root, '.cache', 'embeddings');
+    onnxPipeline = await pipeline('feature-extraction', ONNX_MODEL, { dtype: /e5/i.test(ONNX_MODEL) ? 'q8' : 'fp32' });
     console.log(`[vector-index] ONNX model loaded: ${ONNX_MODEL}`);
     return onnxPipeline;
   } catch {
@@ -49,7 +51,8 @@ async function buildOnnxEmbedding(text) {
   const pipe = await initOnnxPipeline();
   if (!pipe) return null;
   try {
-    const output = await pipe(text.slice(0, 512), { pooling: 'mean', normalize: true });
+    const input = /e5/i.test(ONNX_MODEL) ? `passage: ${text}` : text;
+    const output = await pipe(input, { pooling: 'mean', normalize: true });
     return Array.from(output.data);
   } catch {
     return null;
@@ -102,6 +105,7 @@ function isUsableNvidiaApiKey(value) {
 async function createNvidiaEmbeddings(apiKey, inputs) {
   const response = await fetch('https://integrate.api.nvidia.com/v1/embeddings', {
     method: 'POST',
+    signal: AbortSignal.timeout(30000),
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
@@ -154,7 +158,8 @@ async function main() {
   const seen = new Set();
   const out = [];
   const nvidiaKey = process.env.NVIDIA_API_KEY?.trim();
-  const canUseNvidia = isUsableNvidiaApiKey(nvidiaKey);
+  const canUseNvidia = provider === 'nvidia' && isUsableNvidiaApiKey(nvidiaKey);
+  if (provider === 'nvidia' && !canUseNvidia) throw new Error('NVIDIA_API_KEY is required for VECTOR_PROVIDER=nvidia');
   const uniqueChunks = [];
 
   for (const chunk of chunks) {
@@ -164,9 +169,10 @@ async function main() {
   }
 
   // Probe ONNX availability before the main loop (downloads model once)
-  const onnxAvailable = !canUseNvidia && (await initOnnxPipeline()) !== null;
+  const onnxAvailable = provider === 'local' && (await initOnnxPipeline()) !== null;
+  if (provider === 'local' && !onnxAvailable) throw new Error('Local model unavailable. Existing vectors preserved. Use VECTOR_PROVIDER=lexical explicitly for lexical vectors.');
   if (onnxAvailable) {
-    console.log('[vector-index] Using ONNX local embeddings (384 dim) — semantic search enabled without API key');
+    console.log('[vector-index] Using ONNX local document embeddings (384 dim), no inference API key. Semantic queries still require the matching encoder at runtime.');
   } else if (!canUseNvidia) {
     console.warn('[vector-index] WARNING: No semantic embedding available. Falling back to hashed bag-of-words (NOT semantic).');
     console.warn('[vector-index] Install @huggingface/transformers for free local semantic embeddings: npm install @huggingface/transformers');
@@ -192,17 +198,9 @@ async function main() {
           continue;
         }
       } catch (error) {
-        console.warn(`[vector-index] NVIDIA embedding batch failed; trying ONNX fallback: ${String(error.message || error)}`);
+        throw new Error(`NVIDIA batch failed; existing index preserved: ${String(error.message || error)}`);
       }
-      // NVIDIA batch failed — try ONNX per-chunk, then hashed-BoW
-      for (const chunk of batch) {
-        const onnxEmbed = await buildOnnxEmbedding(chunk.text);
-        if (onnxEmbed && onnxEmbed.length === ONNX_EMBEDDING_DIM) {
-          out.push(JSON.stringify({ id: chunk.id, embeddingKind: 'onnx-minilm', embeddingModel: ONNX_MODEL, embedding: onnxEmbed }));
-        } else {
-          out.push(JSON.stringify({ id: chunk.id, embeddingKind: 'hashed-bow', embeddingModel: 'local-hashed-bow', embedding: Array.from(buildEmbedding(chunk.text)) }));
-        }
-      }
+      throw new Error('NVIDIA returned an incomplete embedding batch; existing index preserved');
     }
   } else if (onnxAvailable) {
     const batchSize = 8;
@@ -214,7 +212,7 @@ async function main() {
         if (onnxEmbed && onnxEmbed.length === ONNX_EMBEDDING_DIM) {
           out.push(JSON.stringify({ id: chunk.id, embeddingKind: 'onnx-minilm', embeddingModel: ONNX_MODEL, embedding: onnxEmbed }));
         } else {
-          out.push(JSON.stringify({ id: chunk.id, embeddingKind: 'hashed-bow', embeddingModel: 'local-hashed-bow', embedding: Array.from(buildEmbedding(chunk.text)) }));
+          throw new Error(`Local embedding failed for ${chunk.id}; existing index preserved`);
         }
         done += 1;
       }
@@ -235,6 +233,9 @@ async function main() {
   }
 
   const kinds = new Set(out.map((line) => { try { return JSON.parse(line).embeddingKind; } catch { return 'unknown'; } }));
+  if (kinds.size !== 1 || (provider === 'local' && !kinds.has('onnx-minilm')) || (provider === 'nvidia' && !kinds.has('nvidia-e5'))) {
+    throw new Error('Embedding failed or produced mixed model spaces. Existing vector index preserved; retry the build.');
+  }
   const payload = `${out.join('\n')}\n`;
   const tmpPath = outPath + '.tmp';
   fs.writeFileSync(tmpPath, payload, 'utf8');

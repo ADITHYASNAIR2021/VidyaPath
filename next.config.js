@@ -2,21 +2,41 @@
 const nextConfig = {
   // Sentry source maps for production error tracking
   productionBrowserSourceMaps: process.env.SENTRY_DSN ? true : false,
+  outputFileTracingIncludes: {
+    '/**': [
+      './lib/context/chunks.jsonl.gz',
+      './lib/context/textbook_chunks.jsonl.gz',
+      './lib/context/chapter_index.json.gz',
+      './lib/context/textbook_chapter_index.json.gz',
+      './lib/context/retrieval_index.json.gz',
+      './lib/context/retrieval_manifest.json',
+    ],
+  },
   // Serverless routes never execute the offline PDF/index builders or local
   // ONNX model runtime. Excluding those broad filesystem traces keeps Vercel
   // functions below the standard 250 MB limit while retaining the compact,
   // tracked RAG fallbacks in lib/context.
   outputFileTracingExcludes: {
-    '/api/**': [
+    '/**': [
+      './.cache/**/*',
+      './.git/**/*',
+      './.env*',
+      './services/**/*',
+      './lib/runtime/*.json',
       './dataset/**/*',
       './scripts/**/*',
       './node_modules/@huggingface/transformers/**/*',
       './node_modules/onnxruntime-common/**/*',
       './node_modules/onnxruntime-node/**/*',
       './lib/context/chunks.jsonl',
+      './lib/context/textbook_chunks.jsonl',
       './lib/context/chunk_vectors.jsonl',
       './lib/context/chunk_vectors.jsonl.gz',
       './lib/context/retrieval_index.json',
+      './lib/context/images/**/*',
+      './lib/context/*_image_manifest.json',
+      './lib/context/rag_pipeline_report.json',
+      './lib/context/.rag_count.json',
     ],
   },
   // Limit parallel static-generation workers to prevent OOM on machines
@@ -79,7 +99,7 @@ module.exports = withSerwist(nextConfig);
 
 // ── Sentry: wraps build with source maps + error instrumentation ──
 if (process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN) {
-  const { withSentryConfig } = require('@sentry/nextjs');
+  const { withSentryConfig } = require('@sentry/nextjs/config');
   module.exports = withSentryConfig(module.exports, {
     org: process.env.SENTRY_ORG || 'adithya-s-nair',
     project: process.env.SENTRY_PROJECT || 'javascript-nextjs',

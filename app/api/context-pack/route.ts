@@ -2,7 +2,6 @@ import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { getContextPack, type ContextTask } from '@/lib/ai/context-retriever';
 import { getChapterById } from '@/lib/data';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { contextPackRequestSchema } from '@/lib/schemas/ai';
@@ -117,14 +116,6 @@ async function handlePost(req: Request) {
       usedPgvector: contextPack.usedPgvector,
       retrieval: contextPack.retrievalMeta ?? null,
     };
-    await logAiUsage({
-      endpoint: '/api/context-pack',
-      provider: contextPack.usedPgvector ? 'gemini-pgvector' : 'local-retriever',
-      model: contextPack.usedPgvector ? 'gemini-embedding-001' : 'context-index',
-      promptText: query,
-      completionText: JSON.stringify({ snippets: payload.snippets.length, usedPgvector: payload.usedPgvector }),
-      estimated: true,
-    });
     return dataJson({ requestId, data: payload });
   } catch (error) {
     logger.error({ err: error }, '[context-pack] error');

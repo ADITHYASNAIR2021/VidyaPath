@@ -4,7 +4,7 @@ import { validateEnv } from '@/lib/config/env-validation';
 import { getGlobalBudgetUsage } from '@/lib/ai/cost-guard';
 import { getUsageSummary } from '@/lib/ai/usage-metrics';
 import { getUnavailableModels } from '@/lib/ai/generator';
-import { getRerankStatus } from '@/lib/ai/context-retriever';
+import { getRerankStatus, getRetrievalStats } from '@/lib/ai/context-retriever';
 import { getModelConfig, getTaskModelAliases, listContextTasks } from '@/lib/ai/model-routing';
 import { getAiQualitySummary } from '@/lib/ai/quality-store';
 import { BOARD_CHAPTERS } from '@/lib/data';
@@ -12,6 +12,12 @@ import { getPaperStats } from '@/lib/papers';
 import { getAllFormulaEntries } from '@/lib/formulas';
 import { listCareerTracks, listCareerExams } from '@/lib/career-catalog';
 import { getSiteUrl } from '@/lib/site-url';
+import { readRetrievalReport } from '@/lib/ai/retrieval-report';
+import { getBoundaryStats } from '@/lib/ai/boundary-policy';
+import { AI_TOOL_POLICIES } from '@/lib/ai/tool-registry';
+import { getVectorStoreStatus } from '@/lib/ai/vector-store';
+import { getSemanticGuardStatus } from '@/lib/ai/semantic-guard';
+import { getRemoteRetrievalStatus } from '@/lib/ai/remote-retrieval';
 
 const PROVIDER_KEYS = [
   { provider: 'gemini', envKey: 'GEMINI_API_KEY' },
@@ -50,6 +56,7 @@ async function fileSize(filePath: string): Promise<number | null> {
 
 async function getRagStatus() {
   const dir = path.join(process.cwd(), 'lib', 'context');
+  const report = await readRetrievalReport();
   const cdnConfigured = has('CONTEXT_CDN_URL');
   const files = await Promise.all(
     RAG_FILES.map(async ({ file, role }) => {
@@ -63,9 +70,13 @@ async function getRagStatus() {
     const raw = await fs.readFile(path.join(dir, '.rag_count.json'), 'utf-8');
     chunkCount = Number((JSON.parse(raw) as { chunks?: number }).chunks) || null;
   } catch {
-    chunkCount = null;
+    chunkCount = report?.totals.chunks ?? null;
   }
-  return { cdnConfigured, chunkCount, files, rerank: getRerankStatus() };
+  return {
+    cdnConfigured, chunkCount, files, rerank: getRerankStatus(), runtime: getRetrievalStats(), report,
+    helpersEnabled: process.env.AI_ENABLE_RETRIEVAL_LLM === '1', vectorStore: getVectorStoreStatus(), remoteService: getRemoteRetrievalStatus(),
+    localEmbeddingsEnabled: process.env.AI_ENABLE_LOCAL_EMBEDDINGS === '1' && !process.env.VERCEL,
+  };
 }
 
 function getContentStats() {
@@ -109,6 +120,7 @@ export async function getDeveloperOverview() {
 
   return {
     generatedAt: new Date().toISOString(),
+    aiSafety: { ...getBoundaryStats(), tools: AI_TOOL_POLICIES, classifier: getSemanticGuardStatus() },
     runtime: {
       version: process.env.npm_package_version || '0.1.0',
       node: process.version,

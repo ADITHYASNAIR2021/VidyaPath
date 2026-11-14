@@ -14,7 +14,6 @@ import {
   type ChapterRemediateResponse,
 } from '@/lib/ai/validators';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { chapterRemediateRequestSchema } from '@/lib/schemas/ai';
@@ -148,6 +147,7 @@ async function handlePost(req: Request) {
       });
     }
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/chapter-remediate',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 1600,
@@ -236,27 +236,18 @@ Return ONLY JSON:
         }))
         .slice(0, parsed.availableDays);
 
-      if (dayPlan.length === 0) return dataJson({ requestId, data: fallback });
+      if (dayPlan.length === 0) return errorJson({ requestId, errorCode: 'grounded-generation-unavailable', message: 'A safe, grounded result is not available. Review the chapter material and try again.', status: 503 });
 
       const payload = {
         chapterId: chapter.id,
         dayPlan,
         checkpoints: cleanTextList(data.checkpoints, 8).length > 0 ? cleanTextList(data.checkpoints, 8) : fallback.checkpoints,
-        expectedScoreLift: stripSourceTags(data.expectedScoreLift || fallback.expectedScoreLift),
+        expectedScoreLift: 'No score increase is guaranteed. Measure progress with practice and teacher feedback.',
       };
-      await logAiUsage({
-        endpoint: '/api/chapter-remediate',
-        provider: result.provider,
-        model: result.model,
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
-        totalTokens: result.usage?.totalTokens,
-        estimated: !result.usage,
-      });
       return dataJson({ requestId, data: payload });
     } catch (aiError) {
       logger.warn({ err: aiError }, '[chapter-remediate] AI fallback triggered');
-      return dataJson({ requestId, data: fallback });
+      return errorJson({ requestId, errorCode: 'grounded-generation-unavailable', message: 'A safe, grounded result is not available. Review the chapter material and try again.', status: 503 });
     }
   } catch (error) {
     logger.error({ err: error }, '[chapter-remediate] error');

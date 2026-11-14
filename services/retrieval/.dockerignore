@@ -1,0 +1,8 @@
+node_modules
+release
+model-cache
+.env
+.env.*
+.git
+*.test.mjs
+smoke.mjs

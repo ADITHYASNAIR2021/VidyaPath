@@ -282,7 +282,7 @@ npm run build:textbooks
 # 3. Remove duplicate chunks
 npm run clean:chunks
 
-# 4. Build local hash-based vectors (for fast offline retrieval)
+# 4. Build local multilingual E5 embeddings (cached/downloaded model, no hosted inference)
 npm run build:vectors
 
 # 5. Verify the artifacts look correct
@@ -297,7 +297,7 @@ npm run verify:context
 | `lib/context/chapter_index.json` | Maps chapter IDs to source PDF paths | Fast chapter lookup |
 | `lib/context/textbook_chunks.jsonl` | Text chunks from NCERT textbooks | NCERT definitions in prompts |
 | `lib/context/textbook_chapter_index.json` | Textbook source map | Textbook lookup |
-| `lib/context/chunk_vectors.jsonl` | Local 384-dim semantic or hash-fallback vectors | Similarity scoring |
+| `lib/context/chunk_vectors.jsonl` | Local 384-dim E5 embeddings; intentionally excluded from Git/Vercel | Export to the private semantic service |
 
 **What is semantic chunking?**
 
@@ -367,9 +367,10 @@ npm run start
 ## Deploying publicly
 
 1. Deploy to Vercel (or any Node host / the included `Dockerfile`). No database to provision.
-2. Set at least one AI key, `NEXT_PUBLIC_APP_URL`, the Upstash pair, `DEVELOPER_DASHBOARD_KEY`, and `CONTEXT_CDN_URL` (the board-paper chunk file is not in git — host `lib/context/chunks.jsonl.gz` on any static host).
+   Follow [the deployment runbook](docs/DEPLOYMENT_RUNBOOK.md) for the exact upload destinations, optional private E5 service, environment settings, checks and rollback. The bundled BM25 path works before the semantic VM is available.
+2. Set at least one AI key, `NEXT_PUBLIC_APP_URL`, the Upstash pair, and `DEVELOPER_DASHBOARD_KEY`. Core chunks and BM25 artifacts are bundled; `CONTEXT_CDN_URL` is an optional pinned, immutable release fallback. See [AI security and retrieval](docs/AI_SECURITY_AND_RETRIEVAL.md) for all data flows, coverage checks and serving options.
    After deploying, open `/developer` → **Check providers** and **Run all** to confirm every model and endpoint works.
-3. Pick an `AI_DAILY_TOKEN_BUDGET_GLOBAL` you are happy to pay for. When it is spent, students see a friendly "AI resets tomorrow" message and everything non-AI keeps working.
+3. Choose `AI_DAILY_TOKEN_BUDGET_GLOBAL` and verify provider free-tier/billing settings. When it is spent, students see a friendly "AI resets tomorrow" message and everything non-AI keeps working.
 4. Optional: set `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (or Umami) for cookieless, anonymous usage analytics.
 
 Old portal URLs (`/student/*`, `/teacher/*`, `/admin/*`, `/login`, …) permanently redirect to the matching public page.
@@ -467,7 +468,7 @@ npm run check:route-links
 npm run build:context   # Build chunks from CBSE papers
 npm run build:textbooks # Build chunks from NCERT textbooks
 npm run clean:chunks    # Deduplicate chunk files
-npm run build:vectors   # Build local hash embeddings
+npm run build:vectors   # Build local multilingual E5 embeddings
 npm run verify:context  # Verify artifact integrity
 ```
 

@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { compressSnippetText } from '@/lib/ai/retrieval-enhancements';
+import { checkAiTokenBudget } from '@/lib/ai/token-budget';
+import { inspectAiText, UNTRUSTED_DATA_RULES } from '@/lib/ai/boundary-policy';
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -10,7 +12,6 @@ interface CachedTextValue {
 }
 
 const hydeCache = new Map<string, CachedTextValue>();
-const compressionCache = new Map<string, CachedTextValue>();
 
 function now(): number {
   return Date.now();
@@ -43,6 +44,7 @@ function readCached(cache: Map<string, CachedTextValue>, key: string): string | 
 }
 
 function writeCached(cache: Map<string, CachedTextValue>, key: string, text: string): void {
+  if (cache.size >= 500) cache.delete(cache.keys().next().value!);
   cache.set(key, {
     text,
     expiresAt: now() + CACHE_TTL_MS,
@@ -66,7 +68,9 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const body = await response.arrayBuffer();
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -75,12 +79,13 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 async function callGeminiLite(systemPrompt: string, userPrompt: string, maxOutputTokens: number): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!isUsableGeminiApiKey(apiKey)) return null;
+  if (!(await checkAiTokenBudget({ endpoint: 'retrieval-helper:gemini', projectedInputText: `${systemPrompt}\n${userPrompt}`, projectedOutputTokens: maxOutputTokens })).allowed) return null;
 
   const response = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
@@ -104,6 +109,7 @@ async function callGeminiLite(systemPrompt: string, userPrompt: string, maxOutpu
 async function callGroqCacheFriendly(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string | null> {
   const apiKey = process.env.GROQ_API_KEY?.trim();
   if (!isUsableGroqApiKey(apiKey)) return null;
+  if (!(await checkAiTokenBudget({ endpoint: 'retrieval-helper:groq', projectedInputText: `${systemPrompt}\n${userPrompt}`, projectedOutputTokens: maxTokens })).allowed) return null;
 
   const response = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -112,7 +118,7 @@ async function callGroqCacheFriendly(systemPrompt: string, userPrompt: string, m
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: process.env.AI_RETRIEVAL_HELPER_GROQ_MODEL?.trim() || 'llama-3.3-70b-versatile',
+      model: process.env.AI_RETRIEVAL_HELPER_GROQ_MODEL?.trim() || 'openai/gpt-oss-20b',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -133,6 +139,11 @@ async function callGroqCacheFriendly(systemPrompt: string, userPrompt: string, m
 }
 
 async function runRetrievalLlm(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string | null> {
+  // Retrieval works without generation. Extra helper calls are an explicit opt-in
+  // and share the same token budget as student-facing AI requests.
+  if (process.env.AI_ENABLE_RETRIEVAL_LLM !== '1') return null;
+  if (inspectAiText(userPrompt, 'request')) return null;
+  systemPrompt = `${UNTRUSTED_DATA_RULES}\n\n${systemPrompt}`;
   const preferred = process.env.AI_RETRIEVAL_HELPER_PROVIDER?.trim().toLowerCase();
   if (preferred === 'gemini') {
     return (await callGeminiLite(systemPrompt, userPrompt, maxTokens)) ?? callGroqCacheFriendly(systemPrompt, userPrompt, maxTokens);
@@ -179,65 +190,14 @@ Requirements:
 
   const generated = await runRetrievalLlm(systemPrompt, userPrompt, 120);
   const normalized = generated ? normalizeOutput(generated).slice(0, 700) : '';
-  if (!normalized) return null;
+  if (!normalized || inspectAiText(normalized, 'output')) return null;
   writeCached(hydeCache, cacheKey, normalized);
   return normalized;
 }
 
+/** Evidence compression is extractive: generated paraphrases must never become source facts. */
 export async function compressRetrievedSnippet(input: {
-  query: string;
-  subject: string;
-  classLevel: number;
-  chapterTitle?: string;
-  snippetText: string;
-  maxChars?: number;
+  query: string; subject: string; classLevel: number; chapterTitle?: string; snippetText: string; maxChars?: number;
 }): Promise<string> {
-  const maxChars = Math.max(220, Math.min(1200, input.maxChars ?? 900));
-  const sourceText = String(input.snippetText || '').trim();
-  if (!sourceText) return '';
-  if (sourceText.length <= Math.min(320, maxChars)) {
-    return compressSnippetText(sourceText, input.query, maxChars);
-  }
-
-  const cacheKey = buildCacheKey('compress', {
-    query: input.query,
-    subject: input.subject,
-    classLevel: input.classLevel,
-    chapterTitle: input.chapterTitle,
-    maxChars,
-    snippetText: sourceText.slice(0, 2200),
-  });
-  const cached = readCached(compressionCache, cacheKey);
-  if (cached) return cached;
-
-  const systemPrompt = `You compress textbook and exam snippets into key facts for question generation.
-Preserve only directly relevant factual content.
-Return plain text only with no bullets, no labels, and no commentary.`;
-  const userPrompt = `Compress the snippet to only the facts needed for this retrieval focus.
-Class: ${input.classLevel}
-Subject: ${input.subject}
-Chapter: ${input.chapterTitle || 'unspecified'}
-Retrieval focus: ${input.query}
-Max characters: ${maxChars}
-
-Keep:
-- exact definitions, formulae, reaction steps, causes, effects, process stages, diagram labels, and worked-example facts relevant to the focus
-- important units and conditions
-
-Remove:
-- broad introductions, repetition, instructions, filler, and unrelated facts
-
-Snippet:
-"""
-${sourceText.slice(0, 2400)}
-"""
-
-Output only the compressed factual text.`;
-
-  const generated = await runRetrievalLlm(systemPrompt, userPrompt, 220);
-  const normalized = generated ? normalizeOutput(generated).slice(0, maxChars) : '';
-  const fallback = compressSnippetText(sourceText, input.query, maxChars);
-  const resolved = normalized.length >= 80 ? normalized : fallback;
-  writeCached(compressionCache, cacheKey, resolved);
-  return resolved;
+  return compressSnippetText(input.snippetText, input.query, Math.max(220, Math.min(1200, input.maxChars ?? 900)));
 }

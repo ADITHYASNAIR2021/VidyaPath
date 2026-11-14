@@ -5,6 +5,10 @@ import { callNvidiaChatCompletion, isUsableNvidiaApiKey, type LlmUsageCounts } f
 import { rankModelCandidatesForTask, recordAiQualityRecord } from '@/lib/ai/quality-store';
 import { logger } from '@/lib/logger';
 import { sharedState } from '@/lib/runtime/shared-state';
+import { prepareGenerationRequest, assertSafeGeneratedOutput, requiresGrounding } from '@/lib/ai/generation-policy';
+import { inspectSemanticPayload } from '@/lib/ai/semantic-guard';
+import { logAiUsage } from '@/lib/ai/token-usage';
+import { checkAiTokenBudget as reserveProviderBudget } from '@/lib/ai/cost-guard';
 
 export type { LlmUsageCounts };
 
@@ -143,7 +147,7 @@ function buildContextSection(snippets: ContextSnippet[]): string {
     ]
       .filter(Boolean)
       .join(' | ');
-    const entry = `${source}\n${snippet.text}`;
+    const entry = JSON.stringify({ id: `S${idx + 1}`, source, text: snippet.text });
     if (charBudget - entry.length < 0 && parts.length > 0) break;
     parts.push(entry);
     charBudget -= entry.length;
@@ -156,7 +160,7 @@ function estimatePromptTokens(systemPrompt: string, contextBlock: string, userPr
 }
 
 function buildCacheKey(options: GenerateTextOptions): string {
-  const digest = createHash('sha1');
+  const digest = createHash('sha256');
   digest.update(options.task);
   digest.update('|');
   digest.update(options.chapterId ?? '');
@@ -172,7 +176,7 @@ function buildCacheKey(options: GenerateTextOptions): string {
   digest.update(options.userPrompt);
   digest.update('|');
   if (options.messages && options.messages.length > 0) {
-    for (const message of options.messages.slice(-8)) {
+    for (const message of options.messages.slice(-12)) {
       digest.update(message.role);
       digest.update(':');
       digest.update(message.content);
@@ -256,8 +260,7 @@ async function callGemini(
   );
 
   if (!response.ok) {
-    const err = await response.text().catch(() => '');
-    throw new Error(`Gemini ${model} failed: ${response.status} ${err.slice(0, 140)}`);
+    throw new Error(`Gemini ${model} failed: ${response.status}`);
   }
 
   const payload = (await response.json()) as {
@@ -333,8 +336,7 @@ async function callOpenAICompatibleEndpoint(
   }
 
   if (!response.ok) {
-    const err = await response.text().catch(() => '');
-    throw new Error(`${providerTag}/${model} failed: ${response.status} ${err.slice(0, 140)}`);
+    throw new Error(`${providerTag}/${model} failed: ${response.status}`);
   }
 
   const payload = (await response.json()) as {
@@ -538,8 +540,8 @@ function tryParseJsonCandidates(rawText: string): { parsed: unknown | null; erro
   for (const candidate of candidates) {
     try {
       return { parsed: JSON.parse(candidate) };
-    } catch (error) {
-      lastError = String(error);
+    } catch {
+      lastError = 'invalid-json';
     }
   }
 
@@ -700,9 +702,9 @@ export function resetUnavailableModels(): void {
   unavailableModels.clear();
 }
 
-async function runGeneration(options: GenerateTextOptions): Promise<GenerationResult> {
+async function runProviderGeneration(options: GenerateTextOptions): Promise<GenerationResult> {
   const cacheKey = buildCacheKey(options);
-  const cacheEnabled = isResponseCacheEnabled();
+  const cacheEnabled = isResponseCacheEnabled() && !['chat', 'paper-evaluate'].includes(options.task);
   if (cacheEnabled) {
     const fromCache = RESPONSE_CACHE.get(cacheKey);
     if (fromCache && fromCache.expiresAt > now()) {
@@ -727,14 +729,10 @@ async function runGeneration(options: GenerateTextOptions): Promise<GenerationRe
   const fullSystemPrompt = `${options.systemPrompt}
 
 ${citationBlock}`;
-  const contextAwareUserPrompt = `Retrieved Paper Context:
-${contextBlock}
-
-User Request:
-${options.userPrompt}`;
+  const contextAwareUserPrompt = JSON.stringify({ kind: 'untrusted-academic-data', retrievedEvidence: contextBlock, studentRequest: options.userPrompt });
   const modelMessages: ChatMessage[] | undefined =
     options.messages && options.messages.length > 0
-      ? [{ role: 'user', content: `Retrieved Paper Context:\n${contextBlock}` }, ...options.messages.slice(-12)]
+      ? [{ role: 'user', content: JSON.stringify({ kind: 'untrusted-retrieved-evidence', evidence: contextBlock }) }, ...options.messages.slice(-12).map((message) => ({ ...message, content: JSON.stringify({ kind: `untrusted-${message.role}-history`, content: message.content }) }))]
       : undefined;
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -756,6 +754,14 @@ ${options.userPrompt}`;
     const temperature = resolveTemperature(candidate, options.temperature);
     const maxOutputTokens = resolveMaxTokens(candidate, options.maxOutputTokens);
     const topP = resolveTopP(candidate);
+    const configured = candidate.provider === 'nvidia' ? isUsableNvidiaApiKey(nvidiaKey)
+      : candidate.provider === 'gemini' ? isUsableGeminiApiKey(geminiKey)
+      : candidate.provider === 'groq' ? isUsableGroqApiKey(groqKey)
+      : candidate.provider === 'cerebras' ? isUsableCerebrasApiKey(cerebrasKey) : isUsableMistralApiKey(mistralKey);
+    if (!configured) continue;
+    const budget = await reserveProviderBudget({ endpoint: options.qualityMeta?.endpoint || options.task,
+      requestedTokens: estimateTokens(fullSystemPrompt) + estimateTokens(modelMessages ? JSON.stringify(modelMessages) : contextAwareUserPrompt) + maxOutputTokens + 64 });
+    if (!budget.allowed) throw new Error('AI token budget unavailable or exceeded; reduce the request or try later.');
     try {
       if (candidate.provider === 'nvidia') {
         if (!isUsableNvidiaApiKey(nvidiaKey)) {
@@ -790,18 +796,6 @@ ${options.userPrompt}`;
           });
         }
         const latencyMs = now() - candidateStart;
-        void recordAiQualityRecord({
-          task: options.task,
-          provider: 'nvidia',
-          model: candidate.model,
-          ...buildQualityRecordBase(options),
-          latencyMs,
-          promptTokens: nvidiaResult.usage?.promptTokens,
-          completionTokens: nvidiaResult.usage?.completionTokens,
-          totalTokens: nvidiaResult.usage?.totalTokens,
-          contextSnippetCount: options.contextSnippets.length,
-          success: true,
-        });
         return {
           text: nvidiaResult.text,
           provider: 'nvidia',
@@ -840,18 +834,6 @@ ${options.userPrompt}`;
           });
         }
         const latencyMs = now() - candidateStart;
-        void recordAiQualityRecord({
-          task: options.task,
-          provider: 'gemini',
-          model: candidate.model,
-          ...buildQualityRecordBase(options),
-          latencyMs,
-          promptTokens: geminiResult.usage?.promptTokens,
-          completionTokens: geminiResult.usage?.completionTokens,
-          totalTokens: geminiResult.usage?.totalTokens,
-          contextSnippetCount: options.contextSnippets.length,
-          success: true,
-        });
         return {
           text: geminiResult.text,
           provider: 'gemini',
@@ -878,18 +860,6 @@ ${options.userPrompt}`;
           RESPONSE_CACHE.set(cacheKey, { text: groqResult.text, provider: 'groq', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
         }
         const latencyMs = now() - candidateStart;
-        void recordAiQualityRecord({
-          task: options.task,
-          provider: 'groq',
-          model: candidate.model,
-          ...buildQualityRecordBase(options),
-          latencyMs,
-          promptTokens: groqResult.usage?.promptTokens,
-          completionTokens: groqResult.usage?.completionTokens,
-          totalTokens: groqResult.usage?.totalTokens,
-          contextSnippetCount: options.contextSnippets.length,
-          success: true,
-        });
         return { text: groqResult.text, provider: 'groq', model: candidate.model, cacheHit: false, usage: groqResult.usage, latencyMs };
       }
 
@@ -909,18 +879,6 @@ ${options.userPrompt}`;
           RESPONSE_CACHE.set(cacheKey, { text: result.text, provider: 'cerebras', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
         }
         const latencyMs = now() - candidateStart;
-        void recordAiQualityRecord({
-          task: options.task,
-          provider: 'cerebras',
-          model: candidate.model,
-          ...buildQualityRecordBase(options),
-          latencyMs,
-          promptTokens: result.usage?.promptTokens,
-          completionTokens: result.usage?.completionTokens,
-          totalTokens: result.usage?.totalTokens,
-          contextSnippetCount: options.contextSnippets.length,
-          success: true,
-        });
         return { text: result.text, provider: 'cerebras', model: candidate.model, cacheHit: false, usage: result.usage, latencyMs };
       }
 
@@ -940,34 +898,11 @@ ${options.userPrompt}`;
           RESPONSE_CACHE.set(cacheKey, { text: result.text, provider: 'mistral', model: candidate.model, expiresAt: now() + CACHE_TTL_MS });
         }
         const latencyMs = now() - candidateStart;
-        void recordAiQualityRecord({
-          task: options.task,
-          provider: 'mistral',
-          model: candidate.model,
-          ...buildQualityRecordBase(options),
-          latencyMs,
-          promptTokens: result.usage?.promptTokens,
-          completionTokens: result.usage?.completionTokens,
-          totalTokens: result.usage?.totalTokens,
-          contextSnippetCount: options.contextSnippets.length,
-          success: true,
-        });
         return { text: result.text, provider: 'mistral', model: candidate.model, cacheHit: false, usage: result.usage, latencyMs };
       }
     } catch (error) {
       errors.push(String(error).slice(0, 220));
       noteCandidateFailure(candidate, error);
-      void recordAiQualityRecord({
-        task: options.task,
-        provider: candidate.provider,
-        model: candidate.model,
-        ...buildQualityRecordBase(options),
-        latencyMs: now() - candidateStart,
-        contextSnippetCount: options.contextSnippets.length,
-        success: false,
-        errorCode: 'provider-generation-failed',
-        errorMessage: String(error),
-      });
     }
   }
 
@@ -980,6 +915,20 @@ export async function generateTaskText(options: GenerateTextOptions): Promise<Ge
   return runGeneration(options);
 }
 
+async function runGeneration(options: GenerateTextOptions): Promise<GenerationResult> {
+  const prepared = prepareGenerationRequest(options);
+  if (!await inspectSemanticPayload(prepared.contextSnippets.map((snippet) => snippet.text), 'retrieval')) throw new Error('Retrieved evidence rejected by semantic safety check');
+  const result = await runProviderGeneration(prepared);
+  if (!result.cacheHit) await logAiUsage({
+    endpoint: options.qualityMeta?.endpoint || options.task, provider: result.provider, model: result.model,
+    promptTokens: result.usage?.promptTokens, completionTokens: result.usage?.completionTokens, totalTokens: result.usage?.totalTokens,
+    promptText: `${prepared.systemPrompt} ${prepared.userPrompt}`, completionText: result.text, estimated: !result.usage,
+  });
+  try { assertSafeGeneratedOutput(result.text, prepared.contextSnippets); }
+  catch (error) { RESPONSE_CACHE.delete(buildCacheKey(prepared)); void recordAiQualityRecord({ task: options.task, provider: result.provider, model: result.model, ...buildQualityRecordBase(options), success: false, rejected: true, errorCode: 'safety-output-rejected' }); throw error; }
+  return result;
+}
+
 export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Promise<{
   data: T;
   result: GenerationResult;
@@ -990,6 +939,7 @@ export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Prom
     repaired: boolean;
   };
 }> {
+  options = prepareGenerationRequest(options);
   const evaluateAndAccept = (raw: unknown) => {
     // JSON mode on OpenAI-compatible APIs always returns an object, so array tasks may come
     // back wrapped as {"flashcards": [...]} — accept the single array inside.
@@ -999,6 +949,7 @@ export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Prom
       if (arrays.length === 1 && options.validate(arrays[0])) value = arrays[0];
     }
     if (!options.validate(value)) return null;
+    try { assertSafeGeneratedOutput(value, options.contextSnippets); } catch { return null; }
     const quality = evaluateJsonGrounding(value, options.contextSnippets, options.includeCitations);
     return { data: value as T, quality };
   };
@@ -1007,7 +958,7 @@ export async function generateTaskJson<T>(options: GenerateJsonOptions<T>): Prom
   const firstResult = await runGeneration(jsonOptions);
   const firstParsed = tryParseJsonCandidates(firstResult.text);
   const acceptedFirst = firstParsed.parsed ? evaluateAndAccept(firstParsed.parsed) : null;
-  if (acceptedFirst && (acceptedFirst.quality.retrievalMiss || acceptedFirst.quality.groundednessScore >= 30)) {
+  if (acceptedFirst && (!options.includeCitations || acceptedFirst.quality.citationCoverageScore > 0) && (!requiresGrounding(options.task) || (!acceptedFirst.quality.retrievalMiss && acceptedFirst.quality.groundednessScore >= 45))) {
     void recordAiQualityRecord({
       task: options.task,
       provider: firstResult.provider,
@@ -1048,7 +999,7 @@ CRITICAL:
   const retryResult = await runGeneration(retryOptions);
   const retryParsed = tryParseJsonCandidates(retryResult.text);
   const acceptedRetry = retryParsed.parsed ? evaluateAndAccept(retryParsed.parsed) : null;
-  if (acceptedRetry && (acceptedRetry.quality.retrievalMiss || acceptedRetry.quality.groundednessScore >= 20)) {
+  if (acceptedRetry && (!options.includeCitations || acceptedRetry.quality.citationCoverageScore > 0) && (!requiresGrounding(options.task) || (!acceptedRetry.quality.retrievalMiss && acceptedRetry.quality.groundednessScore >= 45))) {
     void recordAiQualityRecord({
       task: options.task,
       provider: retryResult.provider,
@@ -1099,8 +1050,8 @@ CRITICAL:
   logger.warn(
     {
       task: options.task,
-      first: { provider: firstResult.provider, model: firstResult.model, parseError: firstParsed.error, preview: firstResult.text.slice(0, 600) },
-      retry: { provider: retryResult.provider, model: retryResult.model, parseError: retryParsed.error, preview: retryResult.text.slice(0, 600) },
+      first: { provider: firstResult.provider, model: firstResult.model, parseError: firstParsed.error },
+      retry: { provider: retryResult.provider, model: retryResult.model, parseError: retryParsed.error },
     },
     '[generator] JSON output rejected after retry'
   );

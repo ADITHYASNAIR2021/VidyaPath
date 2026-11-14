@@ -2,7 +2,8 @@ import 'server-only';
 
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { ALL_CHAPTERS, getChapterById } from '@/lib/data';
 import { getPYQData, type PYQEntry } from '@/lib/pyq';
 
@@ -28,12 +29,8 @@ export interface GroundedPYQEntry extends PYQEntry {
   meta: GroundedPYQMeta;
 }
 
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const CONTEXT_DIR = path.resolve(MODULE_DIR, 'context');
-const CONTEXT_PATHS = [
-  path.join(CONTEXT_DIR, 'chunks.jsonl'),
-  path.join(CONTEXT_DIR, 'textbook_chunks.jsonl'),
-];
+const CONTEXT_DIR = path.join(process.cwd(), 'lib', 'context');
+const CONTEXT_FILES = ['chunks.jsonl.gz', 'textbook_chunks.jsonl.gz'];
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const VECTOR_DIM = 192;
 
@@ -41,6 +38,7 @@ let cachedAt = 0;
 let cacheByChapter = new Map<string, GroundedPYQEntry>();
 let cachedPaperYearsByChapter = new Map<string, number[]>();
 let cachedGlobalPaperYears: number[] = [];
+let cacheBuild: Promise<void> | null = null;
 
 const STOP_WORDS = new Set([
   'the', 'and', 'for', 'with', 'that', 'this', 'from', 'which', 'what',
@@ -147,7 +145,9 @@ function estimateAvgMarks(paperEvidenceCount: number, yearsCount: number, fallba
   return clamp(Math.round(estimate), 3, 15);
 }
 
-function scoreTopicAgainstChunks(topic: string, chunkTexts: Array<{ text: string; weight: number }>): number {
+type TopicEvidence = { weight: number; vector: Float32Array; tokens: Set<string> };
+
+function scoreTopicAgainstChunks(topic: string, chunkTexts: TopicEvidence[]): number {
   if (!topic.trim() || chunkTexts.length === 0) return 0;
   const topicVector = buildVector(topic);
   const topicTokens = new Set(tokenize(topic));
@@ -155,12 +155,11 @@ function scoreTopicAgainstChunks(topic: string, chunkTexts: Array<{ text: string
 
   let score = 0;
   for (const chunk of chunkTexts) {
-    const sim = cosineSimilarity(topicVector, buildVector(chunk.text));
+    const sim = cosineSimilarity(topicVector, chunk.vector);
     if (sim < 0.12) continue;
-    const chunkTokens = new Set(tokenize(chunk.text));
     let overlap = 0;
     for (const token of topicTokens) {
-      if (chunkTokens.has(token)) overlap += 1;
+      if (chunk.tokens.has(token)) overlap += 1;
     }
     if (overlap === 0) continue;
     score += (sim * 100) * (1 + overlap * 0.35) * chunk.weight;
@@ -172,7 +171,7 @@ function deriveGroundedEntryForChapter(chapterId: string, chunks: ContextChunkLi
   const chapter = getChapterById(chapterId);
   if (!chapter) return null;
 
-  const chapterChunks = chunks.filter((chunk) => chunk.chapterId === chapterId);
+  const chapterChunks = chunks;
   const paperChunks = chapterChunks.filter((chunk) => (chunk.sourceType === 'paper'));
   const textbookChunks = chapterChunks.filter((chunk) => (chunk.sourceType === 'textbook'));
   const yearsAsked = normalizeYears(
@@ -187,7 +186,7 @@ function deriveGroundedEntryForChapter(chapterId: string, chunks: ContextChunkLi
     ...(fallback?.importantTopics ?? []),
   ]).slice(0, 22);
 
-  const weightedChunks: Array<{ text: string; weight: number }> = [
+  const weightedChunks: TopicEvidence[] = [
     ...paperChunks
       .map((chunk) => String(chunk.text || '').trim())
       .filter((text) => text.length > 50)
@@ -196,7 +195,7 @@ function deriveGroundedEntryForChapter(chapterId: string, chunks: ContextChunkLi
       .map((chunk) => String(chunk.text || '').trim())
       .filter((text) => text.length > 50)
       .map((text) => ({ text, weight: 1 })),
-  ];
+  ].map(({ text, weight }) => ({ weight, vector: buildVector(text), tokens: new Set(tokenize(text)) }));
 
   const topicScores = candidateTopics
     .map((topic) => ({ topic, score: scoreTopicAgainstChunks(topic, weightedChunks) }))
@@ -209,32 +208,17 @@ function deriveGroundedEntryForChapter(chapterId: string, chunks: ContextChunkLi
 
   const avgMarks = estimateAvgMarks(paperChunks.length, yearsAsked.length, fallback?.avgMarks ?? 5);
 
-  if (yearsAsked.length === 0 && !fallback) {
+  if (yearsAsked.length === 0) {
     return {
       chapterId,
       yearsAsked: [],
-      importantTopics: chapter.topics.slice(0, 6),
+      importantTopics,
       avgMarks,
       meta: {
         source: 'grounded',
-        paperEvidenceCount: 0,
+        paperEvidenceCount: paperChunks.length,
         textbookEvidenceCount: textbookChunks.length,
         confidence: 0.35,
-      },
-    };
-  }
-
-  if (yearsAsked.length === 0 && fallback) {
-    return {
-      chapterId,
-      yearsAsked: fallback.yearsAsked,
-      importantTopics: importantTopics.length > 0 ? importantTopics : fallback.importantTopics,
-      avgMarks: fallback.avgMarks,
-      meta: {
-        source: 'fallback',
-        paperEvidenceCount: 0,
-        textbookEvidenceCount: textbookChunks.length,
-        confidence: 0.4,
       },
     };
   }
@@ -254,15 +238,22 @@ function deriveGroundedEntryForChapter(chapterId: string, chunks: ContextChunkLi
 }
 
 async function loadContextChunks(): Promise<ContextChunkLike[]> {
+  const manifest = JSON.parse(await fs.readFile(path.join(CONTEXT_DIR, 'retrieval_manifest.json'), 'utf8')) as { artifacts: Array<{ file: string; sha256: string }> };
   const payloads = await Promise.all(
-    CONTEXT_PATHS.map((filePath) => fs.readFile(filePath, 'utf-8').catch(() => ''))
+    CONTEXT_FILES.map(async (file) => {
+      const bytes = await fs.readFile(path.join(CONTEXT_DIR, file));
+      if (createHash('sha256').update(bytes).digest('hex') !== manifest.artifacts.find((row) => row.file === file)?.sha256) throw new Error('PYQ corpus integrity mismatch');
+      return gunzipSync(bytes, { maxOutputLength: 256 * 1024 * 1024 }).toString('utf8');
+    })
   );
   const chunks: ContextChunkLike[] = [];
+  const seen = new Set<string>();
   for (const payload of payloads) {
     for (const line of payload.split('\n')) {
       const parsed = parseChunkLine(line);
-      if (!parsed) continue;
-      chunks.push(parsed);
+      if (!parsed?.id || seen.has(parsed.id)) continue;
+      seen.add(parsed.id);
+      chunks.push({ ...parsed, sourceType: parsed.sourceType || 'paper' });
     }
   }
   return chunks;
@@ -271,8 +262,19 @@ async function loadContextChunks(): Promise<ContextChunkLike[]> {
 async function ensureGroundedCache(force = false): Promise<void> {
   const now = Date.now();
   if (!force && now - cachedAt < CACHE_TTL_MS && cacheByChapter.size > 0) return;
+  if (!cacheBuild) cacheBuild = rebuildGroundedCache().finally(() => { cacheBuild = null; });
+  await cacheBuild;
+}
 
+async function rebuildGroundedCache(): Promise<void> {
   const chunks = await loadContextChunks();
+  const chunksByChapter = new Map<string, ContextChunkLike[]>();
+  for (const chunk of chunks) {
+    if (!chunk.chapterId) continue;
+    const group = chunksByChapter.get(chunk.chapterId) ?? [];
+    group.push(chunk);
+    chunksByChapter.set(chunk.chapterId, group);
+  }
   const next = new Map<string, GroundedPYQEntry>();
   const nextPaperYearsByChapter = new Map<string, number[]>();
   const globalYearSet = new Set<number>();
@@ -284,7 +286,7 @@ async function ensureGroundedCache(force = false): Promise<void> {
     }
   }
   for (const chapter of ALL_CHAPTERS) {
-    const entry = deriveGroundedEntryForChapter(chapter.id, chunks);
+    const entry = deriveGroundedEntryForChapter(chapter.id, chunksByChapter.get(chapter.id) ?? []);
     if (!entry) continue;
     next.set(chapter.id, entry);
     nextPaperYearsByChapter.set(chapter.id, entry.yearsAsked);
@@ -296,7 +298,7 @@ async function ensureGroundedCache(force = false): Promise<void> {
   cacheByChapter = next;
   cachedPaperYearsByChapter = nextPaperYearsByChapter;
   cachedGlobalPaperYears = normalizeYears(Array.from(globalYearSet));
-  cachedAt = now;
+  cachedAt = Date.now();
 }
 
 export async function getGroundedPYQData(chapterId: string): Promise<GroundedPYQEntry | null> {
@@ -306,7 +308,7 @@ export async function getGroundedPYQData(chapterId: string): Promise<GroundedPYQ
 
 export async function getGroundedFrequencyLabel(chapterId: string): Promise<{ label: string; color: string } | null> {
   const entry = await getGroundedPYQData(chapterId);
-  if (!entry) return null;
+  if (!entry || entry.yearsAsked.length === 0) return null;
   return buildFrequencyLabelFromCount(entry.yearsAsked.length);
 }
 

@@ -31,6 +31,10 @@ const REDACT_PATHS = [
   'refresh_token',
   'authorization',
   'Authorization',
+  'imageBase64', 'prompt', 'messages', 'answerText',
+  '*.imageBase64', '*.prompt', '*.messages', '*.answerText',
+  '*.password', '*.token', '*.secret', '*.authorization', '*.Authorization',
+  'req.headers', 'request.headers', 'req.body', 'request.body',
 ];
 
 function resolveLevel(): string {

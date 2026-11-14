@@ -24,7 +24,6 @@ import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
 import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { chapterDrillRequestSchema } from '@/lib/schemas/ai';
@@ -132,45 +131,7 @@ function buildFallbackDrill(
     explanation: quiz.explanation ?? 'Revise this concept from chapter notes and PYQs.',
   }));
 
-  const generated: MCQItem[] = fromChapter.length > 0
-    ? fromChapter
-    : Array.from({ length: Math.max(1, mcqCount) }, (_, index) => {
-        const topic = chapter.topics[index % Math.max(1, chapter.topics.length)] ?? chapter.title;
-        return {
-          question: `Which statement is most accurate for "${topic}" in ${chapter.title}?`,
-          options: [
-            'It is usually ignored in board exams.',
-            'It is a high-yield concept requiring definition + application.',
-            'It only appears in practical exams.',
-            'It is not part of NCERT scope.',
-          ],
-          answer: 1,
-          explanation: `${topic} should be revised with concept clarity and board-style examples.`,
-        };
-      });
-
-  const normalized = normalizeMCQs(generated);
-  const expanded = normalized.length >= mcqCount
-    ? normalized
-    : mcqCount > 0
-      ? [
-        ...normalized,
-        ...Array.from({ length: mcqCount - normalized.length }, (_, idx) => {
-          const topic = chapter.topics[idx % Math.max(1, chapter.topics.length)] ?? chapter.title;
-          return {
-            question: `Board drill check: what is the most important exam angle of "${topic}" in ${chapter.title}?`,
-            options: [
-              'Formula and concept clarity with solved examples',
-              'Skip this topic because it is never asked',
-              'Only practical file work is needed',
-              'Only memorize definitions without application',
-            ],
-            answer: 0,
-            explanation: `For ${topic}, prioritize concept + formula + PYQ application.`,
-          };
-        }),
-      ]
-      : [];
+  const expanded = normalizeMCQs(fromChapter);
   const questions = mcqCount > 0 ? normalizeMCQs(expanded).slice(0, mcqCount) : [];
   const shortQuestions = shortCount > 0
     ? cleanTextList(
@@ -214,25 +175,6 @@ function isQuestionAligned(question: string, chapterTitle: string, chapterTopics
   const questionTokens = tokenize(question);
   if (questionTokens.length === 0) return false;
   return questionTokens.some((token) => allow.has(token));
-}
-
-function buildGenericQuestion(topic: string, chapterTitle: string, variant = 0): MCQItem {
-  const stems = [
-    `In ${chapterTitle}, which statement about "${topic}" is most exam-relevant?`,
-    `For ${chapterTitle}, what is the most accurate board-level understanding of "${topic}"?`,
-    `Which option best captures the NCERT idea of "${topic}" in ${chapterTitle}?`,
-  ];
-  return {
-    question: `${stems[variant % stems.length]} (Set ${variant + 1})`,
-    options: [
-      'Apply concept + formula with correct units/sign convention.',
-      'Memorize one definition only and skip applications.',
-      'Ignore this topic because it never appears in boards.',
-      'Attempt without showing intermediate steps.',
-    ],
-    answer: 0,
-    explanation: `Board scoring improves when ${topic} is solved with concept, formula, and final-unit checks.`,
-  };
 }
 
 function ensureExactPromptCount(
@@ -292,7 +234,7 @@ function ensureExactDrillCount(
   chapterTopics: string[],
   questionCount: number
 ): MCQItem[] {
-  const normalized = normalizeMCQs(items);
+  const normalized = normalizeMCQs(items).filter((item) => isQuestionAligned(item.question, chapterTitle, chapterTopics));
   const output = normalized.slice(0, questionCount);
   const used = new Set(output.map((item) => item.question.trim().toLowerCase()));
 
@@ -304,30 +246,7 @@ function ensureExactDrillCount(
     used.add(key);
   }
 
-  let cursor = 0;
-  while (output.length < questionCount && cursor < questionCount * 10) {
-    const topic = chapterTopics[cursor % Math.max(1, chapterTopics.length)] ?? chapterTitle;
-    const generated = buildGenericQuestion(topic, chapterTitle, cursor);
-    const key = generated.question.trim().toLowerCase();
-    if (!used.has(key)) {
-      output.push(generated);
-      used.add(key);
-    }
-    cursor += 1;
-  }
-
-  if (output.length < questionCount) {
-    for (let index = output.length; index < questionCount; index += 1) {
-      const topic = chapterTopics[index % Math.max(1, chapterTopics.length)] ?? chapterTitle;
-      const forced = buildGenericQuestion(topic, chapterTitle, 100 + index);
-      const key = forced.question.trim().toLowerCase();
-      if (!used.has(key)) {
-        output.push(forced);
-        used.add(key);
-      }
-    }
-  }
-
+  // Keep only genuine generated/static questions; never synthesize answer filler.
   return normalizeMCQs(output).slice(0, questionCount);
 }
 
@@ -396,6 +315,7 @@ async function handlePost(req: Request) {
     }
     const projectedOutputTokens = Math.min(3600, 900 + parsed.questionCount * 170);
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/chapter-drill',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens,
@@ -645,21 +565,11 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
         subject: chapter.subject,
         questions: finalAnnotatedQuestions,
       });
-
-      await logAiUsage({
-        endpoint: '/api/chapter-drill',
-        provider: result.provider,
-        model: result.model,
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
-        totalTokens: result.usage?.totalTokens,
-        estimated: !result.usage,
-      });
       return dataJson({ requestId, data: response });
     } catch (aiError) {
       const reason = aiError instanceof Error ? aiError.message : String(aiError);
       logger.warn({ reason }, '[chapter-drill] AI fallback triggered');
-      return dataJson({ requestId, data: annotatedFallback });
+      return errorJson({ requestId, errorCode: 'grounded-generation-unavailable', message: 'A safe, grounded drill is not available. Please try again later.', status: 503 });
     }
   } catch (error) {
     logger.error({ err: error }, '[chapter-drill] error');

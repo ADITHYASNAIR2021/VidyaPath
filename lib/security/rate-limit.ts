@@ -109,7 +109,8 @@ export async function checkRateLimit(input: RateLimitInput): Promise<RateLimitDe
       blockSeconds,
     });
     if (redisDecision) return redisDecision;
-    // null = Redis error → fall back to the in-process limiter below.
+    // A configured shared limiter outage must not reset limits on each instance.
+    return { allowed: false, retryAfterSeconds: 30, remaining: 0, limit };
   } else if (!memoryModeNotice.warned && process.env.NODE_ENV === 'production') {
     memoryModeNotice.warned = true;
     logger.warn('[rate-limit] Upstash Redis not configured; using per-instance memory limits.');

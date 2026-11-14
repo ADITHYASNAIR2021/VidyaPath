@@ -18,7 +18,6 @@ import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
 import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { quizRequestSchema } from '@/lib/schemas/ai';
@@ -33,26 +32,6 @@ function sanitizeUntrustedPromptContext(value: string): string {
     .slice(0, 1600);
 }
 
-function buildGenericQuestion(subject: string, chapterTitle: string, topic: string, variant: number): MCQItem {
-  const prompts = [
-    `In ${chapterTitle}, which statement about "${topic}" is most accurate?`,
-    `For ${subject}, what is the board-relevant understanding of "${topic}" in ${chapterTitle}?`,
-    `Which option best explains "${topic}" from ${chapterTitle}?`,
-  ];
-  const stem = prompts[variant % prompts.length];
-  return {
-    question: `${stem} (Concept check ${variant + 1})`,
-    options: [
-      'It should be understood with concept clarity and correct terminology from the textbook.',
-      'It is usually ignored in board preparation.',
-      'It appears only in practical files and not in theory.',
-      'It is outside NCERT chapter scope.',
-    ],
-    answer: 0,
-    explanation: `Revise "${topic}" from NCERT and apply it in board-style questions with accurate terms.`,
-  };
-}
-
 function isGroundedQuestion(item: MCQItem): boolean {
   const text = `${item.question} ${item.options.join(' ')} ${item.explanation}`.toLowerCase();
   return !/(exam strategy|time management|score more|marks boosting|answering technique|attempt order)/.test(text);
@@ -61,10 +40,7 @@ function isGroundedQuestion(item: MCQItem): boolean {
 function ensureExactQuizCount(
   items: MCQItem[],
   chapterQuizzes: MCQItem[],
-  questionCount: number,
-  subject: string,
-  chapterTitle: string,
-  chapterTopics: string[]
+  questionCount: number
 ): MCQItem[] {
   const output: MCQItem[] = [];
   const used = new Set<string>();
@@ -86,15 +62,7 @@ function ensureExactQuizCount(
     pushIfUnique(item);
   }
 
-  let cursor = 0;
-  const topics = chapterTopics.length > 0 ? chapterTopics : [chapterTitle || subject];
-  while (output.length < questionCount) {
-    const topic = topics[cursor % topics.length] ?? chapterTitle;
-    pushIfUnique(buildGenericQuestion(subject, chapterTitle, topic, cursor));
-    cursor += 1;
-    if (cursor > questionCount * 6) break;
-  }
-
+  // Return fewer valid items rather than invent filler to meet a count.
   return normalizeMCQs(output).slice(0, questionCount);
 }
 
@@ -140,6 +108,7 @@ async function handlePost(req: Request) {
     }
     const body = parsedBody.value as Record<string, unknown>;
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/generate-quiz',
       projectedInputText: JSON.stringify(body),
       projectedOutputTokens: 4000,
@@ -286,10 +255,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
     const exactQuestions = ensureExactQuizCount(
       prioritizeUnseenQuestions(data, recentHistory.recentHashes),
       chapterFallbackQuizzes,
-      questionCount,
-      subject,
-      chapterTitle,
-      chapter?.topics ?? []
+      questionCount
     );
 
     if (exactQuestions.length === 0) {
@@ -312,10 +278,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
     const hardenedQuestions = ensureExactQuizCount(
       highGroundedSeed.length > 0 ? highGroundedSeed : annotatedInitial,
       chapterFallbackQuizzes,
-      questionCount,
-      subject,
-      chapterTitle,
-      chapter?.topics ?? []
+      questionCount
     );
     const orderedQuestions = prioritizeUnseenQuestions(hardenedQuestions, recentHistory.recentHashes).slice(0, questionCount);
     const annotated = annotateQuestionsWithRagMeta(orderedQuestions, {
@@ -328,16 +291,6 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
       chapterId: chapter?.id ?? (chapterId || undefined),
       subject,
       questions: annotated,
-    });
-    await logAiUsage({
-      endpoint: '/api/generate-quiz',
-      provider: result.provider,
-      model: result.model,
-      promptTokens: result.usage?.promptTokens,
-      completionTokens: result.usage?.completionTokens,
-      totalTokens: result.usage?.totalTokens,
-      requestId,
-      estimated: !result.usage,
     });
 
     return dataJson({

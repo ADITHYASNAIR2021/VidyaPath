@@ -33,7 +33,8 @@ const CASES: EndpointCase[] = [
   { id: 'career-tracks', method: 'GET', path: '/api/career/tracks', usesAi: false },
   { id: 'career-exams', method: 'GET', path: '/api/career/exams', usesAi: false },
   { id: 'career-map', method: 'GET', path: '/api/career/map?chapterId=c12-phy-1', usesAi: false },
-  { id: 'context-pack', method: 'POST', path: '/api/context-pack', usesAi: false, body: { classLevel: 10, subject: 'Chemistry', chapterId: 'c10-chem-1', query: 'balancing equations' } },
+  { id: 'retrieval-local', method: 'POST', path: '/api/developer/rag-check', usesAi: false, body: { chapterId: 'c10-chem-1', query: 'balancing equations' } },
+  { id: 'context-pack', method: 'POST', path: '/api/context-pack', usesAi: true, body: { classLevel: 10, subject: 'Chemistry', chapterId: 'c10-chem-1', query: 'balancing equations' } },
   {
     id: 'ai-tutor',
     method: 'POST',
@@ -64,7 +65,7 @@ const CASES: EndpointCase[] = [
     method: 'POST',
     path: '/api/image-solve',
     usesAi: true,
-    body: () => ({ imageBase64: questionImageBase64(), mimeType: 'image/png', classLevel: 10, subject: 'Chemistry' }),
+    body: () => ({ imageBase64: questionImageBase64(), mimeType: 'image/png', chapterId: 'c10-chem-1', classLevel: 10, subject: 'Chemistry' }),
   },
 ];
 

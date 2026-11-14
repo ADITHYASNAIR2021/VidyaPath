@@ -78,7 +78,8 @@ export function isUsableNvidiaApiKey(key: string | undefined): key is string {
 
 async function readErrorText(response: Response): Promise<string> {
   try {
-    return (await response.text()).slice(0, 400);
+    await response.text();
+    return ''; // Provider error bodies may echo request text or credentials.
   } catch {
     return '';
   }

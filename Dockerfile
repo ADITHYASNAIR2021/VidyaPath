@@ -23,13 +23,17 @@ RUN npm run build
 # ── Runtime ──
 FROM base AS runner
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=builder /app/.next ./.next
+COPY --chown=node:node --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/lib/context ./lib/context
 COPY --from=builder /app/next.config.js ./
 COPY --from=builder /app/package.json ./
+RUN mkdir -p /app/.cache/embeddings /app/lib/runtime \
+    && chown -R node:node /app/.cache /app/lib/runtime
 
 EXPOSE 3000
+
+USER node
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=4 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(async r=>{const j=await r.json();process.exit(r.ok&&j.status==='ok'?0:1)}).catch(e=>{console.error(e);process.exit(1)})"]

@@ -423,7 +423,8 @@ def extract_pdf_text(pdf_path: Path, max_pages: int) -> str:
             if idx >= max_pages:
                 break
             try:
-                page_text = page.extract_text() or ""
+                from pdf_text_fallback import extract_page_text
+                page_text = extract_page_text(page, pdf_path, idx)
             except Exception as page_exc:
                 print(f"[WARN] {pdf_path.name} page {idx}: {page_exc}", file=sys.stderr)
                 page_text = ""

@@ -2,7 +2,7 @@ import { withAiMetrics } from '@/lib/ai/with-ai-metrics';
 import { ALL_CHAPTERS } from '@/lib/data';
 import { getPYQData } from '@/lib/pyq';
 import { getGroundedPYQData } from '@/lib/pyq-grounded';
-import { getContextPack } from '@/lib/ai/context-retriever';
+import { getMultiChapterContextPack } from '@/lib/ai/context-retriever';
 import { computeWeightedTemperature } from '@/lib/ai/generation-controls';
 import { generateTaskJson } from '@/lib/ai/generator';
 import {
@@ -29,51 +29,11 @@ import { getFewShotExamples } from '@/lib/ai/pyq-examples';
 import { verifySelfCheck } from '@/lib/ai/question-verifier';
 import { getContentSafetyBlock } from '@/lib/ai/content-safety';
 import { requirePublicAiAccess } from '@/lib/ai/public-access';
-import { logAiUsage } from '@/lib/ai/token-usage';
 import { dataJson, errorJson, getClientIp, getRequestId } from '@/lib/http/api-response';
 import { parseAndValidateJsonBody, bodyReasonToStatus } from '@/lib/http/request-body';
 import { adaptiveTestRequestSchema, type AdaptiveTestRequest } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { logger } from '@/lib/logger';
-
-function buildAdaptiveGenericQuestion(subject: string, chapterTitle: string, topic: string, index: number): MCQItem {
-  const variants: MCQItem[] = [
-    {
-      question: `In ${chapterTitle}, which statement best describes "${topic}"?`,
-      options: [
-        `It should follow the chapter definition and standard ${subject} conditions.`,
-        'It is solved mainly by exam strategy tricks rather than concept.',
-        'It belongs outside the syllabus of this chapter.',
-        'It never appears in board-level conceptual questions.',
-      ],
-      answer: 0,
-      explanation: `For ${topic}, start from NCERT definition and chapter conditions before applying it in questions.`,
-    },
-    {
-      question: `Which option is the most board-relevant understanding of "${topic}" in ${chapterTitle}?`,
-      options: [
-        `A precise concept statement with correct ${subject} terminology and constraints.`,
-        'A memorized one-line trick without conceptual basis.',
-        'A generic exam tactic unrelated to the chapter content.',
-        'A random assumption not supported by textbook content.',
-      ],
-      answer: 0,
-      explanation: `Board answers on ${topic} are strongest when concept and chapter language are both accurate.`,
-    },
-    {
-      question: `For "${topic}" questions in ${chapterTitle}, the best first step is to:`,
-      options: [
-        `Identify the governing ${subject} principle from the chapter and apply it to the given case.`,
-        'Start with time-management tips before reading the concept.',
-        'Ignore definitions and directly guess from options.',
-        'Use only elimination without understanding the topic.',
-      ],
-      answer: 0,
-      explanation: `The reliable path is concept-first: map the question to the chapter principle and then solve.`,
-    },
-  ];
-  return variants[index % variants.length];
-}
 
 function ensureAdaptiveQuestionCount(questions: MCQItem[], req: AdaptiveTestRequest): MCQItem[] {
   const target = Math.max(3, Math.min(30, req.questionCount ?? 10));
@@ -85,23 +45,6 @@ function ensureAdaptiveQuestionCount(questions: MCQItem[], req: AdaptiveTestRequ
     used.add(key);
     output.push(item);
     if (output.length >= target) break;
-  }
-  const selectedChapters = ALL_CHAPTERS.filter((chapter) => req.chapterIds.includes(chapter.id));
-  const topicPool = selectedChapters.flatMap((chapter) =>
-    (chapter.topics ?? []).map((topic) => ({ chapterTitle: chapter.title, topic }))
-  );
-  let cursor = 0;
-  while (output.length < target) {
-    const selected = topicPool[cursor % Math.max(1, topicPool.length)];
-    output.push(
-      buildAdaptiveGenericQuestion(
-        req.subject,
-        selected?.chapterTitle ?? `${req.subject} chapter`,
-        selected?.topic ?? `${req.subject} core concept`,
-        cursor
-      )
-    );
-    cursor += 1;
   }
   return normalizeMCQs(output).slice(0, target);
 }
@@ -119,32 +62,17 @@ function buildFallbackQuestions(req: AdaptiveTestRequest): AdaptiveTestResponse 
     )
     .slice(0, Math.max(3, Math.min(20, req.questionCount ?? 10)));
 
-  const baseQuestions = pool.length > 0
-    ? normalizeMCQs(pool)
-    : [
-        {
-          question: `In ${req.subject}, which choice is most aligned with textbook-grounded problem solving?`,
-          options: [
-            'Apply the chapter concept accurately before selecting a method.',
-            'Pick the longest option because it looks complete.',
-            'Rely on guessing patterns from option positions.',
-            'Ignore chapter definitions and memorize outcomes.',
-          ],
-          answer: 0,
-          explanation: 'Textbook-grounded reasoning starts with concept accuracy, then application.',
-        },
-      ];
+  const baseQuestions = normalizeMCQs(pool);
 
   const questions = ensureAdaptiveQuestionCount(baseQuestions, req);
   const answerKey = questions.map((question) => question.answer);
   const topicCoverage = chapters.map((chapter) => chapter.title);
-  const estimatedPct = Math.min(92, 55 + topicCoverage.length * 4);
 
   return {
     questions,
     answerKey,
     topicCoverage,
-    predictedScoreBand: `${Math.max(45, estimatedPct - 12)}-${estimatedPct}%`,
+    predictedScoreBand: 'Practice only; exam marks are not predicted.',
   };
 }
 
@@ -194,6 +122,7 @@ async function handlePost(req: Request) {
     }
     const parsed = bodyResult.value;
     const tokenBudget = await checkAiTokenBudget({
+      reserve: false,
       endpoint: '/api/adaptive-test',
       projectedInputText: JSON.stringify(parsed),
       projectedOutputTokens: 2000,
@@ -225,16 +154,15 @@ async function handlePost(req: Request) {
       .map((item) => `avg ${item.avgMarks} | topics: ${item.importantTopics.slice(0, 3).join(', ')}`)
       .join('\n');
 
-    const chapterTopicsText = chapter?.topics?.join(', ') ?? '';
-    const contextPack = await getContextPack({
-      task: 'adaptive-test',
-      classLevel: parsed.classLevel,
-      subject: parsed.subject,
-      chapterId: chapter?.id,
-      chapterTopics: chapter?.topics ?? [],
-      query: `${parsed.subject} ${chapter?.title ?? ''} ${chapterTopicsText} ${pyqTopics.slice(0, 6).join(' ')}`.trim(),
-      topK: computeRecommendedTopK(parsed.questionCount ?? 10),
+    const chapterTopicsText = ALL_CHAPTERS.filter((item) => parsed.chapterIds.includes(item.id)).flatMap((item) => item.topics).join(', ');
+    const contextPack = await getMultiChapterContextPack({
+      task: 'adaptive-test', chapterIds: parsed.chapterIds,
+      query: `${parsed.subject} ${pyqTopics.slice(0, 6).join(' ')}`,
+      topK: Math.max(parsed.chapterIds.length, computeRecommendedTopK(parsed.questionCount ?? 10)),
     });
+    if (contextPack.chapterCoverage?.missing.length) {
+      return errorJson({ requestId, errorCode: 'chapter-coverage-incomplete', message: 'Some selected chapters have no usable evidence. Select fewer chapters or update their indexes.', status: 503 });
+    }
 
     const textbookSnippetCount = contextPack.snippets.filter((s) => s.sourceType === 'textbook').length;
     const paperSnippetCount = contextPack.snippets.filter((s) => s.sourceType !== 'textbook').length;
@@ -273,7 +201,7 @@ Return ONLY JSON:
   "questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}],
   "answerKey":[0,2,1],
   "topicCoverage":["..."],
-  "predictedScoreBand":"65-78%"
+  "predictedScoreBand":"Practice only; future exam marks are not predicted."
 }`;
     const variation = buildVariationProfile({
       task: 'adaptive-test',
@@ -378,9 +306,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
           Array.isArray(data.topicCoverage) ? data.topicCoverage : fallback.topicCoverage,
           Math.max(12, parsed.questionCount ?? 10)
         ),
-        predictedScoreBand: stripSourceTags(
-          typeof data.predictedScoreBand === 'string' ? data.predictedScoreBand : fallback.predictedScoreBand
-        ),
+        predictedScoreBand: 'Practice only; future exam marks are not predicted.',
         sourceCitations: normalizeChapterCitations(
           contextPack.snippets.map((snippet) => ({ sourcePath: snippet.sourcePath, year: snippet.year }))
         ),
@@ -390,34 +316,10 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
           retrieval: contextPack.retrievalMeta,
         },
       };
-      await logAiUsage({
-        endpoint: '/api/adaptive-test',
-        provider: result.provider,
-        model: result.model,
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
-        totalTokens: result.usage?.totalTokens,
-        estimated: !result.usage,
-      });
       return dataJson({ requestId, data: response });
     } catch (aiError) {
       logger.warn({ err: aiError }, '[adaptive-test] AI fallback triggered');
-      const selectedChapters = ALL_CHAPTERS.filter((item) => parsed.chapterIds.includes(item.id));
-      const topicHints = selectedChapters.flatMap((item) => item.topics ?? []);
-      const fallbackQuestions = annotateQuestionsWithRagMeta(fallback.questions, {
-        chapterTitle: chapter?.title,
-        chapterTopics: topicHints,
-        pyqTopics,
-        contextSnippets: contextPack.snippets,
-      });
-      return dataJson({
-        requestId,
-        data: {
-          ...fallback,
-          questions: fallbackQuestions,
-          answerKey: fallbackQuestions.map((question) => question.answer),
-        },
-      });
+      return errorJson({ requestId, errorCode: 'grounded-generation-unavailable', message: 'A safe, grounded test is not available. Please try again later.', status: 503 });
     }
   } catch (error) {
     logger.error({ err: error }, '[adaptive-test] error');

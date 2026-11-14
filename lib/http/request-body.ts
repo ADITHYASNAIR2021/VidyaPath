@@ -1,4 +1,7 @@
 import type { ZodTypeAny, infer as ZodInfer } from 'zod';
+import { applyAiRequestPolicy } from '@/lib/ai/request-policy';
+import { getAiToolPolicy } from '@/lib/ai/tool-registry';
+import { inspectSemanticPayload } from '@/lib/ai/semantic-guard';
 
 export interface JsonBodyParseSuccess<T> {
   ok: true;
@@ -7,7 +10,7 @@ export interface JsonBodyParseSuccess<T> {
 
 export interface JsonBodyParseFailure {
   ok: false;
-  reason: 'payload-too-large' | 'invalid-json' | 'empty-body' | 'validation-failed';
+  reason: 'payload-too-large' | 'invalid-json' | 'empty-body' | 'validation-failed' | 'unsafe-input' | 'guard-unavailable';
   message: string;
   /** Populated only when `reason === 'validation-failed'`. */
   issues?: Array<{ path: string; message: string }>;
@@ -28,7 +31,27 @@ export async function parseJsonBodyWithLimit<T = unknown>(
     };
   }
 
-  const raw = await req.text().catch(() => '');
+  // Count streamed bytes before buffering; Content-Length may be missing or false.
+  const reader = req.body?.getReader();
+  const buffers: Uint8Array[] = [];
+  let bytes = 0;
+  if (reader) {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > maxBytes) {
+          await reader.cancel().catch(() => undefined);
+          return { ok: false, reason: 'payload-too-large', message: `Payload too large. Max allowed is ${maxBytes} bytes.` };
+        }
+        buffers.push(value);
+      }
+    } catch {
+      return { ok: false, reason: 'invalid-json', message: 'Could not read request body.' };
+    } finally { reader.releaseLock(); }
+  }
+  const raw = Buffer.concat(buffers).toString('utf8');
   if (!raw || !raw.trim()) {
     return {
       ok: false,
@@ -93,15 +116,25 @@ export async function parseAndValidateJsonBody<S extends ZodTypeAny>(
       })),
     };
   }
-  return { ok: true, value: parsed.data };
+  const policy = applyAiRequestPolicy(new URL(req.url).pathname, parsed.data);
+  if (policy.error) return { ok: false, reason: 'unsafe-input', message: policy.error };
+  if (getAiToolPolicy(new URL(req.url).pathname)) {
+    try {
+      if (!await inspectSemanticPayload(policy.value, 'request')) return { ok: false, reason: 'unsafe-input', message: 'The request did not pass the instruction safety check.' };
+    } catch { return { ok: false, reason: 'guard-unavailable', message: 'The safety check is unavailable. Please try again later.' }; }
+  }
+  return { ok: true, value: policy.value as ZodInfer<S> };
 }
 
 /** Map a body-parse reason to an HTTP status code. */
 export function bodyReasonToStatus(reason: JsonBodyParseFailure['reason']): number {
   switch (reason) {
+    case 'guard-unavailable':
+      return 503;
     case 'payload-too-large':
       return 413;
     case 'validation-failed':
+    case 'unsafe-input':
       return 422;
     case 'invalid-json':
     case 'empty-body':

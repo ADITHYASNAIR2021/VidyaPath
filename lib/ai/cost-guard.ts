@@ -2,7 +2,7 @@
  * AI token-cost guardrail for the public platform.
  *
  * Enforces:
- *   1) per-request hard cap (AI_MAX_TOKENS_PER_REQUEST, default 4000)
+ *   1) per-request hard cap (AI_MAX_TOKENS_PER_REQUEST, default 16000)
  *   2) global daily budget across all visitors (AI_DAILY_TOKEN_BUDGET_GLOBAL, default 1,000,000)
  *
  * Counters live in Upstash Redis when configured, otherwise in process memory
@@ -14,7 +14,7 @@ import { sharedState } from '@/lib/runtime/shared-state';
 const WINDOW_SECONDS = 24 * 60 * 60;
 
 function maxTokensPerRequest(): number {
-  return Math.max(256, Math.min(32_768, Number(process.env.AI_MAX_TOKENS_PER_REQUEST) || 4_000));
+  return Math.max(256, Math.min(32_768, Number(process.env.AI_MAX_TOKENS_PER_REQUEST) || 16_000));
 }
 
 function dailyBudgetGlobal(): number {
@@ -57,6 +57,9 @@ async function incrementCounter(key: string, delta: number): Promise<number> {
     await redis.expire(key, WINDOW_SECONDS + 3600);
     return total;
   }
+  if (process.env.NODE_ENV === 'production' || process.env.UPSTASH_REDIS_REST_URL || process.env.UPSTASH_REDIS_REST_TOKEN) {
+    throw new Error('Shared AI budget unavailable');
+  }
   const next = (memoryCounters.get(key) ?? 0) + delta;
   memoryCounters.set(key, next);
   if (memoryCounters.size > 64) {
@@ -73,7 +76,7 @@ export interface TokenBudgetResult {
   remaining: number;
   requested: number;
   limit: number;
-  reason?: 'per-request-cap' | 'global-daily-budget';
+  reason?: 'per-request-cap' | 'global-daily-budget' | 'budget-unavailable';
 }
 
 export interface TokenBudgetInput {
@@ -143,8 +146,8 @@ export async function checkAiTokenBudget(input: TokenBudgetInput): Promise<Token
       limit: globalBudget,
     };
   } catch (err) {
-    logger.warn({ err, endpoint: input.endpoint, requestedTokens: delta }, 'AI token budget check failed; failing open');
-    return { allowed: true, remaining: perRequestCap, requested: delta, limit: perRequestCap };
+    logger.warn({ err, endpoint: input.endpoint, requestedTokens: delta }, 'AI token budget check failed; blocking provider calls');
+    return { allowed: false, remaining: 0, requested: delta, limit: perRequestCap, reason: 'budget-unavailable' };
   }
 }
 
