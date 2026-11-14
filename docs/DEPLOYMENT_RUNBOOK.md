@@ -210,3 +210,11 @@ The build reports a React 18 deprecation warning. Current Next.js 16 builds succ
 - Current upload-ready VM bundle: `D:\VidyaPath\.cache\retrieval-deploy-df1e96493cb2447372bbaaf9-a82a3b2b2835`. Repackage after service/corpus changes; do not reuse this path blindly.
 
 No cloud upload, public deployment, optional database migration or classifier activation was performed. Docker/ARM deployment, real answer-provider behavior and target-host load/failure testing remain unverified. Resolve the 43 coverage review flags (including 26 chapters without mapped textbook chunks) using `INDEXING_PLAN.md`; `c10-eng-6` still has no mapped source and `c12-eng-1` still fails its benchmark case. Source review cannot be replaced by rerunning the same embedding job.
+
+## Clean-checkout build correction: 15 November 2026
+
+Git normalizes the editable textbook JSONL to LF, while the existing hash-pinned gzip payload contains CRLF. The original prebuild comparison incorrectly reported a stale gzip on clean Linux checkouts. The comparison now ignores CRLF/LF differences only; actual content changes and deployed artifact SHA-256 mismatches still fail. Regression tests cover all three cases. No reindexing, recompression or semantic-service release replacement is needed for this fix.
+
+Commit the prebuild fix and its tests before rerunning CI/Vercel. The latest Supabase check reports that preview branching is disabled and skips creation; the recommended VM/BM25 setup does not require a Supabase preview database. Vercel's own deployment log must be checked separately for additional errors if its next build still fails.
+
+Local verification: the committed prebuild was reproduced failing against Git-normalized textbook content, and the fixed version passed against the same content. TypeScript, strict lint and all 95 default tests passed (one opt-in integration skip). Production build and all 48 deployment trace checks passed; largest trace remains 72.98 MiB. The fix is local until committed/pushed; remote CI and Vercel have not rerun with it.

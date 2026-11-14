@@ -27,7 +27,9 @@ const missing = index.docs.filter((doc) => doc.kind === 'chunk' && !sourceIds.ha
 if (missing.length) throw new Error(`${missing.length} indexed chunks are missing from the deployment corpus`);
 for (const file of ['chunks.jsonl', 'textbook_chunks.jsonl', 'retrieval_index.json']) {
   const rawPath = path.join(directory, file);
-  if (existsSync(rawPath) && readFileSync(rawPath, 'utf8') !== read(`${file}.gz`)) {
+  // Git's eol=lf checkout normalizes editable JSONL. Existing pinned gzip
+  // payloads may contain CRLF; compare content without changing their hashes.
+  if (existsSync(rawPath) && readFileSync(rawPath, 'utf8').replace(/\r\n/g, '\n') !== read(`${file}.gz`).replace(/\r\n/g, '\n')) {
     throw new Error(`${file}.gz is stale. Run npm run compress:context before deploying.`);
   }
 }
