@@ -13,7 +13,7 @@ Static chapters/papers require no database. Production AI requires shared rate l
 
 The build includes paper chunks as `chunks.jsonl.gz`, `textbook_chunks.jsonl.gz`, compressed chapter maps, compressed BM25 index and `retrieval_manifest.json`. `npm run build` verifies hashes, removes offline/private trace references and checks every page/API trace. See [the deployment runbook](../DEPLOYMENT_RUNBOOK.md) for the optional private E5 service, exact upload destinations and rollback.
 
-`CONTEXT_CDN_URL` is optional. It must point to the immutable release uploaded by `scripts/upload_context_to_storage.mjs --apply`; the release must match the manifest committed with the deployment. Raw/vector files are not silently downloaded from an unpinned arbitrary corpus.
+`CONTEXT_CDN_URL` is optional and accepts an operator-managed HTTPS academic-corpus release matching the committed manifest. Bundled files are the default; no storage service is required.
 
 ## Quotas
 
@@ -30,7 +30,7 @@ Vercel's platform-controlled forwarding header is used for IP limits. On another
 - `AI_ENABLE_RETRIEVAL_LLM=1` opts into budgeted query expansion. Source compression always preserves original sentences.
 - `AI_ENABLE_LOCAL_EMBEDDINGS=1` enables the exact local model named by vector metadata on a long-running Node/Docker host. It is disabled on Vercel.
 - `AI_INJECTION_GUARD_URL` enables a separately hosted/local text-injection classifier. Configured outages fail closed. See the full guide for setup and limits.
-- `AI_VECTOR_BACKEND=supabase`, `RAG_VECTOR_CORPUS_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` enable the optional private pgvector backend. These variables are now used only for this explicit backend/upload workflow. The old `AI_ENABLE_PGVECTOR_RAG` flag has no effect.
+- `AI_VECTOR_BACKEND=remote`, `RETRIEVAL_SERVICE_URL` and `RETRIEVAL_SERVICE_KEY` connect the private E5 service. No external database is used.
 
 ## Deployment verification
 
@@ -40,4 +40,4 @@ Vercel's platform-controlled forwarding header is used for IP limits. On another
 4. Confirm unauthenticated developer APIs return 401 and cross-site mutations return 403.
 5. Test representative benign prompts and image questions using the target deployment/account. Automated safety checks and lexical grounding do not certify every model answer.
 
-Full procedures and optional database setup: [AI security and retrieval](../AI_SECURITY_AND_RETRIEVAL.md).
+Full procedures and private retrieval setup: [AI security and retrieval](../AI_SECURITY_AND_RETRIEVAL.md).

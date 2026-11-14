@@ -88,7 +88,7 @@ export interface ChapterDrillResponse {
   topicCoverage: string[];
   sourceCitations: ChapterCitation[];
   grounding?: {
-    usedPgvector: boolean;
+    usedRemoteIndex: boolean;
     usedOnDemandFallback: boolean;
     retrieval?: {
       snippetCount: number;

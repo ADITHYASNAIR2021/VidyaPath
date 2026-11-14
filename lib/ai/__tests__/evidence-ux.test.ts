@@ -21,7 +21,7 @@ describe('AI evidence UX helpers', () => {
       ],
       contextHash: 'test-pack',
       usedOnDemandFallback: false,
-      usedPgvector: true,
+      usedRemoteIndex: true,
       retrievalMeta: {
         snippetCount: 1,
         averageRelevance: 91,

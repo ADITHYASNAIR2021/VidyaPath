@@ -35,7 +35,10 @@ function collectTraceFiles(directory) {
   return traces
 }
 
-const reports = collectTraceFiles(tracesRoot).map((tracePath) => {
+const traceFiles = collectTraceFiles(tracesRoot)
+if (traceFiles.length === 0) throw new Error('No page/API traces found. Run npm run build first.')
+
+const reports = traceFiles.map((tracePath) => {
   const trace = JSON.parse(readFileSync(tracePath, 'utf8'))
   const uniqueFiles = new Set()
 
@@ -53,8 +56,14 @@ const reports = collectTraceFiles(tracesRoot).map((tracePath) => {
       throw new Error(`Private/offline artifact leaked into ${tracePath}: ${relative}`)
     }
   }
-  for (const file of requiredContext) {
-    if (!tracedPaths.has(path.join(projectRoot, file))) throw new Error(`Missing deployment corpus in ${tracePath}: ${file}`)
+  // Next generates this standalone crash fallback outside normal route tracing.
+  // It must render without the app's data dependencies. Keep its size/privacy
+  // checks, but do not require the academic corpus in the crash handler.
+  const frameworkError = path.relative(tracesRoot, tracePath).replaceAll('\\', '/') === '_global-error/page.js.nft.json'
+  if (!frameworkError) {
+    for (const file of requiredContext) {
+      if (!tracedPaths.has(path.join(projectRoot, file)) || !existsSync(path.join(projectRoot, file))) throw new Error(`Missing deployment corpus in ${tracePath}: ${file}`)
+    }
   }
   const bytes = [...uniqueFiles].reduce((total, file) => {
     if (!sizeCache.has(file)) sizeCache.set(file, statSync(file).size)

@@ -113,7 +113,7 @@ async function handlePost(req: Request) {
       })),
       contextHash: contextPack.contextHash,
       usedOnDemandFallback: contextPack.usedOnDemandFallback,
-      usedPgvector: contextPack.usedPgvector,
+      usedRemoteIndex: contextPack.usedRemoteIndex,
       retrieval: contextPack.retrievalMeta ?? null,
     };
     return dataJson({ requestId, data: payload });

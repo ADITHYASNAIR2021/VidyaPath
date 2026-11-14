@@ -295,7 +295,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
       const response: AdaptiveTestResponse & {
         sourceCitations: Array<{ sourcePath: string; year?: number }>;
         grounding: {
-          usedPgvector: boolean;
+          usedRemoteIndex: boolean;
           usedOnDemandFallback: boolean;
           retrieval: typeof contextPack.retrievalMeta;
         };
@@ -311,7 +311,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
           contextPack.snippets.map((snippet) => ({ sourcePath: snippet.sourcePath, year: snippet.year }))
         ),
         grounding: {
-          usedPgvector: contextPack.usedPgvector,
+          usedRemoteIndex: contextPack.usedRemoteIndex,
           usedOnDemandFallback: contextPack.usedOnDemandFallback,
           retrieval: contextPack.retrievalMeta,
         },

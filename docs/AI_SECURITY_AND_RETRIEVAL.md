@@ -62,7 +62,7 @@ Indexing and retrieval helpers also have data boundaries: local E5/MiniLM encode
 - Logs/metrics retain counts, model names, latency and decisions, not prompt or image bodies. Sentry strips request payloads, auth headers/cookies, user data, extras, breadcrumbs and URL queries; session replay is disabled. Chat/paper evaluation responses are not cached. Other short-lived response caching is server-side and keyed with SHA-256; changing its scope warrants privacy review.
 - Image handling verifies decoded format, limits decoded pixels/bytes, rejects animation, resizes and re-encodes to remove EXIF/location metadata. Text inside a photographed question can still contain private data. The UI tells students to crop names/faces; no face detector or full image PII scrubber is claimed.
 - Hosted provider retention/training policies and free-tier terms are external to this app. Do not submit private school records, names, credentials or identifiable images. Pattern checks cannot recognize all private data. Provider keys must remain server-side; never use `NEXT_PUBLIC_` names for secrets.
-- Developer endpoints require an authenticated operator session, use no-store responses and expose configuration presence rather than secret values. Corpus publishing and database ingestion are CLI-only, default to dry run, and are not exposed to student prompts.
+- Developer endpoints require an authenticated operator session, use no-store responses and expose configuration presence rather than secret values. Corpus export and packaging are CLI-only and are not exposed to student prompts.
 
 ## Rebuild and quality workflow
 
@@ -102,44 +102,21 @@ For a chapter flagged in the plan: inspect the matching PDF and extracted passag
 
 The prebuild gate checks real deployed files, reference integrity and SHA-256 hashes. Explicit Next tracing includes them in page/API functions; postbuild normalizes/prunes offline-only paths across platforms, then verifies all resulting page/API traces against the configured 240 MiB guardrail and rejects private artifacts. The compressed core totals about 41.5 MiB before the manifest. Commit both chunk gzip files, compressed index/maps and manifest together. Raw chunks, datasets, local caches and large vectors are excluded from Vercel functions.
 
+Next's standalone `_global-error` crash fallback does not require academic data; its size/privacy checks still apply. Real page/API corpus requirements remain enforced. Retrieval metadata identifies private-service use as `usedRemoteIndex`; no external database backend or service-role credential is used.
+
 **Optional semantic service, implemented now:** `services/retrieval` contains a bounded, bearer-authenticated E5 query encoder and compact exact vector search. Export the existing vectors using `scripts/export_semantic_release.mjs --apply`, then package them using `scripts/package_retrieval_service.mjs`. The resulting directory goes to a separate VM. The service returns IDs/scores only; the web app verifies corpus/vector digests, resolves IDs against its own source text and rechecks curriculum scope. Errors fall back to BM25. Configure `AI_VECTOR_BACKEND=remote`, `RETRIEVAL_SERVICE_URL` and `RETRIEVAL_SERVICE_KEY` only on the web server. Do not enable local ONNX inference on Vercel. See [the exact upload and deployment runbook](./DEPLOYMENT_RUNBOOK.md).
 
 **Optional CDN:** immutable public academic releases are supported. Local artifacts are preferred; fallback CDN content must match the manifest pinned in the application. Remote fetches have deadlines and decompression limits. A matching hash provides integrity relative to the committed manifest; it does not establish that the underlying corpus is factually correct.
 
-```powershell
-# No external writes
-node scripts/upload_context_to_storage.mjs
+An existing HTTPS academic CDN can optionally host an immutable copy of the five compressed core artifacts and matching manifest. Set `CONTEXT_CDN_URL` only after verifying the files match the committed hashes. Bundled files remain the default; no storage account or upload tool is required.
 
-# Requires the server-only storage credentials documented in .env.example
-# Uploads releases/<fingerprint>/..., verifies bytes and writes manifest last
-node --env-file=.env.local scripts/upload_context_to_storage.mjs --apply
-```
-
-Set `CONTEXT_CDN_URL` to the exact release URL printed by the upload, then deploy the matching manifest. Existing different content is never overwritten. These uploads contain public course material only. Bucket access, rights to redistribute source material, retention and storage costs require operator review. No upload was executed in this change.
-
-## Free models and optional vector database
+## Free models and semantic serving
 
 There is no substantiated universal "best free" model. The no-inference-fee baseline is BM25 plus local embedding inference. The recommended new local vector build uses `Xenova/multilingual-e5-small` q8 (384 dimensions), with E5 `passage:` and `query:` prefixes. The current full corpus uses E5; any separate MiniLM corpus must use its original encoder. See the [E5 model card](https://huggingface.co/intfloat/multilingual-e5-small). Enable `AI_ENABLE_LOCAL_EMBEDDINGS=1` only on a long-running Node/Docker host with the exact model available; local ONNX query inference is disabled on Vercel.
 
 Gemini/Groq/Mistral/NVIDIA generation fallbacks remain configurable. Live catalogs listed the configured default chat IDs during review, but this does not verify each account's quota or answer quality. Automatic Cerebras fallback was removed because its registered model requires billing. [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) and [Groq's model catalog](https://console.groq.com/docs/models) can change. NVIDIA embedding/reranking require a valid key and trial/paid quota; they are optional, not guaranteed unlimited free services.
 
-Use a vector database when the corpus no longer fits warm-process memory or centralized semantic search/versioned ingestion is needed. It does not itself fix wrong chapter mappings, missing books or weak extraction.
-
-An **optional server-only Supabase/pgvector implementation** is supplied:
-
-1. Review and apply `supabase/migrations/20261114000100_optional_rag_vector_store.sql` to your chosen database. It requires pgvector with `halfvec` support (0.7+), enables RLS, revokes student roles and exposes a bounded security-invoker search RPC to `service_role`. Read [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security) and [pgvector dimensions/index limits](https://github.com/pgvector/pgvector).
-2. Build one complete vector space and inspect a local ingestion dry run:
-
-   ```powershell
-   node scripts/ingest_vector_store.mjs --corpus ncert-2026-11-v1
-   node --env-file=.env.local scripts/ingest_vector_store.mjs --corpus ncert-2026-11-v1 --apply
-   ```
-
-3. Use server-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. The script creates a new immutable release, inserts batches and marks it ready only when complete; it never changes deployment configuration. Reuse of a release ID fails, and a failed partial release remains unready.
-4. After evaluation, activate with `AI_VECTOR_BACKEND=supabase` and `RAG_VECTOR_CORPUS_ID=ncert-2026-11-v1`. Query class/subject/chapter filtering is enforced in SQL and checked again in the application. Backend errors return to local BM25, not fabricated evidence.
-5. The supplied query adapter supports 384-dimension matching local models on long-running Node/Docker, or 2,048-dimension `nvidia/nemotron-3-embed-1b` with matching hosted query encoding. A MiniLM corpus cannot be queried with NVIDIA/E5 vectors. Vercel therefore needs a compatible hosted encoder/corpus; simply enabling a database on the current E5 corpus does not provide the required serverless query encoder.
-
-The optional SQL and ingestion are reviewable code; the migration has **not** been applied and no real database integration/load test has run. Client contract tests cover filtering, model mismatch, offline diagnostics and invalid configuration. Database capacity, HNSW recall, service-role isolation and network policy must be verified before activation. The service role bypasses RLS: it must never reach browsers or model prompts.
+The private E5 service serves the complete existing vector index without a database. Use the export/package commands and VM instructions in the deployment runbook. No SQL migration, database service-role credential or database ingestion job is part of the app.
 
 ## Optional local injection classifier
 
@@ -160,6 +137,6 @@ This model detects some instruction attacks; it is neither a factual checker nor
 
 The source tests exercise malicious input on all 14 routes before retrieval/provider calls, actual shared-provider payload framing, poisoned evidence, missing evidence, fabricated citations, invalid questions, request streaming, privacy, proxy attribution, budget failure and optional backend contracts. They do not exercise every route against every real provider. The retrieval benchmark is small and curated; expand it with answer-bearing passages and teacher-reviewed answers, calculations, Hindi questions, OCR and diagram cases.
 
-Before production activation: run the documented checks, deploy matching artifacts, verify authenticated developer retrieval on the target host, test shared Redis throttling/outages, provider quotas and image generation, and measure cold-start memory/latency. The full local E5 embedding build is complete. The optional classifier, database and Docker container, and live semantic-query load testing remain unverified integrations. An empty npm vulnerability report covers known JavaScript advisories at check time; it does not certify the application or optional Python environment.
+Before production activation: run the documented checks, deploy matching artifacts, verify authenticated developer retrieval on the target host, test shared Redis throttling/outages, provider quotas and image generation, and measure cold-start memory/latency. The full local E5 embedding build is complete. The optional classifier and Docker container, and target-host semantic-query load testing remain unverified integrations. An empty npm vulnerability report covers known JavaScript advisories at check time; it does not certify the application or optional Python environment.
 
 The latest local deployment/service verification and remaining upload steps are recorded in [the deployment runbook](./DEPLOYMENT_RUNBOOK.md). Chapter statistics now use the pinned gzip corpus and do not fill missing paper-year history from editorial defaults; marks and focus-topic summaries remain explicitly heuristic guidance.

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-14T17:58:39.585Z",
+  "generatedAt": "2026-11-14T19:46:57.665Z",
   "artifactFingerprint": "c6414950c6c41e4f56c8afa1b82552e2fb9f554fd6b796cdbf09dd91743592ab",
   "artifacts": [
     {
@@ -3611,7 +3611,7 @@
     }
   ],
   "benchmark": {
-    "generatedAt": "2026-11-14T17:46:49.674Z",
+    "generatedAt": "2026-11-14T19:46:48.930Z",
     "totalCases": 25,
     "executedCases": 25,
     "skippedCases": 0,
@@ -4382,7 +4382,7 @@
     ],
     "artifactFingerprint": "c6414950c6c41e4f56c8afa1b82552e2fb9f554fd6b796cdbf09dd91743592ab",
     "benchmarkSeedHash": "e730f23cacecbb1406e495605ec240615bbc983998535f2cc300e218e16f1aff",
-    "retrievalCodeHash": "6a059d07c33eb15b5a8cc438993759c1f8f8a861139c89efa6324f2fee00d9da",
+    "retrievalCodeHash": "ea2fe44328d0d2b4e39c7b09c0c84c8aa52da3f37b9f399aaeec11eb1009939c",
     "stale": false
   },
   "needsWork": 43,
@@ -4390,7 +4390,7 @@
   "serving": {
     "default": "Bundled gzip corpus + in-process BM25; optional private E5 service or hosted reranker",
     "cdn": "Optional immutable versioned artifact release with SHA-256 manifest",
-    "vectorDatabase": "Not required: compact private E5 index supplied; optional server-only pgvector backend",
+    "vectorDatabase": "No external database: compact private E5 index supplied",
     "localVectors": "Export existing E5 vectors into a compact VM release; raw vectors and ONNX weights are excluded from serverless functions"
   }
 }

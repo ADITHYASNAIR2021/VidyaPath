@@ -554,7 +554,7 @@ ${subjectAddendum ? subjectAddendum + '\n' : ''}${fewShotBlock ? `${fewShotBlock
           ...(data.sourceCitations ?? []),
         ]),
         grounding: {
-          usedPgvector: contextPack.usedPgvector,
+          usedRemoteIndex: contextPack.usedRemoteIndex,
           usedOnDemandFallback: contextPack.usedOnDemandFallback,
           retrieval: contextPack.retrievalMeta,
           strongGroundedCount: finalAnnotatedQuestions.filter(isQuestionStronglyGrounded).length,

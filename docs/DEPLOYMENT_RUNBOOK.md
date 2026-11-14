@@ -29,7 +29,6 @@ flowchart LR
 | E5 model weights | VM's `model-cache/` | Download once with the explicit preparation command. Runtime starts offline and fails if the cache is missing. No API inference fee. |
 | Provider keys, Redis credentials, dashboard key, retrieval URL/key | Vercel environment settings | Server-only names. Never put secrets in GitHub, public storage or `NEXT_PUBLIC_` variables. |
 | Retrieval shared secret | VM `.env`, and Vercel `RETRIEVAL_SERVICE_KEY` | Generate on the VM; paste directly into the provider environment UI, not into chat. |
-| Optional public academic corpus release | Supabase Storage `context/releases/<fingerprint>/` | Optional backup/CDN fallback only; not required for the bundled deployment. See step 7. |
 
 Do not upload the entire `.cache` directory, dataset, `lib/context/images` extraction crops, `.env.local`, runtime feedback/log files, student images or answers. The several-gigabyte extraction crops are offline inputs; no runtime route serves them. The 420 MiB raw JSONL vectors are not needed on Vercel or in the compact service bundle. Keep original local vectors/backups for rebuilding.
 
@@ -149,26 +148,13 @@ RETRIEVAL_SERVICE_URL=https://retrieval.YOUR_DOMAIN
 RETRIEVAL_SERVICE_KEY=<the-same-value-created-on-the-VM>
 ```
 
-Do not set `AI_ENABLE_LOCAL_EMBEDDINGS=1` on Vercel. Do not enable the Supabase backend at the same time; no vector SQL migration is needed for this recommended route. The local image cap was corrected to 16,000, but you must set the deployment value separately. Keep provider-side spending controls/free quotas enabled; an application token allowance is not a billing guarantee.
+Do not set `AI_ENABLE_LOCAL_EMBEDDINGS=1` on Vercel. The local image cap was corrected to 16,000, but you must set the deployment value separately. Keep provider-side spending controls/free quotas enabled; an application token allowance is not a billing guarantee.
 
 The optional local/hosted injection classifier is a separate service and remains disabled unless deliberately configured and evaluated. Do not point a Vercel environment at `127.0.0.1` for services on your own laptop.
 
 If you want the BM25 pilot first, omit the three remote retrieval settings. The site can serve the bundled corpus before the VM is available. Enable the remote settings only after health/search checks pass. Use separate preview credentials/quotas where feasible; test requests consume the configured shared budgets.
 
-## 7. Optional corpus CDN/storage upload
-
-This is optional. It does not replace the current bundled files or automatically reduce package/memory costs. Create a public academic-corpus bucket named `context` in your selected Supabase project, and verify rights to redistribute its contents. Only the approved compressed corpus/manifest is uploaded.
-
-Keep `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in your local untracked environment file. Then:
-
-```powershell
-node scripts/upload_context_to_storage.mjs
-node --env-file=.env.local scripts/upload_context_to_storage.mjs --apply
-```
-
-Set `CONTEXT_CDN_URL` to the exact immutable release URL printed by the uploader. Its files must match the manifest shipped in the app. The uploader does not upload vectors, PDFs, images, answers or credentials. For these larger files, interruption can require retrying a file; existing identical files can be retried without overwriting a release. [Supabase upload/versioning guidance](https://supabase.com/docs/guides/storage/uploads/standard-uploads).
-
-## 8. Acceptance checks before student rollout
+## 7. Acceptance checks before student rollout
 
 - Open the deployed `/developer` console. Confirm 54,260 corpus chunks/current manifest, expected benchmark fingerprint and the 43 flagged chapters.
 - Run the local-only retrieval check for a real chemistry question; verify excerpt text and chapter IDs. This intentionally does not contact the VM.
@@ -209,12 +195,22 @@ The build reports a React 18 deprecation warning. Current Next.js 16 builds succ
 - Corpus deployment checks passed; the retrieval benchmark remains 24/25 on a small local-only lexical test set. It does not certify semantic answer accuracy, calculations, OCR, multilingual safety or teacher approval.
 - Current upload-ready VM bundle: `D:\VidyaPath\.cache\retrieval-deploy-df1e96493cb2447372bbaaf9-a82a3b2b2835`. Repackage after service/corpus changes; do not reuse this path blindly.
 
-No cloud upload, public deployment, optional database migration or classifier activation was performed. Docker/ARM deployment, real answer-provider behavior and target-host load/failure testing remain unverified. Resolve the 43 coverage review flags (including 26 chapters without mapped textbook chunks) using `INDEXING_PLAN.md`; `c10-eng-6` still has no mapped source and `c12-eng-1` still fails its benchmark case. Source review cannot be replaced by rerunning the same embedding job.
+No cloud upload, public deployment or classifier activation was performed. Docker/ARM deployment, real answer-provider behavior and target-host load/failure testing remain unverified. Resolve the 43 coverage review flags (including 26 chapters without mapped textbook chunks) using `INDEXING_PLAN.md`; `c10-eng-6` still has no mapped source and `c12-eng-1` still fails its benchmark case. Source review cannot be replaced by rerunning the same embedding job.
 
 ## Clean-checkout build correction: 15 November 2026
 
 Git normalizes the editable textbook JSONL to LF, while the existing hash-pinned gzip payload contains CRLF. The original prebuild comparison incorrectly reported a stale gzip on clean Linux checkouts. The comparison now ignores CRLF/LF differences only; actual content changes and deployed artifact SHA-256 mismatches still fail. Regression tests cover all three cases. No reindexing, recompression or semantic-service release replacement is needed for this fix.
 
-Commit the prebuild fix and its tests before rerunning CI/Vercel. The latest Supabase check reports that preview branching is disabled and skips creation; the recommended VM/BM25 setup does not require a Supabase preview database. Vercel's own deployment log must be checked separately for additional errors if its next build still fails.
+Commit the prebuild fix and its tests before rerunning CI/Vercel. Vercel's own deployment log must be checked separately for additional errors if its next build still fails.
 
 Local verification: the committed prebuild was reproduced failing against Git-normalized textbook content, and the fixed version passed against the same content. TypeScript, strict lint and all 95 default tests passed (one opt-in integration skip). Production build and all 48 deployment trace checks passed; largest trace remains 72.98 MiB. The fix is local until committed/pushed; remote CI and Vercel have not rerun with it.
+
+## Current check policy and removed integration: 15 November 2026
+
+The app uses bundled BM25 and the optional private E5 service. Supabase support, SQL, ingestion/upload tooling, local settings and retired LMS readiness guides were removed at the operator's request. The operator confirmed uninstalling the Supabase GitHub app after account reauthentication. Existing failed checks remain in old commit history; new runs should not create that integration check. Main currently has no branch-protection requirement for it.
+
+The single automatic `CI` workflow runs `Typecheck, Lint, Tests`, `Dependency Audit (prod)` and `Build Check` on Node 22. A new push cancels an outdated run on the same ref. Production build already runs the corpus/privacy/size gate once; no duplicate size step is needed. The old `Release Readiness` duplicate jobs were replaced with manually dispatched `Docker Validation`, which builds its own image and checks container health without an unused Next build cache.
+
+The standalone Next `_global-error` crash fallback is exempt from requiring academic corpus files, since it must render independently of app data. Its size/privacy checks still run, and real page/API corpus checks remain mandatory. Regression tests cover the crash fallback, missing corpus, private files, oversized functions and missing traces. Push the repository changes before expecting remote CI/Vercel to reflect them.
+
+After removal, strict typecheck/lint and 96 default tests passed (one opt-in integration skip). The integration was then run explicitly against the actual retained E5 service and passed, including `usedRemoteIndex` metadata. Corpus integrity, 24/25 lexical benchmark cases, route integrity, production build and all 48 local page/API size/privacy checks passed; largest trace is 72.98 MiB. The 54,260-chunk corpus and semantic release ID remain unchanged. Workflow YAML was parsed and checked for the three automatic jobs/manual-only Docker trigger. Docker execution and the next remote CI/Vercel run are not verified by these local checks.

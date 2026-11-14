@@ -25,7 +25,6 @@ import { logger } from '@/lib/logger';
 import { sharedState } from '@/lib/runtime/shared-state';
 import { inspectAiText, recordBoundaryBlock } from '@/lib/ai/boundary-policy';
 import { readRetrievalReport } from '@/lib/ai/retrieval-report';
-import { searchVectorStore } from '@/lib/ai/vector-store';
 import { searchRemoteIndex, resolveRemoteHits } from '@/lib/ai/remote-retrieval';
 
 export type ContextTask =
@@ -112,7 +111,7 @@ export interface ContextPack {
   snippets: ContextSnippet[];
   contextHash: string;
   usedOnDemandFallback: boolean;
-  usedPgvector: boolean;
+  usedRemoteIndex: boolean;
   retrievalMeta?: {
     snippetCount: number;
     averageRelevance: number;
@@ -376,7 +375,7 @@ async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
     // Local ONNX execution is opt-in on long-running servers. Shipping the
     // transformer runtime in every serverless route adds hundreds of MB and
     // exceeds Vercel's function limit. Production semantic retrieval uses
-    // pgvector/remote embeddings; BM25 remains the deterministic local fallback.
+    // Optional remote embeddings; BM25 remains the deterministic local fallback.
     return null;
   }
   // Hashed BoW fallback — lexical similarity only, no semantic understanding
@@ -1359,7 +1358,7 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
   const semanticQuery = { ...query, subject: normalizedSubject, query: query.query?.trim() || expandedQuery };
   const vectorCandidates = process.env.AI_VECTOR_BACKEND === 'remote'
     ? resolveRemoteHits(await searchRemoteIndex(semanticQuery), semanticQuery, rag.chunks)
-    : await searchVectorStore(semanticQuery);
+    : [];
 
   const selectDiversifiedSnippets = (rankedCandidates: Array<{ snippet: ContextSnippet; score: number }>): ContextSnippet[] => {
     const uniqueCandidates: Array<{ snippet: ContextSnippet; score: number }> = [];
@@ -1501,7 +1500,7 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
         correctiveActions,
         strategies: unique([
           localDenseStrategy,
-          vectorCandidates.length ? (process.env.AI_VECTOR_BACKEND === 'remote' ? 'remote-e5-index' : 'pgvector-dense') : '',
+          vectorCandidates.length ? 'remote-e5-index' : '',
           'contextual-bm25',
           'rank-fusion',
         'topic-hierarchy',
@@ -1546,7 +1545,7 @@ export async function getContextPack(query: ContextQuery): Promise<ContextPack> 
       snippets: compressed,
       contextHash: buildContextHash(compressed),
       usedOnDemandFallback,
-      usedPgvector: process.env.AI_VECTOR_BACKEND === 'supabase' && vectorCandidates.length > 0,
+      usedRemoteIndex: vectorCandidates.length > 0,
       retrievalMeta: buildRetrievalMeta(compressed, query.chapterId, {
         queryText: focusText,
         topicFocus,
@@ -1603,7 +1602,7 @@ export async function getMultiChapterContextPack(input: { task: ContextTask; cha
   const selected = snippets.slice(0, Math.max(ids.length, Math.min(32, input.topK ?? 16)));
   const retrieved = packs.filter(({ pack }) => pack.snippets.length > 0).map(({ chapterId }) => chapterId);
   return {
-    snippets: selected, contextHash: buildContextHash(selected), usedOnDemandFallback: packs.some(({ pack }) => pack.usedOnDemandFallback), usedPgvector: packs.some(({ pack }) => pack.usedPgvector),
+    snippets: selected, contextHash: buildContextHash(selected), usedOnDemandFallback: packs.some(({ pack }) => pack.usedOnDemandFallback), usedRemoteIndex: packs.some(({ pack }) => pack.usedRemoteIndex),
     retrievalMeta: buildRetrievalMeta(selected, undefined, { queryText: input.query, strategies: ['multi-chapter-interleaved'] }),
     chapterCoverage: { requested: ids, retrieved, missing: ids.filter((id) => !retrieved.includes(id)) },
   };
