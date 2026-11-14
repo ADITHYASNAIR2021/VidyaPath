@@ -27,6 +27,7 @@ COPY --chown=node:node --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/lib/context ./lib/context
 COPY --from=builder /app/next.config.js ./
+COPY --from=builder /app/config/context-deployment.cjs ./config/context-deployment.cjs
 COPY --from=builder /app/package.json ./
 RUN mkdir -p /app/.cache/embeddings /app/lib/runtime \
     && chown -R node:node /app/.cache /app/lib/runtime
