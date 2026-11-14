@@ -24,5 +24,9 @@ lib/context/.rag_count.json
 .env.*
 .vscode
 .hermes
+.tools
+.claude
+.claude-flow
+.mcp.json
 Dockerfile
 .dockerignore

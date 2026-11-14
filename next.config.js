@@ -1,17 +1,10 @@
+const { tracingIncludes } = require('./config/context-deployment.cjs');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Sentry source maps for production error tracking
   productionBrowserSourceMaps: process.env.SENTRY_DSN ? true : false,
-  outputFileTracingIncludes: {
-    '/**': [
-      './lib/context/chunks.jsonl.gz',
-      './lib/context/textbook_chunks.jsonl.gz',
-      './lib/context/chapter_index.json.gz',
-      './lib/context/textbook_chapter_index.json.gz',
-      './lib/context/retrieval_index.json.gz',
-      './lib/context/retrieval_manifest.json',
-    ],
-  },
+  outputFileTracingIncludes: tracingIncludes,
   // Serverless routes never execute the offline PDF/index builders or local
   // ONNX model runtime. Excluding those broad filesystem traces keeps Vercel
   // functions below the standard 250 MB limit while retaining the compact,

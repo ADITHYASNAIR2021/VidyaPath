@@ -1,15 +1,13 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
+import deployment from '../config/context-deployment.cjs'
 
 const projectRoot = process.cwd()
 const tracesRoot = path.join(projectRoot, '.next', 'server', 'app')
 const limitMb = Number(process.env.FUNCTION_TRACE_LIMIT_MB || '240')
 const limitBytes = limitMb * 1024 * 1024
-const requiredContext = [
-  'chunks.jsonl.gz', 'textbook_chunks.jsonl.gz', 'chapter_index.json.gz',
-  'textbook_chapter_index.json.gz', 'retrieval_index.json.gz',
-  'retrieval_manifest.json',
-].map((file) => `lib/context/${file}`)
+const requiredContext = deployment.corpusFiles
+const corpusTraceEntries = new Set(deployment.corpusTraceEntries)
 const sizeCache = new Map()
 
 if (!Number.isFinite(limitMb) || limitMb <= 0) {
@@ -37,6 +35,10 @@ function collectTraceFiles(directory) {
 
 const traceFiles = collectTraceFiles(tracesRoot)
 if (traceFiles.length === 0) throw new Error('No page/API traces found. Run npm run build first.')
+const presentEntries = new Set(traceFiles.map((file) => path.relative(tracesRoot, file).replaceAll('\\', '/')))
+for (const entry of corpusTraceEntries) {
+  if (!presentEntries.has(entry)) throw new Error(`Missing retrieval function trace: ${entry}`)
+}
 
 const reports = traceFiles.map((tracePath) => {
   const trace = JSON.parse(readFileSync(tracePath, 'utf8'))
@@ -56,11 +58,8 @@ const reports = traceFiles.map((tracePath) => {
       throw new Error(`Private/offline artifact leaked into ${tracePath}: ${relative}`)
     }
   }
-  // Next generates this standalone crash fallback outside normal route tracing.
-  // It must render without the app's data dependencies. Keep its size/privacy
-  // checks, but do not require the academic corpus in the crash handler.
-  const frameworkError = path.relative(tracesRoot, tracePath).replaceAll('\\', '/') === '_global-error/page.js.nft.json'
-  if (!frameworkError) {
+  const entry = path.relative(tracesRoot, tracePath).replaceAll('\\', '/')
+  if (corpusTraceEntries.has(entry)) {
     for (const file of requiredContext) {
       if (!tracedPaths.has(path.join(projectRoot, file)) || !existsSync(path.join(projectRoot, file))) throw new Error(`Missing deployment corpus in ${tracePath}: ${file}`)
     }
@@ -95,4 +94,5 @@ if (oversized.length > 0) {
   process.exitCode = 1
 } else {
   console.log(`All ${reports.length} page/API traces are within the ${limitMb.toFixed(0)} MiB guardrail; no offline/private artifacts traced.`)
+  console.log(`Deployment corpus verified in all ${corpusTraceEntries.size} retrieval functions.`)
 }
