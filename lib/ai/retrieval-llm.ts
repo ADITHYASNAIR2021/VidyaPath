@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { compressSnippetText } from '@/lib/ai/retrieval-enhancements';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
 import { inspectAiText, UNTRUSTED_DATA_RULES } from '@/lib/ai/boundary-policy';
+import { isStudentAiProviderAllowed } from '@/lib/ai/provider-policy';
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -77,6 +78,7 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 }
 
 async function callGeminiLite(systemPrompt: string, userPrompt: string, maxOutputTokens: number): Promise<string | null> {
+  if (!isStudentAiProviderAllowed('gemini')) return null;
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!isUsableGeminiApiKey(apiKey)) return null;
   if (!(await checkAiTokenBudget({ endpoint: 'retrieval-helper:gemini', projectedInputText: `${systemPrompt}\n${userPrompt}`, projectedOutputTokens: maxOutputTokens })).allowed) return null;
@@ -107,6 +109,7 @@ async function callGeminiLite(systemPrompt: string, userPrompt: string, maxOutpu
 }
 
 async function callGroqCacheFriendly(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string | null> {
+  if (!isStudentAiProviderAllowed('groq')) return null;
   const apiKey = process.env.GROQ_API_KEY?.trim();
   if (!isUsableGroqApiKey(apiKey)) return null;
   if (!(await checkAiTokenBudget({ endpoint: 'retrieval-helper:groq', projectedInputText: `${systemPrompt}\n${userPrompt}`, projectedOutputTokens: maxTokens })).allowed) return null;

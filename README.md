@@ -2,7 +2,7 @@
 
 VidyaPath is a free, open-source CBSE learning platform for Class 10 and 12. It provides AI-generated quizzes, mock exams, chapter drills, flashcards, and revision plans grounded in NCERT textbooks and past board exam papers.
 
-**No login, no database.** Any student can open the site and start studying. Personal progress (class, bookmarks, notes, flashcards, streaks, mock-exam history) is stored only in the student's browser. AI endpoints are public and protected by per-IP limits plus a global daily token budget (`lib/ai/public-access.ts`, `lib/ai/cost-guard.ts`).
+**No login, no database.** Any student can open the site and start studying. The saved progress copy stays in the student's browser; AI tools may send selected notes, answers or learning summaries to the server/provider. Production AI starts paused and requires explicit provider approval, shared limits and a global daily token budget. Start with the [public launch checklist](docs/PUBLIC_LAUNCH.md) and [current environment guide](docs/operations/VERCEL_ENV_SETUP.md). Use Node **22.x**, matching CI and Vercel.
 
 **Who is this guide for?** Anyone — even if you have never set up a Next.js or AI project before. Every step below is explained with a reason.
 
@@ -48,15 +48,15 @@ PDF papers + NCERT textbooks
   lib/context/textbook_chunks.jsonl ← NCERT textbook chunks
         │
         ▼
-  HyDE query expansion + MMR retrieval
+  BM25 + topic retrieval + MMR (optional private E5 service)
   (finds the most relevant, non-redundant context)
         │
         ▼
-  Multi-provider LLM (NVIDIA → Gemini → Groq → Cerebras → Mistral)
+  Explicitly approved provider candidates for the task
   + Subject-specific prompts + Few-shot PYQ examples
         │
         ▼
-  Self-verification pass (Groq checks answers)
+  Safety/schema/grounding checks (optional Groq self-check)
         │
         ▼
   CBSE-style MCQs, drills, flashcards, revision plans
@@ -72,7 +72,7 @@ Install these before anything else:
 
 | Tool | Version | Why |
 |------|---------|-----|
-| Node.js | 20.9+ | Required by Next.js 16 |
+| Node.js | 22.x | Pinned for consistent CI/Vercel builds |
 | npm | 10+ | Installs JavaScript packages |
 | Python | 3.10+ | Runs the chunking and OCR scripts |
 | Git | any | Clones the repo |
@@ -135,8 +135,8 @@ Nothing is strictly required: chapters, notes, papers and formulas work with zer
 
 ```env
 NEXT_PUBLIC_APP_URL=https://your-domain.example
-# Free Upstash Redis (https://upstash.com). Without it, AI rate limits and the
-# daily AI budget are enforced per server instance only.
+# Shared Redis protection is required for production AI; missing/unavailable
+# protection blocks calls. Static study material needs no Redis.
 UPSTASH_REDIS_REST_URL=https://...upstash.io
 UPSTASH_REDIS_REST_TOKEN=...
 ```
@@ -154,25 +154,17 @@ DEVELOPER_DASHBOARD_KEY=...
 ```env
 AI_PUBLIC_DAILY_REQUESTS_PER_IP=120     # AI calls per IP per day across all AI tools
 AI_DAILY_TOKEN_BUDGET_GLOBAL=1000000    # Tokens per day for the whole site; AI pauses until midnight UTC when spent
-AI_MAX_TOKENS_PER_REQUEST=4000          # Hard cap per AI request
+AI_MAX_TOKENS_PER_REQUEST=16000         # Instructions + evidence/history + output per provider attempt
 ```
 
-### AI Providers — At Least One Required
+### AI Providers — Optional, Separate Student Approval Required
 
-The app tries providers in this order: **NVIDIA → Gemini → Groq → Cerebras → Mistral**.
-You only need one. Groq is the easiest (free, no credit card):
+Static study material requires no provider. Production AI needs `AI_PUBLIC_ENABLED=1` and a nonempty `AI_PUBLIC_PROVIDERS` allowlist after reviewing each selected provider's age, region, privacy/retention and account terms. Only allowlisted providers receive student data, including automatic fallbacks and hosted retrieval helpers. See `.env.example`; no provider is certified for children by a successful API call or free quota. Cerebras's registered model requires billing and is not an automatic fallback.
 
-| Provider | Sign Up | Free Tier |
-|----------|---------|-----------|
-| Groq | https://console.groq.com | Yes — very fast |
-| Cerebras | https://cloud.cerebras.ai | Yes — key starts with `csk-` |
-| Mistral | https://console.mistral.ai | Yes — limited |
-| Gemini | https://aistudio.google.com | Yes — generous |
-| NVIDIA | https://build.nvidia.com | Yes — used for reranking and supported NIM features |
+Gemini API's [current terms](https://aistudio.google.com/docs/terms#age-requirements) prohibit under-18-directed apps. Production student requests exclude Gemini even if keyed/allowlisted. Its image solver is unavailable in production until an eligible vision integration is implemented; local adult developer evaluation is separate.
 
 ```env
 NVIDIA_API_KEY=nvapi-...
-GEMINI_API_KEY=...
 GROQ_API_KEY=gsk_...
 CEREBRAS_API_KEY=csk-...
 MISTRAL_API_KEY=...
@@ -181,16 +173,16 @@ MISTRAL_API_KEY=...
 ### Optional — Advanced AI Features
 
 ```env
-# Self-verification: Groq checks each generated answer for correctness
-# Requires GROQ_API_KEY. Set to 1 to enable (adds ~1s latency per quiz).
-AI_ENABLE_SELF_VERIFY=1
+# Optional additional model check; does not certify answer correctness.
+# Requires GROQ_API_KEY and production provider approval. Off by default.
+AI_ENABLE_SELF_VERIFY=0
 
 # Timeout for all LLM API calls in milliseconds (default: 30000)
 AI_REQUEST_TIMEOUT_MS=30000
 
 # Enable semantic re-ranking of retrieved context chunks using NVIDIA
-# Requires NVIDIA_API_KEY and improves retrieval quality significantly
-AI_ENABLE_NVIDIA_RERANK=1
+# Requires NVIDIA_API_KEY and production provider approval; evaluate quality first.
+AI_ENABLE_NVIDIA_RERANK=0
 
 # Serve large RAG files (chunks.jsonl etc.) from a static host instead of the bundle
 CONTEXT_CDN_URL=https://your-static-host.example/context
@@ -368,9 +360,8 @@ npm run start
 
 1. Deploy to Vercel (or any Node host / the included `Dockerfile`). No database to provision.
    Follow [the deployment runbook](docs/DEPLOYMENT_RUNBOOK.md) for the exact upload destinations, optional private E5 service, environment settings, checks and rollback. The bundled BM25 path works before the semantic VM is available.
-2. Set at least one AI key, `NEXT_PUBLIC_APP_URL`, the Upstash pair, and `DEVELOPER_DASHBOARD_KEY`. Core chunks and BM25 artifacts are bundled; `CONTEXT_CDN_URL` is an optional pinned, immutable release fallback. See [AI security and retrieval](docs/AI_SECURITY_AND_RETRIEVAL.md) for all data flows, coverage checks and serving options.
-   After deploying, open `/developer` → **Check providers** and **Run all** to confirm every model and endpoint works.
-3. Choose `AI_DAILY_TOKEN_BUDGET_GLOBAL` and verify provider free-tier/billing settings. When it is spent, students see a friendly "AI resets tomorrow" message and everything non-AI keeps working.
+2. Set `NEXT_PUBLIC_APP_URL`, a monitored `NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL`, `AI_PUBLIC_ENABLED=0`, and an operator-only `DEVELOPER_DASHBOARD_KEY`. Core chunks and BM25 artifacts are bundled; no dataset upload, provider key or VM is needed for the static launch. See [AI security and retrieval](docs/AI_SECURITY_AND_RETRIEVAL.md) for data flows and coverage limits.
+3. Complete [the separate AI activation review](docs/PUBLIC_LAUNCH.md) before enabling approved providers and shared Redis protection. Teacher-review covered-chapter answers, test quotas/outages and the actual target deployment; a successful provider check does not certify suitability for children.
 4. Optional: set `NEXT_PUBLIC_PLAUSIBLE_DOMAIN` (or Umami) for cookieless, anonymous usage analytics.
 
 Old portal URLs (`/student/*`, `/teacher/*`, `/admin/*`, `/login`, …) permanently redirect to the matching public page.
@@ -383,15 +374,7 @@ This section documents what the AI system does and what was built/improved.
 
 ### Multi-Provider Fallback Chain
 
-The app tries AI providers in order and falls back automatically if one fails or has no key:
-
-```
-NVIDIA (nv-mistral-nemo-minitron-8b)
-  → Gemini (gemini-2.0-flash)
-  → Groq (llama-3.3-70b-versatile)
-  → Cerebras (llama-4-scout-17b)
-  → Mistral (mistral-small-latest)
-```
+Task-specific candidates live in `lib/ai/model-routing.ts`; configured overrides merge with defaults and are filtered by the student provider policy in production. Failed or unconfigured candidates can fall back only within that approved provider set. Gemini is excluded from production student traffic; a key or routing override cannot bypass it. Check current model/account availability before a teacher-reviewed pilot.
 
 All providers share a 30-second timeout (`AI_REQUEST_TIMEOUT_MS`).
 
@@ -400,10 +383,10 @@ All providers share a 30-second timeout (`AI_REQUEST_TIMEOUT_MS`).
 Before generating any question, the system retrieves relevant context from the chunk index:
 
 **1. HyDE (Hypothetical Document Embeddings)**
-The retrieval query is expanded with a hypothetical NCERT paragraph generated from chapter topics and PYQ data. This makes the embedding search find more relevant chunks because the expanded query vocabulary is closer to what textbook paragraphs look like.
+Optional query expansion (`AI_ENABLE_RETRIEVAL_LLM=1`) sends the bounded query/topics to an approved hosted provider for a hypothetical retrieval paragraph. It is disabled by default; BM25 works without it. Evaluate retrieval improvement and extra data sharing before enabling it.
 
 **2. Source-Diverse Retrieval**
-For question-generation tasks, the system guarantees at least 35% of retrieved chunks are from NCERT textbooks (not just past papers). This ensures questions have textbook definitions and not just exam paper phrasing.
+Retrieval tries to balance textbook definitions and paper evidence when mapped sources exist. Missing textbook coverage cannot be solved by a requested source ratio. Check chapter-specific coverage in `/developer` and `docs/INDEXING_PLAN.md` before including a chapter in an AI pilot.
 
 **3. MMR (Maximal Marginal Relevance)**
 After scoring all candidate chunks, the system applies MMR (λ=0.6) to the paper/OCR pool before selecting the final context. This removes redundant chunks that overlap each other, maximising the variety of topics in the context window.

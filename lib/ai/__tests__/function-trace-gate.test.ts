@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check_function_trace_size.mjs');
+const finalizeScript = path.resolve('scripts/prune_function_traces.mjs');
 const require = createRequire(import.meta.url);
 const deployment = require(path.resolve('config/context-deployment.cjs')) as {
   corpusFiles: string[]; corpusRoutes: string[]; corpusTraceEntries: string[]; tracingIncludes: Record<string, string[]>;
@@ -31,7 +32,8 @@ function fixture(includeRetrieval = true) {
   };
   const check = (limit = '240') => execFileSync(process.execPath, [script], { cwd: root, env: { ...process.env, FUNCTION_TRACE_LIMIT_MB: limit }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   if (includeRetrieval) for (const entry of deployment.corpusTraceEntries) trace(entry, context);
-  return { root, context, trace, check };
+  const finalize = () => execFileSync(process.execPath, [finalizeScript], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  return { root, context, trace, check, finalize };
 }
 
 it('accepts Linux/Vercel framework, static and unrelated API traces without chapter data', () => {
@@ -102,4 +104,30 @@ it('uses valid Next tracing globs including literal dynamic chapter brackets', (
   const patterns = Object.keys(deployment.tracingIncludes).map((pattern) => match(pattern, { dot: true, contains: true }));
   for (const route of deployment.corpusRoutes) expect(patterns.some((test) => test(route))).toBe(true);
   for (const route of ['/_not-found', '/_global-error', '/privacy', '/api/health']) expect(patterns.some((test) => test(route))).toBe(false);
+});
+
+it('packages Vercel-style omitted corpus references into every retrieval trace before verifying', () => {
+  const { root, trace, check, finalize } = fixture();
+  for (const entry of deployment.corpusTraceEntries) trace(entry, []);
+  trace('_not-found/page.js.nft.json', []);
+  expect(check).toThrow(/Missing deployment corpus/);
+  expect(finalize()).toContain('added 90 approved corpus references');
+  expect(check()).toContain('Deployment corpus verified in all 15 retrieval functions');
+  expect(JSON.parse(readFileSync(path.join(root, '.next/server/app/_not-found/page.js.nft.json'), 'utf8')).files).toEqual([]);
+  expect(finalize()).toContain('added 0 approved corpus references');
+});
+
+it('refuses to fabricate a missing corpus file when finalizing traces', () => {
+  const { root, context, finalize } = fixture();
+  unlinkSync(path.join(root, context[0]));
+  expect(finalize).toThrow(/Missing deployment corpus on disk/);
+});
+
+it('finalizes approved corpus files while removing private artifacts from all traces', () => {
+  const { root, trace, check, finalize } = fixture();
+  writeFileSync(path.join(root, '.env.local'), 'fixture-only');
+  trace('api/adaptive-test/route.js.nft.json', ['.env.local']);
+  trace('_not-found/page.js.nft.json', ['.env.local']);
+  expect(finalize()).toContain('removed 2 offline/private references');
+  expect(check()).toContain('Deployment corpus verified');
 });

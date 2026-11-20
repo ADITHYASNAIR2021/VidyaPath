@@ -14,6 +14,7 @@ import { imageSolveRequestSchema } from '@/lib/schemas/ai';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { logger } from '@/lib/logger';
 import { inspectSemanticPayload } from '@/lib/ai/semantic-guard';
+import { isStudentAiProviderAllowed } from '@/lib/ai/provider-policy';
 
 const solutionSchema = z.object({
   solution: z.string().min(1).max(14000), detectedTopic: z.string().min(1).max(300),
@@ -26,6 +27,7 @@ async function handlePost(req: Request) {
   try {
     const access = await requirePublicAiAccess(req);
     if (access.response) return access.response;
+    if (!isStudentAiProviderAllowed('gemini')) return fail('image-provider-unavailable', 'The image solver is unavailable. Type your chapter question in the tutor instead.', 503);
     const limit = await checkRateLimit({ key: buildRateLimitKey('ai:image-solve', [getClientIp(req)]), windowSeconds: 60, maxRequests: 8, blockSeconds: 120 });
     if (!limit.allowed) return fail('rate-limit-exceeded', 'Too many image requests. Please try again later.', 429);
     const parsed = await parseAndValidateJsonBody(req, 3 * 1024 * 1024, imageSolveRequestSchema);

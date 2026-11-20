@@ -38,6 +38,12 @@ export function validateEnv(mode: 'strict' | 'report' = 'report'): EnvValidation
   const warnings: string[] = [];
 
   const hasAiProvider = AI_PROVIDER_KEYS.some(hasValue);
+  if (process.env.NODE_ENV === 'production' && process.env.AI_PUBLIC_ENABLED !== '1') {
+    warnings.push('Public AI is paused. Set AI_PUBLIC_ENABLED=1 only after provider/privacy and student-safety review; static study material remains public.');
+  }
+  if (process.env.NODE_ENV === 'production' && !process.env.AI_PUBLIC_PROVIDERS?.trim()) {
+    warnings.push('No reviewed student AI providers listed in AI_PUBLIC_PROVIDERS. Gemini API is excluded from production student requests by its under-18 terms.');
+  }
   if (!hasAiProvider) {
     warnings.push(
       `No AI provider key set (${AI_PROVIDER_KEYS.join(', ')}). AI tutor, flashcards and quizzes will be unavailable.`

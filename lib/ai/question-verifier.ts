@@ -3,6 +3,7 @@ import type { ContextSnippet } from '@/lib/ai/context-retriever';
 import { logger } from '@/lib/logger';
 import { UNTRUSTED_DATA_RULES } from '@/lib/ai/boundary-policy';
 import { checkAiTokenBudget } from '@/lib/ai/token-budget';
+import { isStudentAiProviderAllowed } from '@/lib/ai/provider-policy';
 
 const VERIFY_TIMEOUT_MS = 12_000;
 
@@ -49,6 +50,7 @@ export async function verifySelfCheck(
   snippets: ContextSnippet[]
 ): Promise<MCQItem[]> {
   if (process.env.AI_ENABLE_SELF_VERIFY !== '1') return questions;
+  if (!isStudentAiProviderAllowed('groq')) return questions;
   if (questions.length === 0) return questions;
 
   const groqKey = process.env.GROQ_API_KEY?.trim();
