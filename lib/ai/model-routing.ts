@@ -1,4 +1,5 @@
 import type { ContextTask } from '@/lib/ai/context-retriever';
+import { isStudentAiProviderAllowed } from '@/lib/ai/provider-policy';
 
 export type LlmProvider = 'nvidia' | 'gemini' | 'groq' | 'cerebras' | 'mistral';
 export type LlmMode = 'chat' | 'embedding' | 'rerank' | 'ocr' | 'table' | 'image';
@@ -252,7 +253,7 @@ export function getTaskChatModelCandidates(task: ContextTask): LlmModelConfig[] 
   const aliases = getTaskModelAliases(task);
   return aliases
     .map((alias) => getModelConfig(alias))
-    .filter((model): model is LlmModelConfig => !!model && model.mode === 'chat');
+    .filter((model): model is LlmModelConfig => !!model && model.mode === 'chat' && isStudentAiProviderAllowed(model.provider));
 }
 
 export function listContextTasks(): ContextTask[] {

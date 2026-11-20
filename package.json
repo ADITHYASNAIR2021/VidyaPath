@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=20.9.0",
+    "node": "22.x",
     "npm": ">=10"
   },
   "scripts": {
@@ -58,7 +58,7 @@
     "rag:build:no-bench": "node scripts/rag_build.mjs --skip-benchmark",
     "check:context-deploy": "node scripts/check_context_deploy.mjs",
     "prebuild": "npm run check:context-deploy",
-    "postbuild": "node scripts/prune_function_traces.mjs && npm run check:function-sizes",
+    "postbuild": "node scripts/prune_function_traces.mjs && node scripts/check_function_trace_size.mjs",
     "report:retrieval": "node scripts/generate_retrieval_report.mjs",
     "eval:rag:report": "node scripts/eval_rag_report.mjs",
     "rag:repair": "node scripts/reindex.mjs",

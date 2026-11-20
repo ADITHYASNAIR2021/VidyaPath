@@ -47,7 +47,17 @@ function renderMathAwareText(text: string) {
   });
 }
 
-export default function ImageQuestionSolver({ chapterId, chapterTitle, classLevel, subject }: ImageQuestionSolverProps) {
+export default function ImageQuestionSolver(props: ImageQuestionSolverProps) {
+  if (process.env.NODE_ENV === 'production') {
+    return <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+      <h2 className="font-semibold text-navy-700 dark:text-slate-100">Image questions</h2>
+      <p className="mt-2 text-sm text-gray-600 dark:text-slate-300">Image solving is unavailable. You can type your chapter question in the tutor when AI study tools are enabled.</p>
+    </section>;
+  }
+  return <DeveloperImageQuestionSolver {...props} />;
+}
+
+function DeveloperImageQuestionSolver({ chapterId, chapterTitle, classLevel, subject }: ImageQuestionSolverProps) {
   const [imageBase64, setImageBase64] = useState('');
   const [mimeType, setMimeType] = useState('image/jpeg');
   const [previewUrl, setPreviewUrl] = useState('');

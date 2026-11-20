@@ -4,7 +4,7 @@ Prepared 14 November 2026. The code, corpus and upload-ready service bundle are 
 
 ## Recommended layout
 
-Use the existing Next.js site on Vercel, a small private E5 retrieval service on a VM, and Upstash for shared AI limits. An external vector database is not required for the present 54,260-document corpus: the supplied service searches a compact normalized vector index and returns IDs. The website resolves those IDs into its own pinned source passages and combines them with BM25. A service outage falls back to local BM25.
+Publish the static study site on Vercel first, with public AI paused. The optional next stage uses a small private E5 retrieval service on a VM and Upstash for shared AI limits. An external vector database is not required for the present 54,260-document corpus: the supplied service searches a compact normalized vector index and returns IDs. The website resolves those IDs into its own pinned source passages and combines them with BM25. A service outage falls back to local BM25. See [the current child-focused public launch checklist](./PUBLIC_LAUNCH.md) before activating any answer provider.
 
 Oracle Always Free is a candidate for the VM: the current official limit for Always Free A1 tenancies is 2 OCPUs and 12 GB RAM, subject to monthly allowances, home-region capacity and idle-instance reclamation. Select resources explicitly labelled Always Free; do not assume trial credits or larger shapes remain free. [Oracle limits and availability](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm).
 
@@ -130,12 +130,15 @@ Set these in Vercel's environment settings for the environment being tested:
 
 ```dotenv
 NEXT_PUBLIC_APP_URL=https://YOUR_ACTUAL_SITE_ORIGIN
+NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL=<working-monitored-privacy-address>
+AI_PUBLIC_ENABLED=0
 DEVELOPER_DASHBOARD_KEY=<separate-random-operator-key-at-least-24-characters>
 UPSTASH_REDIS_REST_URL=<your-redis-rest-url>
 UPSTASH_REDIS_REST_TOKEN=<your-redis-rest-token>
-GEMINI_API_KEY=<usable-server-key-for-generation-and-images>
-# Optional configured generation fallbacks:
-GROQ_API_KEY=<usable-server-key>
+# Only after a separate student/provider review:
+# AI_PUBLIC_ENABLED=1
+# AI_PUBLIC_PROVIDERS=<comma-separated-reviewed-provider-IDs>
+# Configure only the corresponding provider keys. Gemini API is excluded for students.
 
 AI_MAX_TOKENS_PER_REQUEST=16000
 AI_DAILY_TOKEN_BUDGET_GLOBAL=1000000
@@ -152,14 +155,14 @@ Do not set `AI_ENABLE_LOCAL_EMBEDDINGS=1` on Vercel. The local image cap was cor
 
 The optional local/hosted injection classifier is a separate service and remains disabled unless deliberately configured and evaluated. Do not point a Vercel environment at `127.0.0.1` for services on your own laptop.
 
-If you want the BM25 pilot first, omit the three remote retrieval settings. The site can serve the bundled corpus before the VM is available. Enable the remote settings only after health/search checks pass. Use separate preview credentials/quotas where feasible; test requests consume the configured shared budgets.
+For the initial static launch, omit the remote retrieval settings and AI/Redis keys. Static chapters/papers remain public; authenticated operator diagnostics can check the bundled corpus. Later enable the remote settings only after health/search checks pass and complete provider approval before enabling public AI. Use separate preview credentials/quotas where feasible; test requests consume the configured shared budgets.
 
 ## 7. Acceptance checks before student rollout
 
 - Open the deployed `/developer` console. Confirm 54,260 corpus chunks/current manifest, expected benchmark fingerprint and the 43 flagged chapters.
 - Run the local-only retrieval check for a real chemistry question; verify excerpt text and chapter IDs. This intentionally does not contact the VM.
 - Run the public context-pack tester once to exercise the actual remote path. Refresh the console: the remote E5 service should show `ready`, not just configured. Missing/old releases are rejected and fall back to BM25.
-- Test valid chapter chat, quiz, flashcards, drills, diagnosis, remediation, revision planning, ungraded paper feedback and a clear question image using the actual provider account. Review answers with subject expertise. These live generation/quota checks have not been certified by local mocks.
+- After separate provider approval/activation, test valid chapter chat, quiz, flashcards, drills, diagnosis, remediation, revision planning and ungraded paper feedback using the actual eligible provider account. Review answers with subject expertise. The current Gemini-only image solver is blocked in production by the under-18 provider policy; an eligible vision integration is future work. These live generation/quota checks have not been certified by local mocks.
 - Check unknown chapters, cross-class selections, prompt injections, bogus citations and oversized images. Confirm unauthenticated developer endpoints return 401 and cross-site mutations return 403.
 - Temporarily stop the retrieval service and verify BM25 still works. Test Redis protection failure in a preview environment; production AI must pause rather than bypass limits.
 - Measure cold starts, memory, latency and a small concurrent-student workload on the actual target. The Windows service smoke measurement is not an Oracle/Vercel SLA. Docker/ARM execution has not been verified here because the Docker daemon was unavailable.

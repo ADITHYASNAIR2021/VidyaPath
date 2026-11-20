@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getClientIp } from '@/lib/http/api-response';
 import { buildRateLimitKey, checkRateLimit } from '@/lib/security/rate-limit';
 import { isRedisRateLimitConfigured } from '@/lib/security/redis-rate-limit';
+import { hasApprovedStudentAiProvider } from '@/lib/ai/provider-policy';
 
 /**
  * VidyaPath is open to every student with no login. AI endpoints are protected by:
@@ -22,6 +23,12 @@ export async function requirePublicAiAccess(
   req: Request
 ): Promise<{ context: PublicAiContext; response: null } | { context: null; response: NextResponse }> {
   const clientIp = getClientIp(req);
+  if (process.env.AI_PUBLIC_ENABLED === '0' || (process.env.NODE_ENV === 'production' && process.env.AI_PUBLIC_ENABLED !== '1')) {
+    return { context: null, response: NextResponse.json({ ok: false, errorCode: 'public-ai-paused', message: 'AI tools are not enabled for this site yet. Chapters, notes and papers remain available.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } }) };
+  }
+  if (process.env.NODE_ENV === 'production' && !hasApprovedStudentAiProvider()) {
+    return { context: null, response: NextResponse.json({ ok: false, errorCode: 'public-ai-provider-unavailable', message: 'AI study tools are not available yet. Chapters, notes and papers remain available.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } }) };
+  }
   if (process.env.NODE_ENV === 'production' && !isRedisRateLimitConfigured()) {
     return { context: null, response: NextResponse.json({ ok: false, errorCode: 'ai-protection-unavailable', message: 'AI tools are temporarily unavailable. Study chapters and papers remain available.' }, { status: 503, headers: { 'Retry-After': '60', 'Cache-Control': 'no-store' } }) };
   }

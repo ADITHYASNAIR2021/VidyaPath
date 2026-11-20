@@ -26,6 +26,7 @@ import { sharedState } from '@/lib/runtime/shared-state';
 import { inspectAiText, recordBoundaryBlock } from '@/lib/ai/boundary-policy';
 import { readRetrievalReport } from '@/lib/ai/retrieval-report';
 import { searchRemoteIndex, resolveRemoteHits } from '@/lib/ai/remote-retrieval';
+import { isStudentAiProviderAllowed } from '@/lib/ai/provider-policy';
 
 export type ContextTask =
   | 'chat'
@@ -336,7 +337,7 @@ let localEmbeddingPipeline: Promise<unknown> | null = null;
 async function buildQueryEmbedding(text: string): Promise<Float32Array | null> {
   if (supportsRemoteSemanticEmbeddings()) {
     const nvidiaKey = process.env.NVIDIA_API_KEY?.trim();
-    if (isUsableNvidiaApiKey(nvidiaKey)) {
+    if (isStudentAiProviderAllowed('nvidia') && isUsableNvidiaApiKey(nvidiaKey)) {
       try {
         const { createNvidiaEmbeddings } = await import('@/lib/ai/nvidia-client');
         const [embedding] = await createNvidiaEmbeddings({
@@ -870,6 +871,7 @@ function applyMMR(
 }
 
 function shouldUseNvidiaRerankByConfig(): boolean {
+  if (!isStudentAiProviderAllowed('nvidia')) return false;
   if (process.env.AI_ENABLE_NVIDIA_RERANK === '0') return false;
   return isUsableNvidiaApiKey(process.env.NVIDIA_API_KEY);
 }
@@ -944,7 +946,7 @@ async function rerankContextSnippets(query: ContextQuery, snippets: ContextSnipp
   const queryText = query.query?.trim() || '';
   if (!queryText || snippets.length < 2) return snippets;
 
-  if (isUsableNvidiaApiKey(apiKey) && Date.now() >= rerankBreaker.until) {
+  if (isStudentAiProviderAllowed('nvidia') && isUsableNvidiaApiKey(apiKey) && Date.now() >= rerankBreaker.until) {
     const model = (process.env.AI_RERANK_MODEL || DEFAULT_NVIDIA_RERANK_MODEL).trim() || DEFAULT_NVIDIA_RERANK_MODEL;
     try {
       const payload = await rerankWithNvidia({

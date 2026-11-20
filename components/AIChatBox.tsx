@@ -678,7 +678,7 @@ export default function AIChatBox({
           </button>
         </div>
         <p className="mt-1.5 text-center text-xs text-[#8A8AAA] dark:text-slate-400">
-          Evidence-first AI tutor with grounded answers and next-practice follow-up
+          Ask about your chapter. Don&apos;t share names, school details, phone numbers or faces. Questions reach an AI provider. AI can be wrong; check your textbook or ask a teacher.
         </p>
       </div>
     </div>

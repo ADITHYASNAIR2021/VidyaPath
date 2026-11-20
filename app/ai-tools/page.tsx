@@ -718,7 +718,7 @@ export default function StudentAIToolsPage() {
         <div className="mt-5 rounded-2xl border border-[#E8E4DC] bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <h1 className="font-fraunces text-2xl font-bold text-navy-700 dark:text-slate-100">AI Study Hub</h1>
           <p className="mt-2 text-sm text-[#5A5570] dark:text-slate-300">
-            No chapters are currently available for your account scope. If this looks wrong, ask your teacher/admin to update subject access.
+            No chapters are available for this selection. Choose another class or subject to continue studying.
           </p>
         </div>
       </div>
@@ -738,6 +738,9 @@ export default function StudentAIToolsPage() {
             </h1>
             <p className="mt-1 text-sm text-[#5A5570] dark:text-slate-300">
               Select one chapter at the top. Every AI tool on this page uses that chapter context.
+            </p>
+            <p className="mt-2 max-w-2xl text-xs text-[#5A5570] dark:text-slate-300">
+              Keep questions about your studies. Leave out names, school details, contact information and faces. AI tools send your input to a provider and can make mistakes. Check important answers with your textbook or a trusted adult. You can use study material without AI.
             </p>
           </div>
 
